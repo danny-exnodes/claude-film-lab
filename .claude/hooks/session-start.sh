@@ -34,8 +34,12 @@ if [ -f /opt/byteplus/ark.py ] && [ ! -L /opt/byteplus/ark.py ] && [ ! -e /opt/b
 fi
 ln -sfn "$LAB/tools/ark.py" /opt/byteplus/ark.py
 
+# cinecode keeps saved formats in ~/.cinecode/formats, which dies with the container:
+# keep them in the repo instead (docs/CONVENTIONS.md §9)
+mkdir -p "$LAB/formats"
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export FILM_LAB=\"$LAB\"" >> "$CLAUDE_ENV_FILE"
+  echo "export CINECODE_FORMATS=\"$LAB/formats\"" >> "$CLAUDE_ENV_FILE"
 fi
 
 "$LAB/tools/doctor.sh" --quick || true

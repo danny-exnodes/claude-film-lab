@@ -8,6 +8,11 @@
 | Video ra vuông dù `--resolution 720p` | Ảnh đầu vào vuông, `ratio=adaptive` | Truyền `--ratio 16:9` (model sẽ crop) hoặc dùng ảnh 16:9 |
 | `ModuleNotFoundError: rembg` / thiếu font CJK | Hook khởi động chưa chạy hoặc lỗi | `CLAUDE_CODE_REMOTE=true .claude/hooks/session-start.sh` |
 | Connector (AWS, Drive…) báo cần đăng nhập lại, sau khi đăng nhập vẫn không có tool | Phiên đã gỡ server khi lỗi xác thực, không nạp lại giữa chừng | Commit/push công việc, mở **phiên mới** |
+| `ark.py` thoát mã 3, ledger ghi `refused-budget` | Vượt trần trong `budget.yaml` của tập | Hỏi người dùng nâng trần (phiên chính), không tự sửa `budget.yaml` trong agent |
+| `ctext.org` trả trang ~2,8 KB nhắc "robot" thay vì nội dung | ctext chặn truy cập tự động | Dùng `zh.wikisource.org` (tải bình thường từ container) |
+| cinecode tự kích hoạt hoặc đọc nhầm trạng thái tập | Thư mục có file `STATE.md` (tên riêng của cinecode) | Trạng thái tập luôn là `EPISODE.md`; `STATE.md` chỉ nằm trong thư mục film của cinecode |
+| `gh issue list` / `gh pr ...` báo `GitHub GraphQL is not available` | Phiên cloud chỉ cho REST API | Dùng `gh api repos/<owner>/<repo>/...` |
+| Định dạng cinecode đã lưu biến mất ở phiên mới | Mặc định lưu ở `~/.cinecode/formats` | Hook đặt `CINECODE_FORMATS=<repo>/formats`; commit định dạng đã duyệt |
 | Plugin GitHub lỗi `Authorization header is badly formatted` | Lỗi kết nối plugin | Không ảnh hưởng clone/push (đi qua git proxy); kết nối lại plugin trong cài đặt nếu cần GitHub API |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic

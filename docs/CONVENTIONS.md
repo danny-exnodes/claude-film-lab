@@ -44,9 +44,14 @@ Regex chuẩn (dùng trong `tools/check_episode.py`):
 - lớp: `^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$`
 - clip: `^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$`
 - bản dựng: `^ep\d{2}_(draft|final)_v\d{2}\.mp4$`
+- khung đầu Seedance (trong `clips/`): `^ep\d{2}_s\d{2}_start_v\d{2}\.png$`
+- khung của clip: thư mục `clips/<tên clip không đuôi>/` (tên khớp regex clip, bỏ `.mp4`) chỉ chứa `^\d{6}\.png$`
+  và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
+- dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<series>/ep<NN>/{plates,clips,renders}/`.
-Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1).
+Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1); khung gốc trước khi
+tách nền: `clips/<tên clip không đuôi>/raw/000001.png`.
 Thư mục film cinecode của tập: `out/<series>/ep<NN>/film/<tên>/` (có `STATE.md` riêng của cinecode).
 
 ## 3. Style pack: `styles/<id>/style.yaml`

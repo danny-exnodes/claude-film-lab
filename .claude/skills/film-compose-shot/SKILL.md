@@ -154,10 +154,9 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 - Gói mỗi shot: `python3 tools/bundle.py out/<series>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
   `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/`.
   Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
-- Phần chữ của phim nằm trong `out/` nên **không có trong git**, và `bundle.py` chưa gói nó. Sau mỗi bản nháp được
-  duyệt, gói một zip riêng rồi tải lên cùng thư mục Drive (một lần duyệt):
-  `cd out/<series>/ep<NN> && zip -r bundles/ep<NN>_film_<YYYYMMDD>.zip film/<slug>/film.html film/<slug>/STATE.md film/<slug>/LICENSES.csv film/<slug>/review/*.md film/<slug>/notes film/<slug>/audio/mix.json`
-  (bỏ những mục chưa có).
+- Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không có
+  trong git**: gói kèm bằng `python3 tools/bundle.py out/<series>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
+  render và media) sau mỗi bản nháp được duyệt.
 - Bản dựng duyệt (`renders/*.mp4`) tải riêng từng file.
 - Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill phải commit + push trước khi dừng.
 

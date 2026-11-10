@@ -24,9 +24,10 @@ const PLATES = {
         rig: { warp: { tail: { amp: 34, waves: 0.75, speed: 0.42, power: 1.5 } },
                eyes: { eye: { line: 'rgba(20,16,12,0.8)' } },
                breath: { amp: 0.008, period: 3.4, pivot: 'feet' } } },
-  // a keyed Seedance clip (tools/layers/matte.py chroma -> PNG frames), placed like L4:
+  // a keyed Seedance clip: frames keyed one by one with tools/layers/matte.py IN OUT --method chroma
+  // (references/seedance-layer.md). A seq layer fills the stage like the clip did: no `place`.
   // L4b: { seq: { pattern: '../../clips/ep01_s03_seedance25_v01/{n}.png', digits: 6, start: 1, count: 120, fps: 24,
-  //        at: 2.0, end: 'hold' }, depth: 1.0, place: { x: 860, y: 905, h: 640, pivot: 'bottom' } },
+  //        at: 2.0, end: 'hold' }, depth: 1.0 },
 };
 // Atmosphere colours from styles/<id>/style.yaml palette; preset numbers from styles/<id>/motion.md.
 const ATMOS = { mist: '#f2ecde', ember: '#ff9a3c', sun: '#ffd49a' };

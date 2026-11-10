@@ -59,7 +59,7 @@ Nền phẳng lấy màu từ `matte.paper_bg` (luminance) hoặc `matte.key_bg`
 Mọi lần tạo ảnh đều có ledger và trần (thiếu là lỗi quy trình):
 ```
 FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
-  out/<series>/ep<NN>/plates/ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.png --size 2K \
+  out/<series>/ep<NN>/plates/ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.png --size <layers.<lớp>.size trong style.yaml> \
   [--ref <ảnh khóa>.png] [--negative "<negative>"] [--seed <n>] \
   --ledger out/<series>/ep<NN>/ledger.csv --budget series/<series>/ep<NN>-<slug>/budget.yaml
 ```

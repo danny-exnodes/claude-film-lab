@@ -80,10 +80,14 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 1. Kéo dự án (mục 0), rồi đọc `projects/<project>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì
    ghi trong EPISODE.md và file của tập trên Drive mới là sự thật. Không kéo được (không có Drive connector): dừng, báo
    người dùng; không dựng lại dữ liệu từ trí nhớ.
-2. Đọc `budget.yaml` và `out/<project>/ep<NN>/ledger.csv` (vừa kéo về) để biết còn bao nhiêu ảnh/giây video.
-3. Kiểm `out/<project>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
-   trong `prompts.csv`), media chưa lưu là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
-4. Báo người dùng 3–5 dòng: khâu hiện tại, cổng đã qua, việc tiếp theo, ngân sách còn lại. Rồi làm `## Việc tiếp theo`.
+2. Chạy `python3 tools/status.py projects/<project>/ep<NN>-<slug>` (chỉ đọc, không tốn phí): một màn hình gồm khâu và
+   cổng, việc tiếp theo, ngân sách đã tiêu/trần, request trả phí còn dở, trạng thái từng lớp tranh, media chưa đóng gói.
+3. Xử lý mọi dòng `BLOCKED` / `OPEN` / `MISSING` trước khi làm tiếp (mã thoát 1 = còn việc phải xử lý): `BLOCKED` = khâu
+   đã vượt cổng chưa duyệt, dừng và hỏi người dùng; `OPEN` = request đã ghi `pending` mà chưa có dòng cuối, chạy đúng lệnh
+   in kèm (`--resume-task`, `lambda-job finish`), không tạo lại; `MISSING` = file đã trả tiền không còn trong container
+   (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu là mất, ghi vào
+   Nhật ký và báo người dùng trước khi làm lại.
+4. Báo người dùng các dòng `STAGE` / `BUDGET` / `NEXT` (3–5 dòng). Rồi làm `## Việc tiếp theo`.
 
 Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở khâu 0 (mục 3).
 
@@ -114,7 +118,9 @@ Quy tắc cổng:
   (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md; từ G3, trước khâu 9 và G4 thêm
   `--probe` để file có số đo ffprobe/LUFS). Mã thoát 1 = còn ERROR: không mở
   cổng, giao lại agent của khâu đó kèm nguyên văn dòng lỗi. WARN thì nêu cho người dùng.
-- Khi trình cổng: đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần, và đúng một câu hỏi duyệt.
+- Khi trình cổng: chạy `python3 tools/status.py projects/<project>/ep<NN>-<slug> --gate <G>` (mã thoát 1 = còn dòng
+  `[MISSING]`: chưa trình); rồi đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần lấy từ dòng `BUDGET`,
+  và đúng một câu hỏi duyệt.
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.

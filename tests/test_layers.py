@@ -213,6 +213,20 @@ class TestBundle(TmpDirCase, unittest.TestCase):
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_bytes(rel.encode())
 
+    def test_bundle_with_film(self):
+        film = self.media / "film" / "demo"
+        for rel, data in (("film.html", b"<html>"), ("STATE.md", b"# s"), ("review/qc-1.md", b"ok"),
+                          ("renders/draft-v1.mp4", b"x"), ("plates/a.png", b"x"), ("node_modules/x/index.js", b"x")):
+            p = film / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
+        code, so, err = run_main(bundle.main, [str(self.media), "--shot", "s02", "--with-film"])
+        self.assertEqual(code, 0, err)
+        day = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d")
+        with zipfile.ZipFile(self.media / "bundles" / f"ep01_s02_{day}.zip") as z:
+            film_names = sorted(n for n in z.namelist() if n.startswith("film/"))
+        self.assertEqual(film_names, ["film/demo/STATE.md", "film/demo/film.html", "film/demo/review/qc-1.md"])
+
     def test_bundle_shot(self):
         code, so, err = run_main(bundle.main, [str(self.media), "--shot", "s02", "--series-dir", str(EPISODE_FIX)])
         self.assertEqual(code, 0, err)

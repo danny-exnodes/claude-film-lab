@@ -44,15 +44,22 @@
     C.mist.tex = [0, 1, 2].map((v) => bandTexture(seed, 41 + v * 17, C.mist.rgb));
     // opening veil: a normalised noise field; each frame only thresholds it (cheap, and nothing carried over)
     const f = new Float32Array(OPEN_W * OPEN_H);
-    let lo = Infinity, hi = -Infinity;
+    const ca = Math.cos(0.52), sa = Math.sin(0.52);      // a rotated domain: no grid-aligned blocks in the veil
     for (let j = 0; j < OPEN_H; j++) for (let i = 0; i < OPEN_W; i++) {
-      const n = C.fbm2(seed, (i / OPEN_W) * 5, (j / OPEN_H) * 2.8, 97, 4) * 0.8 + 0.2 * C.noise2(seed, i / 9, j / 9, 98);
-      f[j * OPEN_W + i] = n; lo = Math.min(lo, n); hi = Math.max(hi, n);
+      const x = (i / OPEN_W) * 4.2, y = (j / OPEN_H) * 2.4;
+      const u = x * ca - y * sa, v = x * sa + y * ca;
+      const w = 0.6 * (C.fbm2(seed, u * 0.7 + 3.1, v * 0.7, 96, 2) - 0.5);   // a little domain warp: rounder shapes
+      const n = C.fbm2(seed, u + w, v - w, 97, 4);
+      f[j * OPEN_W + i] = n;
     }
-    for (let k = 0; k < f.length; k++) f[k] = (f[k] - lo) / Math.max(1e-6, hi - lo);
-    C.mist.field = f;
+    // rank-equalised (V8's sort is stable, so this is deterministic): the threshold then opens an even share of the
+    // frame per second, and `from` really is the share already open on frame 0
+    const order = Array.from(f.keys()).sort((a, b) => f[a] - f[b]), eq = new Float32Array(f.length);
+    for (let r = 0; r < order.length; r++) eq[order[r]] = r / (order.length - 1);
+    C.mist.field = eq;
     C.mist.scratch = C.canvas(OPEN_W, OPEN_H);
     C.mist.scratchImg = C.mist.scratch.getContext('2d').createImageData(OPEN_W, OPEN_H);
+    C.mist.soft = C.canvas(OPEN_W, OPEN_H);               // the thresholded veil, blurred (small, so cheap)
   });
 
   C.mist = C.mist || {};
@@ -79,7 +86,7 @@
     open(st, o = {}) {
       const dur = o.dur ?? 2, t = st.t - (o.at ?? 0);
       if (t < 0 || t >= dur) return;
-      const k = C.clamp(t / dur), thr = C.lerp(o.from ?? 0.22, 1.04, C.ease.out(k)), soft = 0.22;
+      const k = C.clamp(t / dur), thr = C.lerp(o.from ?? 0.22, 1.1, Math.pow(k, 0.85)), soft = 0.3;
       const f = C.mist.field, img = C.mist.scratchImg, px = img.data, rgb = C.mist.rgb, a = (o.alpha ?? 0.95) * 255;
       for (let i = 0; i < f.length; i++) {
         let v = C.clamp((f[i] - thr) / soft);
@@ -88,11 +95,14 @@
         px[q] = rgb[0]; px[q + 1] = rgb[1]; px[q + 2] = rgb[2]; px[q + 3] = Math.round(v * a);
       }
       C.mist.scratch.getContext('2d').putImageData(img, 0, 0);
+      const sg = C.mist.soft.getContext('2d');            // fully redrawn every call: nothing carried between frames
+      sg.clearRect(0, 0, OPEN_W, OPEN_H);
+      sg.filter = 'blur(3px)'; sg.drawImage(C.mist.scratch, 0, 0); sg.filter = 'none';
       const grow = 1 + 0.18 * C.ease.out(k), drift = 140 * C.ease.out(k) * (o.dir ?? 1);
       const W = (C.STAGE.W + 520) * grow, H = (C.STAGE.H + 300) * grow;
       st.layer(o.depth ?? C.DEPTH.mist, (g) => {
         g.imageSmoothingQuality = 'high';
-        g.drawImage(C.mist.scratch, C.STAGE.W / 2 - W / 2 + drift, C.STAGE.H / 2 - H / 2, W, H);
+        g.drawImage(C.mist.soft, C.STAGE.W / 2 - W / 2 + drift, C.STAGE.H / 2 - H / 2, W, H);
       });
     },
   });

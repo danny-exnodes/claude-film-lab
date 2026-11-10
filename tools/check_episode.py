@@ -17,6 +17,15 @@ import argparse, csv, io, json, os, re, sys, unicodedata
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+def known_motions():
+    """Motion ids from tools/compose/motions.json (None if the registry is missing)."""
+    try:
+        with open(os.path.join(LAB, "tools", "compose", "motions.json"), encoding="utf-8") as f:
+            return set(json.load(f)["motions"])
+    except (OSError, ValueError, KeyError):
+        return None
+
 # --- §2 naming -----------------------------------------------------------------
 RE_LAYER_FILE = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
 RE_CLIP_FILE = re.compile(r"^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$")
@@ -295,6 +304,11 @@ def check_shots(ep_dir, meta, rep):
                 rep.error(W, f"layer code '{c}' invalid (L1-L4, P<n>-<part>, FX)")
         if len(codes) != len(set(codes)):
             rep.error(W, f"duplicate layer codes in '{r['layers']}'")
+        motions = known_motions()
+        if motions is not None:
+            for m in (x.strip() for x in r["code_motion"].split(";")):
+                if m and m not in motions:
+                    rep.warn(W, f"{sid} code_motion '{m}' is not in tools/compose/motions.json")
         r["_codes"] = codes
         r["_line"] = n
         shots[sid] = r
@@ -565,6 +579,10 @@ def check_style(style_dir, rep):
             rep.error(W, "models.image missing")
     if "motion" in y and not isinstance(y["motion"], list):
         rep.error(W, "motion must be a list of module ids")
+    elif "motion" in y and known_motions() is not None:
+        for m in y["motion"]:
+            if m not in known_motions():
+                rep.warn(W, f"motion id '{m}' is not in tools/compose/motions.json")
     check_style_prompts(style_dir, rep)
     if not os.path.isfile(os.path.join(style_dir, "STYLE.md")):
         rep.warn("STYLE.md", "missing")

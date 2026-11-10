@@ -5,7 +5,7 @@
 //   COMPOSE.embers.draw(st, { box: [0, 900, 1920, 1200], count: 14, depth: 1.7, size: [6, 14], alpha: 0.6 }); // near
 // o: box [x0, y0, x1, y1] where they are born (stage px at that depth), count, depth, rise [px/s], life [s],
 //    size [px radius], drift (px of sideways wander), wind (px/s, + right), alpha, color (one of spec.embers.colors,
-//    prebuilt by COMPOSE.load), fade: [[t, v], ...] intensity over film time (e.g. they flare up on an event), salt
+//    prebuilt by COMPOSE.load), fade: [[t, v], ...] intensity over film time (e.g. they surge on an event), salt
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};

@@ -76,7 +76,26 @@ def sha256(path):
     return h.hexdigest()
 
 
-def bundle(media, shot, series_dir=None, today=None):
+FILM_TEXT_EXT = {".html", ".md", ".json", ".js", ".mjs", ".txt", ".csv", ".yaml", ".yml"}
+FILM_SKIP_DIRS = {"node_modules", "renders", "frames", "cache", ".cache", "stills"}
+
+
+def film_text_files(media):
+    """Text sources of the cinecode film folder(s) under <media>/film (film.html, STATE.md, review/*.md, audio/mix.json...).
+
+    Media and render output are skipped: they are large and rebuilt from these sources."""
+    root = os.path.join(media, "film")
+    out = []
+    for dp, dns, fns in os.walk(root):
+        dns[:] = sorted(d for d in dns if d not in FILM_SKIP_DIRS and not d.startswith("."))
+        for fn in sorted(fns):
+            if os.path.splitext(fn)[1].lower() in FILM_TEXT_EXT:
+                full = os.path.join(dp, fn)
+                out.append((full, os.path.join("film", os.path.relpath(full, root))))
+    return out
+
+
+def bundle(media, shot, series_dir=None, today=None, with_film=False):
     if not re.fullmatch(r"s\d{2}", shot):
         raise SystemExit(f"--shot must be s<NN> (got {shot!r})")
     if not os.path.isdir(media):
@@ -101,6 +120,11 @@ def bundle(media, shot, series_dir=None, today=None):
         if pr:
             z.writestr("prompts.csv", pr[0], compress_type=zipfile.ZIP_DEFLATED)
             notes.append(f"prompts.csv ({pr[1]} row(s))")
+        if with_film:
+            ft = film_text_files(media)
+            for full, arc in ft:
+                z.write(full, arc, compress_type=zipfile.ZIP_DEFLATED)
+            notes.append(f"film sources ({len(ft)} text file(s))")
         an = anchors_for(series_dir, shot)
         if an:
             z.writestr("anchors.json", an[0], compress_type=zipfile.ZIP_DEFLATED)
@@ -115,8 +139,10 @@ def main(argv=None):
     p.add_argument("media", help="out/<series>/ep<NN>")
     p.add_argument("--shot", required=True, help="shot id, e.g. s03")
     p.add_argument("--series-dir", default=None, help="series/<series>/ep<NN>-<slug> (prompts.csv, anchors.json)")
+    p.add_argument("--with-film", action="store_true",
+                   help="also include the cinecode film sources under <media>/film (html, md, json...; no media)")
     a = p.parse_args(argv)
-    out, files, notes, sdir = bundle(a.media, a.shot, a.series_dir)
+    out, files, notes, sdir = bundle(a.media, a.shot, a.series_dir, with_film=a.with_film)
     size = os.path.getsize(out)
     print(f"bundle {out}")
     print(f"files  {len(files)} media" + (", " + ", ".join(notes) if notes else "")

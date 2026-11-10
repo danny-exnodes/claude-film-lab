@@ -54,7 +54,7 @@ def plate_l1(w=2400, h=1350):
     tex = noise(w, h, 5) - 0.5
     tone = 0.05 + 0.06 * y + 0.05 * tex
     rgb = ink_mix(np.broadcast_to(tone, (h, w)), 0)
-    rgb += np.array([10, 4, -8], np.float32) * (1 - y)[..., None]                  # warm low sun light on the upper sky
+    rgb += np.array([10, 4, -8], np.float32) * (1 - y)[..., None]  # warm low sun light on the upper sky
     yy = np.arange(h, dtype=np.float32)[:, None]
     for base, amp, cells, ph, tone in ((610, 120, 3, 0.2, 0.22), (700, 90, 5, 1.1, 0.34)):
         top = ridge(w, base, amp, cells, ph)[None, :]
@@ -135,15 +135,12 @@ def plate_l4(n=2048):
     return img
 
 
+# The shape tools/layers/anchors.py writes: points per layer file; a box is the point pair <box>_tl / <box>_br.
 ANCHORS = {
-    "version": 1,
-    "plates": {
-        "ep00_s01_L4_demo-thu_v01.png": {
-            "size": [2048, 2048],
-            "points": {"subject": [540, 995], "feet": [900, 1720], "tail_root": [1310, 1195], "tail_tip": [1985, 880]},
-            "boxes": {"tail": [1290, 760, 2044, 1330], "eye": [466, 946, 614, 1044]},
-        }
-    },
+    "ep00_s01_L4_demo-thu_v01.png": {
+        "subject": [540, 995], "feet": [900, 1720], "tail_root": [1310, 1195], "tail_tip": [1985, 880],
+        "tail_tl": [1290, 760], "tail_br": [2044, 1330], "eye_tl": [466, 946], "eye_br": [614, 1044],
+    }
 }
 
 

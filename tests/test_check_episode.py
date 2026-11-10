@@ -48,6 +48,12 @@ class TestEpisodeGood(EpisodeCase):
         self.assertIn("4 shot(s), 30 s", out)
         self.assertRegex(out, r"WARN  script.md:\d+: en dash outside narration")   # blockquote note: WARN only
 
+    def test_unknown_code_motion_is_warn(self):
+        self.edit("shots.csv", "L1;L2;L3,mist-bands,", "L1;L2;L3,mist-bands;fog-wobble,")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("code_motion 'fog-wobble' is not in tools/compose/motions.json", out)
+
     def test_report_file(self):
         code, out, _ = self.check("--out", "review/check-v1.txt")
         self.assertEqual(code, 0)

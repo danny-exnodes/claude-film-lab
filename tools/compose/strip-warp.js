@@ -6,7 +6,7 @@
 //   | 'top' | 'bottom' (default: point <name>_root, else 'left'), tip: '<point>' (default <name>_tip),
 //   amp: 16 (plate px at the tip), waves: 0.8 (wavelengths along the region), speed: 0.45 (cycles per second),
 //   power: 1.6 (how fast the amplitude rises toward the tip), sway: 0.35 (share of slow noise), lag: 0.35 (s, tip
-//   behind root), strip: 4 (px), salt } }
+//   behind root), strip: 4 (stage px, about 4 px on screen at full size), salt } }
 // Root to tip mostly horizontal (a tail): vertical strips, offset up and down. Mostly vertical (hair, a hem): horizontal
 // strips, offset sideways. The box must hold only what may move (and transparent space around it); the root end of
 // the box joins the body with zero offset, so there is no seam.
@@ -45,7 +45,19 @@
         r0 = axis === 'x' ? a[0] : a[1]; r1 = axis === 'x' ? tp[0] : tp[1];
       }
       if (Math.abs(r1 - r0) < 4) { C.warn(`plate ${p.id}: warp ${name} root and tip are too close`); continue; }
-      p.warps.push({ name, x0, y0, w, h, crop, axis, r0, r1, cfg });
+      // strips are `strip` stage px wide (about 4 px on screen at full size), whatever the plate's resolution
+      const sp = Math.max(1, Math.round((cfg.strip ?? 4) / p.place.s));
+      // The body keeps what lies before the root plus two strips past it: the first strips (offset ~0) then paint over
+      // identical pixels, so the joint shows no anti-aliased seam. Everything further toward the tip is cut out.
+      const keep = 2 * sp, dir = Math.sign(r1 - r0);
+      if (axis === 'x') {
+        const a = dir > 0 ? Math.max(x0, r0 + keep) : x0, b = dir > 0 ? x1 : Math.min(x1, r0 - keep);
+        if (b > a) bg.clearRect(a, y0, b - a, h);
+      } else {
+        const a = dir > 0 ? Math.max(y0, r0 + keep) : y0, b = dir > 0 ? y1 : Math.min(y1, r0 - keep);
+        if (b > a) bg.clearRect(x0, a, w, b - a);
+      }
+      p.warps.push({ name, x0, y0, w, h, crop, axis, r0, r1, sp, cfg });
     }
     if (p.warps.length) p.body = body;
   }
@@ -66,10 +78,12 @@
       for (const w of p.warps) {
         const over = o && typeof o === 'object' ? o[w.name] : null;
         if (over === false) { g.drawImage(w.crop, w.x0, w.y0); continue; }
-        const cfg = over ? { ...w.cfg, ...over } : w.cfg, strip = Math.max(1, cfg.strip ?? 4);
+        const cfg = over ? { ...w.cfg, ...over } : w.cfg, strip = w.sp;
         const len = w.axis === 'x' ? w.w : w.h, start = w.axis === 'x' ? w.x0 : w.y0;
         for (let pos = 0; pos < len; pos += strip) {
-          const sw = Math.min(strip + 1, len - pos);          // 1 px overlap: no hairline gaps between strips
+          // each strip is drawn two strips wide; the next one covers its second half, so a strip's anti-aliased edge
+          // always lands on opaque content of its neighbour (no hairline seams)
+          const sw = Math.min(2 * strip, len - pos);
           const u = (start + pos + strip / 2 - w.r0) / (w.r1 - w.r0);
           const off = C.stripWarp.offset(u, t, cfg);
           if (w.axis === 'x') g.drawImage(w.crop, pos, 0, sw, w.h, w.x0 + pos, w.y0 + off, sw, w.h);

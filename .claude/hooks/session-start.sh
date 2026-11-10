@@ -40,6 +40,10 @@ mkdir -p "$LAB/formats"
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export FILM_LAB=\"$LAB\"" >> "$CLAUDE_ENV_FILE"
   echo "export CINECODE_FORMATS=\"$LAB/formats\"" >> "$CLAUDE_ENV_FILE"
+  # Chrome refuses to run as root without --no-sandbox; cinecode's capture.mjs only reads CHROME_PATH
+  if [ "$(id -u)" = "0" ]; then
+    echo "export CHROME_PATH=\"$LAB/tools/compose/chrome-root.sh\"" >> "$CLAUDE_ENV_FILE"
+  fi
 fi
 
 "$LAB/tools/doctor.sh" --quick || true

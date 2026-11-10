@@ -46,6 +46,8 @@ Regex chuẩn (dùng trong `tools/check_episode.py`):
 - bản dựng: `^ep\d{2}_(draft|final)_v\d{2}\.mp4$`
 
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<series>/ep<NN>/{plates,clips,renders}/`.
+Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1).
+Thư mục film cinecode của tập: `out/<series>/ep<NN>/film/<tên>/` (có `STATE.md` riêng của cinecode).
 
 ## 3. Style pack: `styles/<id>/style.yaml`
 
@@ -78,7 +80,7 @@ layers:                           # quy cách tạo ảnh
   P:  {size: 2K, note: "..."}
 models: {image: seedream-5-0-lite-260128, draft: dola-seedream-5-0-flash-260915,
          pro: dola-seedream-5-0-pro-260628, video: dreamina-seedance-2-5-260628}
-motion: [mist-bands, embers, sun-glow, strip-warp]   # id module trong tools/compose/
+motion: [mist-bands, embers, sun-glow, strip-warp]   # id trong sổ đăng ký tools/compose/motions.json
 sound: {scale: "D minor pentatonic", instruments: [...], notes: "..."}
 type: {latin: "Cormorant Garamond", cjk: "Noto Serif CJK TC"}
 ```
@@ -110,7 +112,7 @@ Thư mục tập `series/<series>/ep<NN>-<slug>/`:
 | `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`. Mọi dòng không phải tiêu đề `#`, dòng trống, chú thích `<!-- -->` hay trích dẫn `>` đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>` |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
-| `anchors.json` | film-plate-maker | điểm neo theo file lớp |
+| `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
 | `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-<v>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 
@@ -142,6 +144,8 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
   Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
+- `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
+  strip-warp, eyelid, breath, parallax, push-in); id lạ là WARN.
 
 `prompts.csv`:
 `file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link`

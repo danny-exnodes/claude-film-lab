@@ -19,11 +19,12 @@
 //   seq       a frame sequence instead of src (a keyed Seedance clip): { pattern: '../../clips/<stem>/{n}.png',
 //             digits: 6, start: 1, count: 120, fps: 24, at: <film time of its first frame>, end: 'hold' | 'loop' | 'hide' }
 //
-// anchors.json (series/<series>/ep<NN>-<slug>/anchors.json; embedded by inline.py --anchors): coordinates in the
-// plate's own pixels, per plate file name:
-//   { "version": 1, "plates": { "<file>.png": { "size": [w, h],
-//       "points": { "subject": [x, y], "feet": [x, y], "tail_root": [x, y], "tail_tip": [x, y] },
-//       "boxes": { "tail": [x0, y0, x1, y1], "eye_back": [x0, y0, x1, y1] } } } }
+// anchors.json (series/<series>/ep<NN>-<slug>/anchors.json, written with tools/layers/anchors.py set; embedded by
+// inline.py --anchors): coordinates in the plate's own pixels, per plate file name; a box is two points <box>_tl and
+// <box>_br (or one [x0, y0, x1, y1] value):
+//   { "<file>.png": { "subject": [x, y], "feet": [x, y], "tail_root": [x, y], "tail_tip": [x, y],
+//                     "tail_tl": [x0, y0], "tail_br": [x1, y1], "eye_tl": [x0, y0], "eye_br": [x1, y1] } }
+// Also read: { "plates": { "<file>": { "size": [w, h], "points": {...}, "boxes": {...} } } }.
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
@@ -56,18 +57,29 @@
     return seq.pattern.replace('{n}', n);
   }
 
-  // Anchors scaled to the decoded size (an anchors.json written for the 2K original still fits a resized plate).
+  // One plate's anchors in either shape: the flat one tools/layers/anchors.py writes ({ "<point>": [x, y] }, a box as
+  // the pair "<box>_tl" / "<box>_br", or "<box>": [x0, y0, x1, y1]), or { size, points, boxes }. Scaled to the decoded
+  // size when "size" (or "_size") says the anchors were measured on another resolution.
   function anchorsFor(spec, w, h) {
     const key = spec.anchors || baseName(spec.src || (spec.seq && spec.seq.pattern));
     const a = C.anchors[key] || {};
+    const rawPts = {}, rawBoxes = {};
+    const flat = !(a.points || a.boxes);
+    const size = a.size || a._size;
+    for (const [n, v] of Object.entries(flat ? a : a.points || {})) if (Array.isArray(v) && v.length === 2 && n !== 'size' && n !== '_size') rawPts[n] = v;
+    for (const [n, v] of Object.entries(flat ? a : a.boxes || {})) if (Array.isArray(v) && v.length === 4) rawBoxes[n] = v;
+    for (const n of Object.keys(rawPts)) {
+      const m = n.match(/^(.*)_tl$/);
+      if (m && rawPts[m[1] + '_br'] && !rawBoxes[m[1]]) rawBoxes[m[1]] = rawPts[n].concat(rawPts[m[1] + '_br']);
+    }
     let fx = 1, fy = 1;
-    if (Array.isArray(a.size) && a.size[0] && a.size[1] && (a.size[0] !== w || a.size[1] !== h)) {
-      fx = w / a.size[0]; fy = h / a.size[1];
-      C.warn(`anchors for ${key} were written for ${a.size[0]}x${a.size[1]}, the plate is ${w}x${h}: scaled`);
+    if (Array.isArray(size) && size[0] && size[1] && (size[0] !== w || size[1] !== h)) {
+      fx = w / size[0]; fy = h / size[1];
+      C.warn(`anchors for ${key} were written for ${size[0]}x${size[1]}, the plate is ${w}x${h}: scaled`);
     }
     const points = {}, boxes = {};
-    for (const [n, p] of Object.entries(a.points || {})) points[n] = [p[0] * fx, p[1] * fy];
-    for (const [n, b] of Object.entries(a.boxes || {})) boxes[n] = [b[0] * fx, b[1] * fy, b[2] * fx, b[3] * fy];
+    for (const [n, p] of Object.entries(rawPts)) points[n] = [p[0] * fx, p[1] * fy];
+    for (const [n, b] of Object.entries(rawBoxes)) boxes[n] = [b[0] * fx, b[1] * fy, b[2] * fx, b[3] * fy];
     return { key, points, boxes };
   }
 

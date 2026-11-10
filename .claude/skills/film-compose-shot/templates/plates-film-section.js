@@ -51,7 +51,7 @@ const SCENES = [
 ];
 
 // Shot s01. Camera: push-in, whole shot, ease-out (fastest on frame 0: the hook), toward the beast's head; seeded
-// handheld drift; a small push when the embers flare (CUES.event). Layers far to near.
+// handheld drift; a small push when the embers surge (CUES.event). Layers far to near.
 function s01(g, k, t, S) {
   const cam = COMPOSE.camera(t, { from: CUES.open, to: CUES.end, ease: 'out', zoom: [1.0, 1.1],
     toward: COMPOSE.anchor('L4', 'subject'), center: 0.25, shake: { amp: 2.2, freq: 0.55, roll: 0.06 },
@@ -73,12 +73,13 @@ function s01(g, k, t, S) {
   });
 }
 
-// Picture-locked sound (styles/<id>/sound.md; every event listed in review/sound-audit.md): air as the mist opens,
-// a cloth tick on the blink, a low swell into the flare. Ambience (wind) comes from SCENES amb.
+// Picture-locked sound (styles/<id>/sound.md; every event listed in review/sound-audit.md): a low whoosh as the
+// mist rises off the frame, a cloth tick on the blink, a short silence, then a low hit on the ember surge.
+// Ambience (wind) comes from SCENES amb; recorded wind and embers go on the ambience/sfx bus of audio/mix.json.
 const SFX = [
-  { at: 0.1, voice: 'air', dur: 1.9, gain: 0.16, wet: 0.35 },          // the opening mist burns off
+  { at: 0.0, voice: 'whoosh', dur: 1.6, gain: 0.2, wet: 0.35 },         // the opening mist lifts
   { at: CUES.blink, voice: 'foley', kind: 'cloth', gain: 0.12, wet: 0.3 }, // the blink
-  { at: CUES.event - 0.35, voice: 'whoosh', dur: 0.7, gain: 0.22, wet: 0.3 }, // into the ember flare
+  { at: CUES.event, voice: 'hit', gain: 0.35, wet: 0.5 },                // the ember surge (camera push)
 ];
 
 // One shared reverb space for the whole film (a generated, seeded impulse), so every sound sits in the same room.

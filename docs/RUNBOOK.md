@@ -13,6 +13,9 @@
 | cinecode tự kích hoạt hoặc đọc nhầm trạng thái tập | Thư mục có file `STATE.md` (tên riêng của cinecode) | Trạng thái tập luôn là `EPISODE.md`; `STATE.md` chỉ nằm trong thư mục film của cinecode |
 | `gh issue list` / `gh pr ...` báo `GitHub GraphQL is not available` | Phiên cloud chỉ cho REST API | Dùng `gh api repos/<owner>/<repo>/...` |
 | Định dạng cinecode đã lưu biến mất ở phiên mới | Mặc định lưu ở `~/.cinecode/formats` | Hook đặt `CINECODE_FORMATS=<repo>/formats`; commit định dạng đã duyệt |
+| `make.py stills/draft/final` lỗi khi mở Chrome (chạy bằng root, "Running as root without --no-sandbox") | Container chạy root; `capture.mjs` chỉ đọc `CHROME_PATH` | Hook đặt `CHROME_PATH=<repo>/tools/compose/chrome-root.sh` (thêm `--no-sandbox`). Phiên cũ: `export` tay biến này |
+| Bản nháp bị giữ vì **TOO STILL** | Chuyển động nhỏ trên tranh nhạt có điểm 0,2–0,45 so với ngưỡng 1,0 của cinecode | Đúng như dự kiến với tranh tĩnh: cắt shot ngắn lại, thêm hành động hoặc đẩy máy rõ hơn (`film-compose-shot` §6) |
+| Bản nháp bị giữ vì **SOUND THIN / SOUND ALL CODE** | Âm thanh chỉ do code tạo | Thêm bản ghi thật (gió, bước chân…) theo `styles/<id>/sound.md` |
 | Plugin GitHub lỗi `Authorization header is badly formatted` | Lỗi kết nối plugin | Không ảnh hưởng clone/push (đi qua git proxy); kết nối lại plugin trong cài đặt nếu cần GitHub API |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic

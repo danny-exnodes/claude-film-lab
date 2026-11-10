@@ -1,0 +1,84 @@
+# Style pack Thủy mặc – schema: docs/CONVENTIONS.md §3. Giải thích từng khóa: styles/_template/style.yaml.
+# Lý do các quyết định (nền lớp, matte, màu ochre...): styles/thuy-mac/STYLE.md.
+id: thuy-mac
+name: Thủy mặc
+status: stable
+base: cinecode:ink-wash            # /root/.claude/skills/cinecode/styles/ink-wash.md – motion/sound/chữ kế thừa từ đây
+
+style_block: >-
+  Traditional Chinese ink-wash painting (shuimo) on aged rice paper, cinematic matte painting,
+  wet-on-wet ink gradients, dry-brush texture, visible paper grain and ink bleeding, high detail
+
+# Gửi qua --negative (CHƯA xác minh seedream-5-0-lite có áp dụng, xem issue #5) và đồng thời
+# viết thành ràng buộc "no ..." trong prompts/*.txt. Ràng buộc riêng từng lớp nằm trong prompts/.
+negative: [text, signature, seal stamp, frame, watermark, photorealistic, 3d render]
+
+palette:
+  ink: "#1A1714"      # mực đậm nhất (焦/濃)
+  grey: "#8C8378"     # mực nhạt (淡), núi xa
+  paper: "#EFE6D3"    # giấy của cả series (đậm/ấm hơn #F2ECDE của recipe)
+  ochre: "#C89A5A"    # ánh nắng thấp ấm + tàn lửa – màu bổ sung so với recipe (xem STYLE.md)
+  accent: "#B02E22"   # son: triện + đúng một điểm nhấn trong truyện (giữ quy tắc §3 của recipe)
+
+# Hướng sáng chèn vào {light}. Mặt trời thấp bên phải là ÁNH SÁNG, không vẽ đĩa mặt trời:
+# vầng sáng do module sun-glow làm bằng code.
+light: "upper-left, warm low sun on the right"
+
+matte:
+  key_bg: "#FF00FF"   # chỉ dùng khi một lớp đặt method=chroma; thủy mặc hiện KHÔNG lớp nào dùng
+  paper_bg: "#FFFFFF" # nền của L2/L3/L4/P (xem quyết định nền L4 trong STYLE.md)
+  per_layer:
+    L1: {method: none}                          # nền đặc, không tách
+    L2: {method: luminance, low: 8, high: 245}  # alpha = 1 - độ sáng trên giấy trắng: giữ gradient mực loang
+    L3: {method: luminance, low: 8, high: 245}
+    L4: {method: rembg, low: 60, high: 200, bg: "#FFFFFF"}  # thân đặc, không để núi xuyên qua thân nhân vật
+    P:  {method: rembg, low: 60, high: 200, bg: "#FFFFFF"}
+
+layers:
+  L1:
+    size: 2560x1440
+    opaque: true
+    note: >-
+      Nền xa, ngang, rộng hơn khung 1920x1080 khoảng 25-33% để lia/đẩy. Nửa dưới ít chi tiết, nhạt
+      (L2/L3 và sương code đè lên). Không tiền cảnh, nhân vật, dị thú, chữ, triện, đĩa mặt trời;
+      không vẽ sương/khói/mưa/tàn lửa (để giấy trống, sương là code).
+  L2:
+    size: 2560x1440
+    note: >-
+      Tầng giữa trên giấy trắng phẳng. Giữa khung để trống (chỗ cho nhân vật và sương); khối đá tan dần
+      về phía chân (mist-bands che mép). Không trời, không sương vẽ sẵn, không vân giấy ngoài khối vẽ.
+  L3:
+    size: 2560x1440
+    note: >-
+      Tiền cảnh trên giấy trắng phẳng: một mặt đứng (gờ đá, sườn núi) đủ rộng cho chân nhân vật,
+      mặt trên gần nằm ngang; cùng hướng sáng với L1/L2. Đậm và nhiều nét hơn L2.
+  L4:
+    size: 2K
+    note: >-
+      Nhân vật/dị thú toàn thân, lề rộng mọi phía, trên nền trắng phẳng (paper_bg, KHÔNG dùng key_bg).
+      Thân phủ một lớp mực nhạt và có đường viền đậm khép kín để rembg tách được thân sáng khỏi nền trắng.
+      Không bóng đổ, không mặt đất, không quầng sương quanh viền.
+  P:
+    size: 2K
+    note: >-
+      Bộ phận để chuyển động riêng: "only the <part>, same position and scale" với ảnh L4 làm --ref,
+      cùng kích thước L4 để chồng khít. Nền như L4.
+
+models:
+  image: seedream-5-0-lite-260128      # 2K ~25 s qua proxy
+  draft: dola-seedream-5-0-flash-260915
+  pro: dola-seedream-5-0-pro-260628    # > 30 s: chỉ qua Lambda (lambda/README.md)
+  video: dreamina-seedance-2-5-260628
+
+motion: [mist-bands, embers, sun-glow, strip-warp]   # id module trong tools/compose/, cách dùng: motion.md
+
+sound:
+  scale: "D minor pentatonic"
+  instruments: [plucked zither, end-blown flute, frame drum, small gong, bowed drone]
+  notes: >-
+    D minor pentatonic = điệu Vũ (羽) trên D, nằm trong "Chinese pentatonic modes" của recipe §7.
+    Bowed drone là phần series thêm. Chi tiết: sound.md.
+
+type:
+  latin: "Cormorant Garamond"          # phụ đề tiếng Việt (font có bộ ký tự tiếng Việt)
+  cjk: "Noto Serif CJK TC"             # nguyên văn chữ Hán trích dẫn

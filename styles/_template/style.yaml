@@ -1,0 +1,71 @@
+# Mẫu style pack – schema: docs/CONVENTIONS.md §3. Ví dụ đầy đủ: styles/thuy-mac/style.yaml.
+# Tạo trường phái mới: chép cả thư mục styles/_template/ thành styles/<id>/, điền file này, STYLE.md, prompts/,
+# motion.md, sound.md. Không sửa skill lõi. Giá trị trong <...> là chỗ phải điền.
+
+# id: tên thư mục, kebab-case không dấu (CONVENTIONS §2). Phải trùng tên thư mục sau khi chép.
+id: _template
+# name: tên hiển thị tiếng Việt.
+name: "<Tên trường phái>"
+# status: draft khi đang thử; stable khi đã có ít nhất một bộ lớp được duyệt (ghi ở examples.md).
+status: draft
+# base: recipe cinecode kế thừa, dạng cinecode:<id> (xem: python3 <cinecode>/scripts/styles.py list),
+#       hoặc null nếu không có recipe gần. motion.md/sound.md chỉ ghi phần khác recipe.
+base: null
+
+# style_block: một câu tiếng Anh đặt đầu MỌI prompt ảnh (chỗ trống {style_block}). Mô tả chất liệu, kỹ thuật,
+#              bề mặt; không tên họa sĩ còn sống, không tên phim.
+style_block: >-
+  <medium and technique>, <surface and texture>, <rendering quality>
+
+# negative: danh sách cụm tiếng Anh. Gửi qua --negative (chưa xác minh model có áp dụng) VÀ viết lại thành
+#           ràng buộc "no ..." trong prompts/*.txt.
+negative: [text, signature, watermark, frame]
+
+# palette: tên -> mã hex "#RRGGBB". Dùng cho code (sương, chữ, triện) và để duyệt màu tranh.
+palette:
+  ink: "#000000"
+  paper: "#FFFFFF"
+
+# light: hướng sáng chung của series, tiếng Anh, chèn vào {light} trong mọi prompt.
+light: "<direction and quality of light>"
+
+# matte: cách tách alpha từng lớp (tools/layers/matte.py).
+matte:
+  key_bg: "#FF00FF"      # nền phẳng khi method=chroma (tách theo màu khóa)
+  paper_bg: "#FFFFFF"    # nền phẳng khi method=luminance (alpha = 1 - độ sáng)
+  per_layer:             # method: none | luminance | chroma | rembg ; low/high: ngưỡng dọn alpha 0-255
+    L1: {method: none}                          # nền đặc
+    L2: {method: luminance, low: 8, high: 245}  # tầng giữa: luminance hợp chất liệu loang; nét cứng thì chroma/rembg
+    L3: {method: luminance, low: 8, high: 245}  # tiền cảnh
+    L4: {method: rembg, low: 60, high: 200}     # nhân vật: thân đặc, viền cứng
+    P:  {method: rembg, low: 60, high: 200}     # bộ phận: như L4
+
+# layers: quy cách tạo ảnh. size truyền thẳng vào ark.py --size (2K, 2560x1440...). 4K/pro phải qua Lambda.
+#         note: ràng buộc bố cục của lớp; mẫu prompt trong prompts/ phải khớp note.
+layers:
+  L1: {size: 2560x1440, opaque: true, note: "nền xa; rộng hơn khung 20-30% để lia; nửa dưới ít chi tiết; không tiền cảnh, nhân vật, chữ, triện"}
+  L2: {size: 2560x1440, note: "tầng giữa; giữa khung trống; chân khối tan dần; không trời; không vẽ sương"}
+  L3: {size: 2560x1440, note: "tiền cảnh; mặt đứng đủ rộng cho nhân vật; cùng hướng sáng"}
+  L4: {size: 2K, note: "nhân vật toàn thân có lề; không bóng đổ, không mặt đất; ghi rõ màu nền đã chọn và lý do"}
+  P:  {size: 2K, note: "only the <part>, same position and scale; ảnh L4 làm --ref"}
+
+# models: id model Ark (docs/MODELS.md). image = mặc định, draft = nháp --fast, pro = qua Lambda, video = Seedance.
+models:
+  image: seedream-5-0-lite-260128
+  draft: dola-seedream-5-0-flash-260915
+  pro: dola-seedream-5-0-pro-260628
+  video: dreamina-seedance-2-5-260628
+
+# motion: id module có thật trong tools/compose/ (không bịa id mới ở đây; module mới viết ở tools/compose/ trước).
+motion: []
+
+# sound: thang âm, nhạc cụ, ghi chú. Chỉ ghi phần chọn/khác so với recipe base.
+sound:
+  scale: "<scale>"
+  instruments: []
+  notes: "<ghi chú ngắn; chi tiết ở sound.md>"
+
+# type: font chữ La-tinh (phải có dấu tiếng Việt) và font chữ Hán. Font phải cài được trong container.
+type:
+  latin: "<font family>"
+  cjk: "Noto Serif CJK TC"

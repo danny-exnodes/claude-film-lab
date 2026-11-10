@@ -1,0 +1,9 @@
+# Trần chi phí của tập – docs/CONVENTIONS.md §7. Chép vào series/<series>/ep<NN>-<slug>/budget.yaml.
+# tools/ark.py --budget đọc file này; cộng ledger (ok, failed, cut-502) + yêu cầu hiện tại, vượt trần nào thì từ chối.
+# Mặc định dưới đây cho một tập thử 60 s (≈ 8-10 shot, 4 lớp mỗi shot, phần lớn chuyển động bằng code).
+# Agent không tự nâng trần: hỏi người dùng ở phiên chính.
+
+images: 40               # tổng số ảnh tối đa, mọi model (gồm nháp --fast và ảnh hỏng)
+video_seconds: 30        # tổng giây video Seedance tối đa (≈ 6 clip 5 s)
+models:                  # (tuỳ chọn) trần riêng theo model: ảnh hoặc giây video
+  dola-seedream-5-0-pro-260628: 6   # ảnh pro (qua Lambda): ảnh khóa nhân vật, biến thể trạng thái

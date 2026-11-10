@@ -35,7 +35,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài riêng, xem `tools/tts/README.md` |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (miễn phí) |
-| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – chưa triển khai |
+| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – đã triển khai, chưa thử ảnh thật |
 | `docs/RELEASING.md` | Bước phát hành: Claude sửa CHANGELOG + mở PR, người dùng tạo tag và GitHub Release |
 | `formats/` | Định dạng cinecode đã lưu (`CINECODE_FORMATS`) |
 | `tests/` | `python3 -m unittest discover -s tests` |

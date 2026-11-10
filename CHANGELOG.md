@@ -41,7 +41,10 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
   `inline.py --lint` và `--init` trên bản chép tạm của template cinecode đang cài → cinecode đổi template thì FAIL ngay
   đầu phiên thay vì lúc dựng shot.
 - `lambda/ark_image_worker.py`: `job_id` đã có `jobs/<job_id>.json` thì không chạy lại (Lambda có thể giao sự kiện bất
-  đồng bộ nhiều lần; chạy lại là tính phí ảnh thứ hai). Cần triển khai (lại) theo `lambda/README.md`.
+  đồng bộ nhiều lần; chạy lại là tính phí ảnh thứ hai). 
+- `lambda/build_deploy.py`: zip của worker không còn nhúng trong chương trình `run_script` (sandbox chặn `import base64`
+  và không truyền được `bytes`); ghi `out/ark_image_worker.zip` (zip tất định), tải lên bucket bằng link ký sẵn, function
+  lấy mã từ S3 và chương trình so `CodeSha256` với repo. **Lambda đã triển khai 2026-11-10** (#13 bước 2); chưa thử ảnh thật.
 - `ark.py image`: thông báo chặn model pro / 4K chỉ sang `lambda-job` thay vì gợi ý `--force`.
 - `docs/RUNBOOK.md`: 11 sự cố mới từ đợt kiểm thử khởi động máy sạch 2026-11-10 (kéo Drive bằng base64 tốn ngữ cảnh,
   CSV của Sheet dùng CRLF, connector AWS `needs_reconnect`, thiếu/hai bản ledger, lỗi `lambda-job`, cinecode đổi

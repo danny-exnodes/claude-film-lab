@@ -24,6 +24,9 @@
 | Hai file cùng tên trong một thư mục Drive | Lần đẩy trước bị ngắt giữa "tải bản mới" và "chuyển bản cũ" | Giữ file `modifiedTime` mới nhất, chuyển file cũ vào `99_LuuTru/` với tên có giờ (§11.6 bước 3) |
 | `update_file` không đổi được nội dung file trên Drive | Connector chỉ sửa metadata (tên, thư mục) | Đúng thiết kế: đẩy bản mới bằng `create_file`, chuyển bản cũ vào `99_LuuTru/` |
 | CSV/Markdown tải lên thành Google Sheet/Doc | Thiếu `disableConversionToGoogleType: true` | Chuyển file đó vào `99_LuuTru/`, tải lại với cờ này (chỉ `README_CauTruc`, `TienDo_SanXuat` được chuyển đổi) |
+| `vieneu_tts.py`: `ONNXRuntimeError ... External data path escapes model directory` | `huggingface_hub` ≥ 2 lưu blob theo kho chia nhỏ (`blobs/<2 ký tự>/...`); onnxruntime 1.29 từ chối file `.data` của backbone nằm khác thư mục với `.onnx` | Tool tự đặt `HF_HUB_DISABLE_SYMLINKS=1` (file thật trong snapshot). Cache cũ tạo trước đó: xóa `~/.cache/huggingface/hub/models--pnnbao-ump--VieNeu-TTS-v3-Turbo` và `models--OpenMOSS-Team--MOSS-Audio-Tokenizer-Nano-ONNX` rồi chạy lại (tải lại ~300 MB) |
+| `vieneu_tts.py` thoát mã 3 "vieneu is not installed" | `vieneu` không nằm trong `requirements.txt` (nặng, không cài ở hook) | Cài theo `tools/tts/README.md` §Cài đặt |
+| `vieneu_tts.py` in `watermark OFF` | Thiếu `resemble-perth` (cần torch CPU) | Cài phần watermark trong `tools/tts/README.md`; bản đọc cuối phải có watermark |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

@@ -2,7 +2,7 @@
 """Start frame for a Seedance clip that becomes a layer: the character plate on a flat key colour, at exactly the place
 and size it has on the 1920x1080 stage (camera at rest). Free (Pillow); no API call.
 
-  python3 tools/compose/keyframe.py out/<s>/ep01/plates/ep01_s03_L4_bac-thi_v02.png out/<s>/ep01/clips/ep01_s03_start.png \
+  python3 tools/compose/keyframe.py out/<s>/ep01/plates/ep01_s03_L4_bac-thi_v02.png out/<s>/ep01/clips/ep01_s03_start_v01.png \
       --x 860 --y 905 --h 640 --pivot feet --anchors series/<s>/ep01-<slug>/anchors.json --key "#00FF00"
 
 --x/--y/--h/--pivot are the plate's `place` in PLATES (pivot: center | bottom | top | an anchor point name).

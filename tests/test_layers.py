@@ -1,5 +1,6 @@
 """tools/layers/{matte,anchors,upscale}.py and tools/bundle.py on small synthetic images."""
-import datetime, hashlib, json, os, re, shutil, unittest, zipfile
+import contextlib, datetime, hashlib, io, json, multiprocessing, os, re, shutil, unittest, zipfile
+from pathlib import Path
 
 import numpy as np
 from PIL import Image
@@ -137,6 +138,13 @@ class TestMatteCli(TmpDirCase, unittest.TestCase):
         self.assertEqual(out[64, 64, 3], 255)
 
 
+def _set_many(path, name, worker, n):
+    """Child process for TestAnchors.test_parallel_set_loses_no_points."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        for k in range(n):
+            anchors.set_point(path, name, f"w{worker}_{k}", worker, k)
+
+
 class TestAnchors(TmpDirCase, unittest.TestCase):
     NAME = "ep01_s02_L4_bac-thi_v02.png"
 
@@ -151,6 +159,21 @@ class TestAnchors(TmpDirCase, unittest.TestCase):
         self.assertIn("was [120, 80.5]", so)
         data = json.loads(j.read_text())
         self.assertEqual(data, {self.NAME: {"neck": [121, 81], "tail": [300, 210]}})
+
+    def test_parallel_set_loses_no_points(self):
+        # up to 3 plate-makers write anchors.json at once (CONVENTIONS §10): flock on anchors.json.lock
+        j = str(self.tmp / "ep" / "anchors.json")
+        ctx = multiprocessing.get_context("fork")
+        procs = [ctx.Process(target=_set_many, args=(j, self.NAME, w, 20)) for w in range(3)]
+        for p in procs:
+            p.start()
+        for p in procs:
+            p.join(60)
+            self.assertEqual(p.exitcode, 0)
+        pts = json.loads(Path(j).read_text())[self.NAME]
+        self.assertEqual(len(pts), 60)
+        self.assertEqual(pts["w2_19"], [2, 19])
+        self.assertTrue(Path(j + ".lock").exists())
 
     def test_set_rejects_non_numbers(self):
         code, _, _ = run_main(anchors.main, ["set", str(self.tmp / "a.json"), self.NAME, "neck", "x", "1"])

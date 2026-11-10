@@ -49,7 +49,8 @@ Quy tắc cổng:
   Agent không bao giờ tự qua cổng, không hỏi người dùng thay bạn.
 - Trước mỗi cổng chạy
   `python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> --out review/check-v<N>.txt`
-  (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md). Mã thoát 1 = còn ERROR: không mở
+  (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md; từ G3, trước khâu 9 và G4 thêm
+  `--probe` để file có số đo ffprobe/LUFS). Mã thoát 1 = còn ERROR: không mở
   cổng, giao lại agent của khâu đó kèm nguyên văn dòng lỗi. WARN thì nêu cho người dùng.
 - Khi trình cổng: đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần, và đúng một câu hỏi duyệt.
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
@@ -91,7 +92,9 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Chỉ **một** `film-compositor` mỗi tập.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.
-- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-<v>.txt`, không nhận mô tả quá trình làm.
+- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-<v>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
+  bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-<v>.txt` (`--probe`:
+  ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,
   `--fast`, Lambda khi đã triển khai).
 

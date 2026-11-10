@@ -6,8 +6,10 @@
 
 JSON shape: {"<layer file name>": {"<point name>": [x, y], ...}, ...}. FILE/IMAGE are matched by base name.
 Transparent layers are drawn over a grey checkerboard so the crosshairs and edges are visible.
+`set` holds an exclusive fcntl.flock on the sidecar `<ANCHORS_JSON>.lock` for the whole read-modify-write
+(up to 3 plate-makers run in parallel, CONVENTIONS §10), then replaces the JSON atomically.
 """
-import argparse, json, os, re, sys, tempfile
+import argparse, contextlib, fcntl, json, os, re, sys, tempfile
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -35,6 +37,19 @@ def save(path, data):
     os.replace(tmp, path)
 
 
+@contextlib.contextmanager
+def locked(path):
+    """Exclusive lock on <path>.lock (sidecar: the JSON itself is replaced, so it cannot carry the lock)."""
+    lock = os.path.abspath(path) + ".lock"
+    os.makedirs(os.path.dirname(lock), exist_ok=True)
+    with open(lock, "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def num(s):
     x = float(s)
     return int(x) if x.is_integer() else round(x, 2)
@@ -44,12 +59,14 @@ def set_point(path, file, name, x, y):
     key = os.path.basename(file)
     if not RE_LAYER_FILE.match(key):
         print(f"warning: {key} does not follow the layer naming convention (docs/CONVENTIONS.md §2)", file=sys.stderr)
-    data = load(path)
-    pts = data.setdefault(key, {})
-    old = pts.get(name)
-    pts[name] = [num(x), num(y)]
-    save(path, data)
-    return old, pts[name]
+    point = [num(x), num(y)]          # validate before taking the lock
+    with locked(path):
+        data = load(path)
+        pts = data.setdefault(key, {})
+        old = pts.get(name)
+        pts[name] = point
+        save(path, data)
+    return old, point
 
 
 def checker(size, cell=16):

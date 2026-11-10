@@ -475,31 +475,173 @@ def check_prompts(ep_dir, meta, shots, rep):
     return files
 
 
-def check_media(media, meta, prompt_files, rep):
+def check_media_name(rel, name, sub, rx, ep, rep):
+    """Name check for one file under plates/, clips/ or renders/ (rel: path inside the media folder)."""
+    parts = rel.split(os.sep)[1:]            # path below plates/ | clips/ | renders/
+    where = "media/" + rel.replace(os.sep, "/")
+    check_ep = name
+    if sub == "clips" and len(parts) > 1:
+        # clips/<clip stem>/000001.png (keyed) or clips/<clip stem>/raw/000001.png (raw ffmpeg frames)
+        stem, inner = parts[0], parts[1:]
+        if not RE_CLIP_STEM.match(stem):
+            rep.error(where, f"frame folder '{stem}' is not a clip name without .mp4 ({RE_CLIP_STEM.pattern})")
+            return
+        if not (len(inner) == 1 or (len(inner) == 2 and inner[0] == "raw")) or not RE_FRAME.match(name):
+            rep.error(where, "frame folders hold only <6 digits>.png files and an optional raw/ subfolder "
+                             f"(clips/{stem}/000001.png, clips/{stem}/raw/000001.png)")
+            return
+        check_ep = stem
+    elif sub == "clips" and RE_START_FRAME.match(name):
+        pass
+    elif not rx.match(name):
+        extra = f" or {RE_START_FRAME.pattern}" if sub == "clips" else ""
+        rep.error(where, f"name does not match the {sub} convention ({rx.pattern}{extra})")
+        return
+    if isinstance(ep, int) and not check_ep.startswith(f"ep{ep:02d}_"):
+        rep.error(where, f"file is not for episode ep{ep:02d}")
+
+
+def check_media(media, meta, prompt_rows, rep):
     if not media or not os.path.isdir(media):
         rep.warn("media", f"media folder {media or '(none)'} not found: plates/clips/renders not checked")
-        return
+        return False
     ep = meta.get("episode") if meta else None
     for sub, rx in MEDIA_RULES.items():
         d = os.path.join(media, sub)
         if not os.path.isdir(d):
             continue
-        for root, _dirs, names in os.walk(d):
+        for root, dirs, names in os.walk(d):
+            dirs.sort()
             for name in sorted(names):
-                rel = os.path.relpath(os.path.join(root, name), media)
-                if not rx.match(name):
-                    rep.error(f"media/{rel}", f"name does not match the {sub} convention ({rx.pattern})")
-                elif isinstance(ep, int) and not name.startswith(f"ep{ep:02d}_"):
-                    rep.error(f"media/{rel}", f"file is not for episode ep{ep:02d}")
-    for f in prompt_files or []:
-        if RE_LAYER_FILE.match(f) and not os.path.isfile(os.path.join(media, "plates", f)):
-            rep.error("prompts.csv", f"{f} listed but not found in {os.path.join(media, 'plates')}")
+                check_media_name(os.path.relpath(os.path.join(root, name), media), name, sub, rx, ep, rep)
+    check_listed_files(media, meta, prompt_rows, rep)
     led = os.path.join(media, "ledger.csv")
     if os.path.isfile(led):
         with open(led, encoding="utf-8") as fh:
             head = fh.readline().strip()
         if head != ",".join(LEDGER_HEADER):
             rep.error("media/ledger.csv", f"header is {head!r}, expected {','.join(LEDGER_HEADER)!r}")
+    return True
+
+
+def check_listed_files(media, meta, prompt_rows, rep):
+    """Every prompts.csv file should exist in plates/ (images) or clips/ (clips) once it was made.
+
+    Rows are written at stage 3, before anything is generated, so a missing file is an ERROR only when
+    the row says it was generated or accepted (non-empty `usage` or `approved=yes`) or the episode is at
+    stage >= FILES_REQUIRED_FROM_STAGE (7, compositing: every listed file must exist by then). Otherwise
+    it is a pending row: one INFO line lists them, so stage 3-6 checks (and gate G2) can pass.
+    """
+    stage = meta.get("stage") if meta else None
+    late = isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE
+    pending = []
+    for r in prompt_rows or []:
+        f = r["file"]
+        sub = "plates" if RE_LAYER_FILE.match(f) else "clips" if RE_CLIP_FILE.match(f) else None
+        if sub is None or os.path.isfile(os.path.join(media, sub, f)):
+            continue
+        made = r["approved"] == "yes" or bool(r["usage"])
+        if made or late:
+            why = ("approved=yes" if r["approved"] == "yes" else "usage is filled") if made else f"episode is at stage {stage}"
+            rep.error("prompts.csv", f"{f} listed but not found in {os.path.join(media, sub)} ({why})")
+        else:
+            pending.append(f)
+    if pending:
+        rep.info(f"prompts.csv: {len(pending)} file(s) not generated yet (no usage, not approved; required from "
+                 f"stage {FILES_REQUIRED_FROM_STAGE}): {', '.join(pending)}")
+
+
+# ==================================================================== probe =====
+def ffprobe(path):
+    """Return {width, height, fps, duration, audio} for a video file (raises RuntimeError)."""
+    cmd = ["ffprobe", "-v", "error", "-print_format", "json", "-show_streams", "-show_format", path]
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if p.returncode != 0:
+        raise RuntimeError((p.stderr.strip().splitlines() or ["ffprobe failed"])[-1])
+    info = json.loads(p.stdout or "{}")
+    streams = info.get("streams", [])
+    v = next((s for s in streams if s.get("codec_type") == "video"), None)
+    if v is None:
+        raise RuntimeError("no video stream")
+    fps = None
+    for key in ("avg_frame_rate", "r_frame_rate"):
+        num, _, den = str(v.get(key, "0/0")).partition("/")
+        try:
+            if float(den or 1):
+                fps = float(num) / float(den or 1)
+                break
+        except ValueError:
+            pass
+    dur = to_float(info.get("format", {}).get("duration")) or to_float(v.get("duration"))
+    return {"width": int(v.get("width") or 0), "height": int(v.get("height") or 0), "fps": fps, "duration": dur,
+            "audio": any(s.get("codec_type") == "audio" for s in streams)}
+
+
+def loudness(path):
+    """Integrated loudness (LUFS) and true peak (dBTP or None) with ffmpeg's ebur128 filter."""
+    cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", path, "-map", "0:a:0",
+           "-af", "ebur128=peak=true:framelog=quiet", "-f", "null", "-"]
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    summary = p.stderr[p.stderr.rfind("Summary:"):] if "Summary:" in p.stderr else ""
+    m = re.search(r"\bI:\s+(-?[\d.]+|-inf)\s+LUFS", summary)
+    if p.returncode != 0 or not m:
+        raise RuntimeError((p.stderr.strip().splitlines() or ["ffmpeg ebur128 failed"])[-1])
+    pk = re.search(r"Peak:\s+(-?[\d.]+|-inf)\s+dBFS", summary)
+    return float(m.group(1)), (float(pk.group(1)) if pk else None)
+
+
+def is_16_9(w, h):
+    return w > 0 and h > 0 and abs(w / h - 16 / 9) <= 0.01
+
+
+def probe_media(media, meta, rep):
+    """--probe: ffprobe numbers for clips/*.mp4 and renders/*.mp4, loudness for final renders."""
+    if not (shutil.which("ffprobe") and shutil.which("ffmpeg")):
+        rep.error("probe", "ffprobe/ffmpeg not found on PATH: clips and renders not measured")
+        return
+    length = meta.get("length_s") if meta else None
+    found = 0
+    for sub in ("clips", "renders"):
+        d = os.path.join(media, sub)
+        names = sorted(n for n in os.listdir(d) if n.endswith(".mp4")) if os.path.isdir(d) else []
+        for name in names:
+            found += 1
+            where = f"media/{sub}/{name}"
+            final = sub == "renders" and "_final_" in name
+            try:
+                pr = ffprobe(os.path.join(d, name))
+            except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+                rep.error(where, f"ffprobe failed: {e}")
+                continue
+            w, h = pr["width"], pr["height"]
+            ratio = "16:9" if is_16_9(w, h) else f"{w / h:.3f}:1" if h else "?"
+            fps = f"{pr['fps']:.3g} fps" if pr["fps"] else "fps ?"
+            dur = f"{pr['duration']:.2f} s" if pr["duration"] is not None else "duration ?"
+            diff = None
+            if sub == "renders" and isinstance(length, (int, float)) and pr["duration"] is not None:
+                diff = pr["duration"] - length
+                dur += f" (length_s {fmt_s(length)} s, {diff:+.2f} s)"
+            msg = f"probe {where}: {w}x{h} ({ratio}), {fps}, {dur}, audio {'yes' if pr['audio'] else 'no'}"
+            if final and pr["audio"]:
+                try:
+                    lufs, peak = loudness(os.path.join(d, name))
+                    msg += f", integrated {lufs:.1f} LUFS" + (f", true peak {peak:.1f} dBTP" if peak is not None else "")
+                except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as e:
+                    lufs = None
+                    rep.error(where, f"loudness not measured: {e}")
+            rep.info(msg)
+            if not is_16_9(w, h):
+                (rep.error if final else rep.warn)(where, f"{w}x{h} is not 16:9")
+            if final:
+                if not pr["audio"]:
+                    rep.error(where, f"final render has no audio stream (master must be {LUFS_TARGET:g} LUFS)")
+                elif lufs is not None and abs(lufs - LUFS_TARGET) > LUFS_TOL:
+                    rep.error(where, f"integrated loudness {lufs:.1f} LUFS outside {LUFS_TARGET:g} +-{LUFS_TOL:g} LUFS")
+            if diff is not None and abs(diff) > LENGTH_TOL_S:
+                rep.warn(where, f"duration {pr['duration']:.2f} s differs from length_s {fmt_s(length)} s "
+                                f"by {diff:+.2f} s (> {LENGTH_TOL_S:g} s)")
+    if not found:
+        rep.info(f"probe: no mp4 in {os.path.join(media, 'clips')} or {os.path.join(media, 'renders')}")
 
 
 def cmd_episode(a):
@@ -515,7 +657,8 @@ def cmd_episode(a):
     media = a.media
     if media is None and isinstance(meta.get("media"), str):
         media = meta["media"] if os.path.isabs(meta["media"]) else os.path.join(LAB, meta["media"])
-    check_media(media, meta, files, rep)
+    if check_media(media, meta, files, rep) and a.probe:
+        probe_media(media, meta, rep)
     if shots:
         total = max(to_float(r["to_s"]) or 0 for r in shots.values())
         rep.info(f"{len(shots)} shot(s), {fmt_s(total)} s; media: {media or '-'}")
@@ -686,6 +829,8 @@ def main(argv=None):
     e = sp.add_parser("episode", help="check an episode folder series/<series>/ep<NN>-<slug>")
     e.add_argument("episode")
     e.add_argument("--media", default=None, help="media folder out/<series>/ep<NN> (default: EPISODE.md media:)")
+    e.add_argument("--probe", action="store_true",
+                   help="measure clips/renders with ffprobe and final renders' loudness with ffmpeg ebur128")
     e.add_argument("--out", default=None, help="also write the report here (relative = inside the episode folder)")
     s = sp.add_parser("style", help="check a style pack styles/<id>")
     s.add_argument("style")

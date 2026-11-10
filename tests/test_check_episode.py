@@ -1,5 +1,5 @@
 """tools/check_episode.py: a valid episode/style fixture passes; broken variants (made in tmp dirs) fail."""
-import re, shutil, unittest
+import os, re, shutil, subprocess, tempfile, unittest
 from pathlib import Path
 
 from helpers import EPISODE_FIX, STYLE_FIX, TmpDirCase, load, run_main
@@ -190,8 +190,42 @@ class TestEpisodePrompts(EpisodeCase):
         self.assert_error(r"approved 'maybe'")
 
     def test_listed_file_missing_in_media(self):
+        (self.media / "plates" / PLATES[0]).unlink()            # row has approved=yes and usage
+        self.assert_error(r"ep01_s01_L1_nui-co_v01.png listed but not found .*approved=yes")
+
+    def test_pending_row_missing_is_info_before_stage_7(self):
+        # rows are written at stage 3 before images exist: G2 (stage 4-5) must still pass
+        for n in PLATES[1:]:
+            (self.media / "plates" / n).unlink()                # approved=no / empty, no usage
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("INFO  prompts.csv: 2 file(s) not generated yet", out)
+        self.assertIn(PLATES[1], out)
+
+    def test_pending_row_missing_is_error_from_stage_7(self):
         (self.media / "plates" / PLATES[1]).unlink()
-        self.assert_error(r"ep01_s02_L4_bac-thi_v02.png listed but not found")
+        self.edit("EPISODE.md", "stage: 5", "stage: 7")
+        self.assert_error(r"ep01_s02_L4_bac-thi_v02.png listed but not found .*episode is at stage 7")
+
+    def test_generated_row_missing_is_error(self):
+        (self.media / "plates" / PLATES[2]).unlink()
+        self.edit("prompts.csv", "prompts/s02_L4.txt,,,,,", 'prompts/s02_L4.txt,,,"{""generated_images"":1}",,')
+        self.assert_error(r"ep01_s02_P1-duoi_bac-thi_v01.png listed but not found .*usage is filled")
+
+    def test_clip_row(self):
+        # seedance-layer.md: the clip is logged in prompts.csv with layer = L4
+        row = 'ep01_s02_seedance25_v01.mp4,s02,L4,dreamina-seedance-2-5-260628,720p,,ep01_s02_start_v01.png,,"{""completion_tokens"":1}",,\n'
+        with open(self.ep / "prompts.csv", "a", encoding="utf-8") as f:
+            f.write(row)
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        (self.media / "clips" / "ep01_s02_seedance25_v01.mp4").unlink()
+        self.assert_error(r"ep01_s02_seedance25_v01.mp4 listed but not found in .*clips")
+
+    def test_clip_row_shot_mismatch(self):
+        with open(self.ep / "prompts.csv", "a", encoding="utf-8") as f:
+            f.write("ep01_s02_seedance25_v01.mp4,s03,L4,m,720p,,,,,,\n")
+        self.assert_error(r"is for s02 but shot column is 's03'")
 
 
 class TestEpisodeMedia(EpisodeCase):
@@ -206,6 +240,117 @@ class TestEpisodeMedia(EpisodeCase):
     def test_other_episode_file(self):
         (self.media / "clips" / "ep02_s01_seedance25_v01.mp4").write_bytes(b"x")
         self.assert_error(r"not for episode ep01")
+
+    def test_documented_clip_artefacts_pass(self):
+        # CONVENTIONS §2 + film-compose-shot/references/seedance-layer.md
+        clips = self.media / "clips"
+        (clips / "ep01_s02_start_v01.png").write_bytes(b"x")
+        stem = clips / "ep01_s02_seedance25_v01"
+        (stem / "raw").mkdir(parents=True)
+        for i in (1, 2, 120):
+            (stem / f"{i:06d}.png").write_bytes(b"x")
+            (stem / "raw" / f"{i:06d}.png").write_bytes(b"x")
+        (self.media / "plates" / "matte").mkdir()
+        (self.media / "plates" / "matte" / PLATES[1]).write_bytes(b"x")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("media/clips", out)
+
+    def test_bad_clip_artefacts(self):
+        clips = self.media / "clips"
+        (clips / "ep01_s02_start.png").write_bytes(b"x")                   # no version
+        (clips / "ep02_s01_start_v01.png").write_bytes(b"x")               # other episode
+        (clips / "s02_frames").mkdir()
+        (clips / "s02_frames" / "000001.png").write_bytes(b"x")            # folder is not a clip stem
+        stem = clips / "ep01_s02_seedance25_v01"
+        (stem / "keyed").mkdir(parents=True)
+        (stem / "frame1.png").write_bytes(b"x")                            # not 6 digits
+        (stem / "keyed" / "000001.png").write_bytes(b"x")                  # only raw/ allowed
+        (clips / "ep02_s01_seedance25_v01").mkdir()
+        (clips / "ep02_s01_seedance25_v01" / "000001.png").write_bytes(b"x")
+        out = self.assert_error(r"media/clips/ep01_s02_start.png: name does not match")
+        self.assertRegex(out, r"ERROR media/clips/ep02_s01_start_v01.png: file is not for episode ep01")
+        self.assertRegex(out, r"ERROR media/clips/s02_frames/000001.png: frame folder 's02_frames'")
+        self.assertRegex(out, r"ERROR media/clips/ep01_s02_seedance25_v01/frame1.png: frame folders hold only")
+        self.assertRegex(out, r"ERROR media/clips/ep01_s02_seedance25_v01/keyed/000001.png: frame folders hold only")
+        self.assertRegex(out, r"ERROR media/clips/ep02_s01_seedance25_v01/000001.png: file is not for episode ep01")
+
+
+class TestEpisodeDot(EpisodeCase):
+    def test_episode_dot(self):
+        cwd = os.getcwd()
+        os.chdir(self.ep)
+        try:
+            code, out, _ = run_main(ce.main, ["episode", ".", "--media", str(self.media)])
+        finally:
+            os.chdir(cwd)
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("folder '.'", out)
+
+
+def ffmpeg(out, size="160x90", seconds=1, audio_db=None):
+    """Tiny test video (lavfi testsrc; optional 1 kHz sine: mono, 0 dB gain = -21 LUFS)."""
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=24:duration={seconds}"]
+    if audio_db is not None:
+        cmd += ["-f", "lavfi", "-i", f"sine=frequency=1000:duration={seconds}", "-af", f"volume={audio_db}dB",
+                "-c:a", "aac", "-shortest"]
+    cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out)]
+    subprocess.run(cmd, check=True, timeout=60)
+
+
+@unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed")
+class TestEpisodeProbe(EpisodeCase):
+    @classmethod
+    def setUpClass(cls):
+        cls._vids = tempfile.mkdtemp(prefix="film-probe-")
+        v = Path(cls._vids)
+        ffmpeg(v / "clip.mp4", "160x90", 1)
+        ffmpeg(v / "square.mp4", "96x96", 1)
+        ffmpeg(v / "draft.mp4", "160x90", 2, audio_db=0)
+        ffmpeg(v / "final_ok.mp4", "320x180", 2, audio_db=7.07)     # -14.0 LUFS
+        ffmpeg(v / "final_quiet.mp4", "320x180", 2, audio_db=0)     # -21 LUFS
+        ffmpeg(v / "final_43.mp4", "160x120", 2, audio_db=7.07)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._vids, ignore_errors=True)
+
+    def put(self, src, rel):
+        shutil.copy(Path(self._vids) / src, self.media / rel)
+
+    def test_probe_numbers_in_report(self):
+        self.put("clip.mp4", "clips/ep01_s02_seedance25_v01.mp4")
+        self.put("draft.mp4", "renders/ep01_draft_v01.mp4")
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe", "--out", "review/check-v1.txt")
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"INFO  probe media/clips/ep01_s02_seedance25_v01.mp4: 160x90 \(16:9\), 24 fps, 1.0\d s, audio no")
+        self.assertRegex(out, r"INFO  probe media/renders/ep01_final_v01.mp4: 320x180 \(16:9\), 24 fps, "
+                              r"2.0\d s \(length_s 30 s, -2[78].\d\d s\), audio yes, "
+                              r"integrated -1[34].\d LUFS, true peak -?\d+.\d dBTP")
+        self.assertRegex(out, r"WARN  media/renders/ep01_draft_v01.mp4: duration .* differs from length_s 30 s")
+        rep = (self.ep / "review" / "check-v1.txt").read_text()
+        self.assertIn("integrated", rep)
+        self.assertIn("160x90 (16:9)", rep)
+
+    def test_probe_errors(self):
+        self.put("square.mp4", "clips/ep01_s02_seedance25_v01.mp4")
+        self.put("final_quiet.mp4", "renders/ep01_final_v01.mp4")
+        self.put("final_43.mp4", "renders/ep01_final_v02.mp4")
+        self.put("clip.mp4", "renders/ep01_final_v03.mp4")          # no audio
+        (self.media / "renders" / "ep01_draft_v01.mp4").write_bytes(b"not a video")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"WARN  media/clips/ep01_s02_seedance25_v01.mp4: 96x96 is not 16:9")
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: integrated loudness -2[01].\d LUFS outside -14 \+-1")
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v02.mp4: 160x120 is not 16:9")
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v03.mp4: final render has no audio")
+        self.assertRegex(out, r"ERROR media/renders/ep01_draft_v01.mp4: ffprobe failed")
+
+    def test_without_probe_measures_nothing(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("probe", out)
 
 
 class TestStyle(TmpDirCase, unittest.TestCase):

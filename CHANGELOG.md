@@ -42,9 +42,15 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
   mỗi lần tải lên (thay dòng dấu, ghi `.pushed.log`). CONVENTIONS §11.6 và `film-pipeline` §0 dùng công cụ này;
   test `tests/test_drive_sync.py`.
 - `templates/project/`: `PROJECT.md`, `SERIES.md`, `README_CauTruc.md` (Google Doc cho người đọc),
-  `TienDo_SanXuat.csv` (header của Google Sheet tiến độ).
+  `TienDo_SanXuat.csv` (header của Google Sheet tiến độ), `pronunciation.csv` (header `term,doc`).
+- Ánh xạ §11.3 `projects/<project>/pronunciation.csv` (bảng phát âm Hán Việt cho `vieneu_tts.py --pron`) ↔
+  `02_KinhThu/pronunciation.csv`, cạnh `SERIES.md`; trước đây `drive_sync.py plan` báo UNMAPPED và thoát 1.
 
 ### Sửa
+- `drive_sync.py plan`: file NEW (không có dòng trong `.pulled.sha256`) cũng được in truy vấn `search_files` và tên lưu
+  trữ, nhãn "if a file with this title already exists in the folder (first push), archive it" (JSON: `archive.when`
+  `if_exists`, CHANGED là `always`), để lần đẩy đầu sau khi tải tay hoặc mất dấu không để lại bản trùng trên Drive.
+  CONVENTIONS §11.6 bước 1 và 4 cập nhật theo.
 - `tools/ark.py`: kiểm ngân sách và giữ chỗ thành một bước nguyên tử (`reserve()`: một `LOCK_EX` trên ledger bao quanh
   đọc ledger, cộng tổng, ghi `pending` hoặc `refused-budget`; nén `--ref` làm trước khoá). N agent song song không còn
   vượt trần tối đa N−1 request; gỡ "giới hạn đã biết" ở CONVENTIONS §7 và WORKFLOW §4. Thêm test 8 tiến trình

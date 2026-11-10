@@ -520,12 +520,12 @@ def collect_lines(a):
     if a.script:
         try:
             text = check_episode.read_text(a.script)
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, check_episode.CheckError) as e:
             fail(f"{a.script}: cannot read: {e}")
         if length is None:
             try:
                 length = episode_length(a.script)
-            except ValueError as e:                 # not UTF-8, or a length_s that is not a number
+            except (ValueError, check_episode.CheckError) as e:   # not UTF-8, or a length_s that is not a number
                 fail(f"{os.path.join(os.path.dirname(os.path.abspath(a.script)), 'EPISODE.md')}: cannot read"
                      f" length_s: {e}")
         problems = script_problems(text, length)

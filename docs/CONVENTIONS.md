@@ -99,7 +99,8 @@ palette: {ink: "#1A1714", ...}    # tên -> hex
 light: "upper-left, warm low sun on the right"
 matte:                            # cách tách alpha theo lớp (tools/layers/matte.py)
   key_bg: "#FF00FF"               # nền phẳng khi method=chroma
-  paper_bg: "#FFFFFF"             # nền phẳng khi method=luminance
+  paper_bg: "#FFFFFF"             # nền phẳng prompt yêu cầu khi method=luminance; matte.py tự ước lượng màu giấy
+                                  # thật từ viền ảnh (--paper auto, mặc định), paper_bg chỉ để tham khảo
   per_layer:                      # method: none | luminance | chroma | rembg ; low/high: ngưỡng cleanup 0-255
                                   # bg (tuỳ chọn): màu nền phẳng mà prompt của lớp yêu cầu (mặc định: key_bg với chroma,
                                   # paper_bg với luminance; rembg nên dùng nền phẳng sáng, ghi rõ ở đây)

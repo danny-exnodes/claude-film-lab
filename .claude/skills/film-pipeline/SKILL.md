@@ -154,6 +154,8 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Bạn tự gọi ark.py ở phiên chính cũng dùng `--ledger/--budget` (cột `agent` trống = phiên chính).
   ark.py cũng đọc `FILM_LEDGER`/`FILM_BUDGET` từ môi trường, nhưng hợp đồng giao việc luôn ghi cờ tường minh.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
+  Mỗi agent song song nhận `FILM_AGENT` riêng (vd. `film-plate-maker-s01-s04`) và hợp đồng ghi rõ: dùng thư mục scratch
+  riêng đặt theo `FILM_AGENT`, không dùng chung script phụ (script chung bị ghi đè làm ledger ghi sai agent).
   Chỉ **một** `film-compositor` mỗi tập.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.

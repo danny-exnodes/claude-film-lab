@@ -113,7 +113,7 @@ Trước khi chuyển sang clip Seedance trong cùng shot, đưa rig về nghỉ
 
 Chỉ khi shot cần cử động code không làm được; mỗi clip tính phí: theo `references/seedance-layer.md`. Tóm tắt:
 khung đầu = nhân vật trên nền key phẳng đúng vị trí trên sân khấu 16:9 (`tools/compose/keyframe.py`, miễn phí) →
-`ark.py video` model `dreamina-seedance-2-5-260628`, 720p 5 s (~2,5 phút, chạy nền), `--ratio 16:9`, `--no-audio`
+`ark.py video` model `dreamina-seedance-2-5-260628`, 720p 5 s (~2,5 phút, chạy nền), không `--ratio` (khung đầu 16:9 quyết định tỉ lệ), `--no-audio`
 khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách nền từng khung bằng
 `tools/layers/matte.py chroma` có khử loang màu (despill; `rembg` chỉ để dự phòng: viền nhấp nháy) → chuỗi PNG
 `out/<project>/ep<NN>/clips/<tên-clip>/000001.png` → lớp `seq` trong `PLATES`. Request 502 không tự thử lại.

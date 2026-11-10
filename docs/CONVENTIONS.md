@@ -265,7 +265,7 @@ ghi lại file đã đẩy (§11.6).
 ClaudeFilmLab/<ProjectName>/            PascalCase không dấu, vd. SonHaiKinh
 ├── 00_QuanLy/      PROJECT.md (manifest, §11.2) · README_CauTruc (Google Doc cho người đọc) · TienDo_SanXuat (Google Sheet, mỗi tập một dòng)
 ├── 01_TaiLieuGoc/  _ChoPhanLoai/ (hộp thư đến) · SachThamKhao/<MaSach>_<NoiDung>/ · NguyenVan/ · HinhAnhThamKhao/ · DanhMuc.csv
-├── 02_KinhThu/     SERIES.md · NhanVat/<slug>/CHARACTER.md (+ ảnh khóa) · BoiCanh/<slug>/LOCATION.md (+ ảnh khóa) · PhongCach/
+├── 02_KinhThu/     SERIES.md · pronunciation.csv · NhanVat/<slug>/CHARACTER.md (+ ảnh khóa) · BoiCanh/<slug>/LOCATION.md (+ ảnh khóa) · PhongCach/
 ├── 03_KichBan/ep<NN>-<slug>/            EPISODE.md, budget.yaml, research.md, script.md, shots.csv, prompts.csv, anchors.json, prompts/, review/, publish.md
 ├── 04_SanXuat/ep<NN>-<slug>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt
 ├── 05_ThanhPham/ep<NN>-<slug>/          bản cuối, thumbnail, tài liệu xuất bản
@@ -316,6 +316,7 @@ drive:
 | `01_TaiLieuGoc/<…>` | chữ: `projects/<project>/sources/<…>` · ảnh, PDF: `out/<project>/sources/<…>` | kéo khi cần; chỉ thêm, không sửa file gốc |
 | `01_TaiLieuGoc/DanhMuc.csv` (ngoại lệ: được sửa) | `projects/<project>/sources/DanhMuc.csv` (mẫu `templates/project/DanhMuc.csv`) | thêm một dòng cho mỗi tài liệu mới; đẩy như file chữ (§11.6) |
 | `02_KinhThu/SERIES.md` | `projects/<project>/SERIES.md` | kéo đầu phiên; đẩy khi đổi |
+| `02_KinhThu/pronunciation.csv` | `projects/<project>/pronunciation.csv` (bảng phát âm Hán Việt `term,doc` cho `tools/tts/vieneu_tts.py --pron`, dùng chung mọi tập; mẫu `templates/project/pronunciation.csv`) | như trên |
 | `02_KinhThu/NhanVat/<c>/CHARACTER.md` | `projects/<project>/characters/<c>/CHARACTER.md` | như trên |
 | `02_KinhThu/NhanVat/<c>/<ảnh khóa>` | `out/<project>/characters/<c>/` | kéo khi cần làm `--ref`; đẩy sau G2 |
 | `02_KinhThu/BoiCanh/<l>/LOCATION.md` · ảnh | `projects/<project>/locations/<l>/LOCATION.md` · `out/<project>/locations/<l>/` | như nhân vật |
@@ -343,8 +344,9 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 
 1. Người dùng chốt: tên dự án, `<project>` (slug), `<ProjectName>`, style mặc định.
 2. Tạo thư mục `ClaudeFilmLab/<ProjectName>/` và cây §11.1 bằng `create_file` (folder), ghi từng ID.
-3. Bản làm việc: chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv}` vào `projects/<project>/`, điền
-   slug, tên, style và ID. Đẩy `PROJECT.md` lên `00_QuanLy/`, `SERIES.md` lên `02_KinhThu/` (file chữ, không chuyển đổi).
+3. Bản làm việc: chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv, pronunciation.csv}` vào
+   `projects/<project>/`, điền slug, tên, style và ID. Đẩy `PROJECT.md` lên `00_QuanLy/`, `SERIES.md` và
+   `pronunciation.csv` lên `02_KinhThu/` (file chữ, không chuyển đổi).
 4. `README_CauTruc.md` (thay `<ProjectName>`) → `create_file` với `contentMimeType: text/markdown`, **để** chuyển sang
    Google Doc; `TienDo_SanXuat.csv` → `text/csv`, chuyển sang Google Sheet. Ghi hai ID vào `drive.files`, đẩy lại `PROJECT.md`.
 
@@ -371,8 +373,12 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (`--json` để đọc
    bằng máy). Mỗi file mới/đã đổi có: thư mục đích (đường dẫn logic + ID từ `PROJECT.md`, hoặc
    `MISSING – create folder <đường dẫn> under <ID cha> first`), `title`, `contentMimeType`, tham chiếu
-   `sha256:<hex>:<đường dẫn tuyệt đối>` cho `create_file`, lệnh `record`, và với file đã đổi: câu truy vấn `search_files`
-   tìm bản cũ cùng tên mới trong `99_LuuTru/` (bước 3). Cùng ánh xạ §11.3 cho media (`ledger.csv`, gói shot theo ngày
+   `sha256:<hex>:<đường dẫn tuyệt đối>` cho `create_file`, lệnh `record`, câu truy vấn `search_files` tìm bản cũ cùng
+   tên mới trong `99_LuuTru/` (bước 3). File đã đổi (CHANGED) luôn có bản cũ. File mới (NEW, không có dòng trong
+   `.pulled.sha256`) cũng được in bước này, ghi nhãn `if a file with this title already exists in the folder (first
+   push), archive it`: Drive có thể đã có file cùng tên (lần đẩy đầu sau khi người dùng tải tay lên, hoặc mất dấu) –
+   vẫn chạy `search_files` sau khi tải lên, có kết quả nào khác ID vừa tạo thì chuyển vào `99_LuuTru/`, không có thì bỏ
+   qua; nhờ vậy không sinh bản trùng. Cùng ánh xạ §11.3 cho media (`ledger.csv`, gói shot theo ngày
    trong tên zip, bản nháp, bản cuối, ảnh khóa); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
    `TienDo_SanXuat.csv` được tách riêng (`[sheet]`, bước 5), không tải lên như file chữ. File không có ánh xạ (UNMAPPED)
    hay thư mục thiếu ID → mã thoát 1: tạo thư mục (`create_file` folder, `parentId` = ID cha), ghi ID vào
@@ -396,7 +402,8 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
 4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
    trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
-   dùng), xung đột thì hỏi người dùng; rồi mới đẩy.
+   dùng), xung đột thì hỏi người dùng; rồi mới đẩy. Với file NEW, mọi kết quả `search_files` có ID không nằm trong
+   `.pushed.log` là bản chưa từng kéo về (tải tay, mất dấu) → cũng tải về, so, gộp trước.
 5. `TienDo_SanXuat` (Sheet): sửa dòng của tập trong `projects/<project>/TienDo_SanXuat.csv` (cột theo
    `templates/project/TienDo_SanXuat.csv`). Có công cụ sửa Google Sheets thì sửa đúng dòng đó tại chỗ (giữ link); không
    có thì tải CSV lên **có** chuyển đổi (Sheet mới tên `TienDo_SanXuat` trong `00_QuanLy/`), chuyển Sheet cũ vào

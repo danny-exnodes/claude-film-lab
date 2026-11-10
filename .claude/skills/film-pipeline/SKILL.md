@@ -28,8 +28,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 1. Hỏi người dùng một lần: tên dự án, slug `<project>`, tên thư mục `<ProjectName>` (PascalCase không dấu), style mặc định.
 2. Tạo `ClaudeFilmLab/<ProjectName>/` và cây thư mục CONVENTIONS §11.1 (`create_file`, mimeType
    `application/vnd.google-apps.folder`, `parentId` = thư mục cha), ghi từng ID.
-3. Chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv}` vào `projects/<project>/`, điền slug, tên, style, ID.
-   Đẩy `PROJECT.md` → `00_QuanLy/`, `SERIES.md` → `02_KinhThu/` (file chữ, `disableConversionToGoogleType: true`).
+3. Chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv, pronunciation.csv}` vào `projects/<project>/`,
+   điền slug, tên, style, ID. Đẩy `PROJECT.md` → `00_QuanLy/`, `SERIES.md` và `pronunciation.csv` → `02_KinhThu/` (file chữ, `disableConversionToGoogleType: true`).
 4. `templates/project/README_CauTruc.md` (thay `<ProjectName>`, `<Tên dự án>`) → `00_QuanLy/README_CauTruc` dạng Google
    Doc; `TienDo_SanXuat.csv` → `00_QuanLy/TienDo_SanXuat` dạng Google Sheet (để Drive chuyển đổi). Ghi hai ID vào
    `drive.files`, đẩy lại `PROJECT.md`. Báo người dùng link thư mục và chỗ thả tài liệu (`01_TaiLieuGoc/_ChoPhanLoai/`).

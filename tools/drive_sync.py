@@ -13,8 +13,9 @@ snapshot  right after a pull: hash the working copy into projects/<project>/.pul
           to projects/<project>/.pulled.at (§11.6 pull step 4).
 plan      list new/changed files: target folder (logical path + ID, or MISSING + which folder to create under which
           parent first), Drive title, mime type, the create_file file reference `sha256:<hex>:<absolute path>` and,
-          for changed files, the search_files query that finds the old version(s) and their archive name in
-          99_LuuTru/ (§11.6 push step 3). TienDo_SanXuat.csv is listed apart (§11.6 step 5). --json: same plan as JSON.
+          the search_files query that finds the old version(s) and their archive name in 99_LuuTru/ (§11.6 push
+          step 3): for changed files always; for new files too, because Drive may already hold a file with that
+          title in the folder (first push after a manual upload, lost snapshot) – archive it if the search finds one. TienDo_SanXuat.csv is listed apart (§11.6 step 5). --json: same plan as JSON.
 record    after each successful create_file: replace just that file's line in .pulled.sha256 and append
           `<UTC> <path> <new Drive ID>` to projects/<project>/.pushed.log (§11.6 push steps 2 and 6).
 
@@ -34,9 +35,11 @@ import yaml
 
 SNAPSHOT, PULLED_AT, PUSHED_LOG = ".pulled.sha256", ".pulled.at", ".pushed.log"
 ARCHIVE = "99_LuuTru"
+IF_EXISTS = "if a file with this title already exists in the folder (first push), archive it"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 SHEET_LOCAL = "TienDo_SanXuat.csv"            # Google Sheet 00_QuanLy/TienDo_SanXuat (§11.6 step 5)
 SHEET_KEY = "00_QuanLy/TienDo_SanXuat"
+PRON_LOCAL = "pronunciation.csv"              # Hán Việt map for tools/tts/vieneu_tts.py --pron, next to SERIES.md
 CATALOG = "sources/DanhMuc.csv"               # the one editable file of 01_TaiLieuGoc (§11.3)
 MIME = {
     ".md": "text/markdown", ".csv": "text/csv", ".json": "application/json", ".yaml": "text/plain",
@@ -197,7 +200,8 @@ def map_project(rel):
     parts = rel.split("/")
     name, head = parts[-1], parts[0]
     if len(parts) == 1:
-        return {"PROJECT.md": "00_QuanLy", SHEET_LOCAL: "00_QuanLy", "SERIES.md": "02_KinhThu"}.get(name)
+        return {"PROJECT.md": "00_QuanLy", SHEET_LOCAL: "00_QuanLy", "SERIES.md": "02_KinhThu",
+                PRON_LOCAL: "02_KinhThu"}.get(name)
     sub = "/".join(parts[1:-1])
     join = lambda base: base + ("/" + sub if sub else "")
     if head == "characters" and len(parts) >= 3:
@@ -321,16 +325,20 @@ def parse_now(a):
 
 
 def entry(man, key, full, folder, h, status, stamp, sheet=False):
-    """One planned upload: folder, create_file arguments, archive step for changed files."""
+    """One planned upload: folder, create_file arguments, archive step (after the upload).
+
+    Changed files always have an old version on Drive. New files may too (first push after a manual upload, or a
+    lost snapshot), so they get the same search, labelled conditional: archive only what the search finds."""
     title = "TienDo_SanXuat" if sheet else os.path.basename(key)
     fid = folder_id(man, folder)
-    archive = None
-    if status == "changed" or sheet:
-        archive = {"search_files": search_query(fid, folder, title),
-                   "move": "every result except the new ID", "parentId": folder_id(man, ARCHIVE),
-                   "title": archive_name(folder, title, stamp)}
-        if sheet and known_id(man["files"].get(SHEET_KEY)):
-            archive["drive_files_id"] = man["files"][SHEET_KEY]
+    archive = {"search_files": search_query(fid, folder, title),
+               "move": "every result except the new ID", "parentId": folder_id(man, ARCHIVE),
+               "title": archive_name(folder, title, stamp),
+               "when": "always" if status == "changed" else "if_exists"}
+    if archive["when"] == "if_exists":
+        archive["condition"] = IF_EXISTS
+    if sheet and known_id(man["files"].get(SHEET_KEY)):
+        archive["drive_files_id"] = man["files"][SHEET_KEY]
     return {"status": status, "local": key, "path": os.path.abspath(full), "sha256": h,
             "folder": {"path": folder, "id": fid, "missing": [] if fid else missing_chain(man, folder)},
             "create_file": {"title": title, "parentId": fid, "contentMimeType": mime_for(os.path.basename(key)),
@@ -354,7 +362,7 @@ def build_plan(a):
     elif not pulled_at:
         warnings.append(f"no {PULLED_AT}: cannot tell user edits on Drive from the pull (re-run snapshot after pulling)")
     if not folder_id(man, ARCHIVE):
-        warnings.append(f"drive.folders has no ID for {ARCHIVE}: changed files cannot be archived")
+        warnings.append(f"drive.folders has no ID for {ARCHIVE}: old versions cannot be archived")
 
     candidates, unmapped, skipped = [], [], 0
     for rel in walk(pd):
@@ -441,7 +449,11 @@ def print_entry(x, label, project_arg, rel):
     print(f"               base64Content={c['base64Content']}")
     print(f"  record       python3 tools/drive_sync.py record {project_arg} --uploaded {rel(x['path'])} --id <new ID>")
     if ar:
-        print(f"  archive      search_files {ar['search_files']}")
+        if ar.get("condition"):
+            print(f"  archive      {ar['condition']}:")
+            print(f"               search_files {ar['search_files']}")
+        else:
+            print(f"  archive      search_files {ar['search_files']}")
         print(f"               update_file each result except the new ID: parentId={ar['parentId'] or '<99_LuuTru ID missing>'}"
               f"  title={ar['title']}")
         if ar.get("drive_files_id"):
@@ -466,6 +478,9 @@ def print_plan(plan, project_arg):
     if plan["actions"] and plan["pulled_at"]:
         print(f"\nBefore uploading a CHANGED file: its archive search_files result with modifiedTime after "
               f"{plan['pulled_at']} and an ID not in .pushed.log = user edit on Drive → download, merge first (§11.6 step 4).")
+    if any(x["status"] == "new" for x in plan["actions"]):
+        print("Before uploading a NEW file: run its archive search_files too; a result whose ID is not in .pushed.log "
+              "is a copy never pulled (manual upload, lost snapshot) → download, compare, merge first (§11.6 step 4).")
     n = len(plan["actions"])
     for i, x in enumerate(plan["actions"], 1):
         print_entry(x, f"[{i}/{n}]", project_arg, rel)

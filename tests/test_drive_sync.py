@@ -153,23 +153,30 @@ class TestPlan(DriveSyncCase):
         self.assertEqual(ar["parentId"], "F-LT")
         self.assertEqual(ar["title"], "03_KichBan__ep01-bac-thi__script_20261110-1530.md")
         self.assertNotIn("fileId", ar)            # old versions are found at archive time, never remembered
+        self.assertEqual(ar["when"], "always")
+        self.assertNotIn("condition", ar)
 
         new = self.action(plan, "projects/demo/ep01-bac-thi/prompts/s02_L4.txt")
         self.assertEqual(new["status"], "new")
-        self.assertIsNone(new["archive"])
+        self.assertEqual(new["archive"]["search_files"],
+                         "parentId = 'F-KB-E1-P' and title = 's02_L4.txt' and trashed = false")
+        self.assertEqual(new["archive"]["title"], "03_KichBan__ep01-bac-thi__prompts__s02_L4_20261110-1530.txt")
+        self.assertEqual(new["archive"]["when"], "if_exists")
+        self.assertEqual(new["archive"]["condition"], ds.IF_EXISTS)
         self.assertEqual(new["folder"]["id"], "F-KB-E1-P")
         self.assertEqual(new["create_file"]["contentMimeType"], "text/plain")
 
     def test_mapping_table(self):
         cases = {
-            "PROJECT.md": "00_QuanLy", "SERIES.md": "02_KinhThu",
+            "PROJECT.md": "00_QuanLy", "SERIES.md": "02_KinhThu", "pronunciation.csv": "02_KinhThu",
             "characters/bac-thi/CHARACTER.md": "02_KinhThu/NhanVat/bac-thi",
             "locations/co-son/LOCATION.md": "02_KinhThu/BoiCanh/co-son",
             "style/notes.md": "02_KinhThu/PhongCach",
             "ep01-bac-thi/review/qc-v1.md": "03_KichBan/ep01-bac-thi/review",
             "sources/DanhMuc.csv": "01_TaiLieuGoc",
             "sources/SachThamKhao/SHK_Quach/a.txt": "01_TaiLieuGoc/SachThamKhao/SHK_Quach",
-            "notes.txt": None, "random/x.md": None,
+            "notes.txt": None, "random/x.md": None, "ep01-bac-thi/pronunciation.csv": "03_KichBan/ep01-bac-thi",
+            "style/pronunciation.csv": "02_KinhThu/PhongCach",
         }
         for rel, folder in cases.items():
             self.assertEqual(ds.map_project(rel), folder, rel)
@@ -206,6 +213,52 @@ class TestPlan(DriveSyncCase):
         code, plan = self.plan()
         self.assertEqual(code, 1)
         self.assertEqual([u["local"] for u in plan["unmapped"]], ["projects/demo/notes.txt"])
+
+    def test_pronunciation_csv(self):
+        """Project-level Hán Việt map (tools/tts --pron) goes next to SERIES.md, not UNMAPPED."""
+        self.snapshot()
+        pron = self.write("pronunciation.csv", "term,doc\nChiêu Diêu,Chiêu Diêu\n")
+        code, plan = self.plan()
+        self.assertEqual(code, 0)
+        self.assertEqual(plan["unmapped"], [])
+        x = self.action(plan, "projects/demo/pronunciation.csv")
+        self.assertEqual(x["folder"], {"path": "02_KinhThu", "id": "F-KT", "missing": []})
+        self.assertEqual((x["create_file"]["title"], x["create_file"]["contentMimeType"]),
+                         ("pronunciation.csv", "text/csv"))
+        self.assertTrue(x["create_file"]["disableConversionToGoogleType"])
+        self.assertEqual(x["create_file"]["base64Content"], f"sha256:{ds.sha256(pron)}:{pron.resolve()}")
+        self.assertEqual(x["archive"]["title"], "02_KinhThu__pronunciation_20261110-1530.csv")
+
+    def test_template_pronunciation_csv(self):
+        tpl = os.path.join(os.path.dirname(ds.__file__), "..", "templates", "project", "pronunciation.csv")
+        with open(tpl, encoding="utf-8") as f:
+            self.assertEqual(f.read().splitlines(), ["term,doc"])
+
+    def test_new_file_archive_if_exists(self):
+        """No snapshot line (first push after a manual upload, lost snapshot): still search and archive duplicates."""
+        os.remove(self.pd / "SERIES.md")
+        self.snapshot()
+        self.write("SERIES.md", "# series\n")
+        code, plan = self.plan()
+        x = self.action(plan, "projects/demo/SERIES.md")
+        self.assertEqual(x["status"], "new")
+        ar = x["archive"]
+        self.assertEqual(ar["search_files"], "parentId = 'F-KT' and title = 'SERIES.md' and trashed = false")
+        self.assertEqual((ar["parentId"], ar["title"], ar["when"]),
+                         ("F-LT", "02_KinhThu__SERIES_20261110-1530.md", "if_exists"))
+        _, out, _ = self.run_tool("plan", "projects/demo", "--now", "20261110-1530")
+        block = out.split("NEW     projects/demo/SERIES.md", 1)[1]
+        self.assertIn("archive      if a file with this title already exists in the folder (first push), archive it:",
+                      block)
+        self.assertIn("search_files parentId = 'F-KT' and title = 'SERIES.md' and trashed = false", block)
+        self.assertIn("title=02_KinhThu__SERIES_20261110-1530.md", block)
+        self.assertIn("Before uploading a NEW file", out)
+
+    def test_no_snapshot_every_file_has_archive(self):
+        code, plan = self.plan()
+        self.assertTrue(plan["actions"])
+        for x in plan["actions"]:
+            self.assertEqual(x["archive"]["when"], "if_exists", x["local"])
 
     def test_sheet_is_apart(self):
         self.snapshot()
@@ -266,6 +319,9 @@ class TestPlan(DriveSyncCase):
         self.assertIn("CHANGED projects/demo/ep01-bac-thi/script.md", out)
         self.assertIn("search_files parentId = 'F-KB-E1' and title = 'script.md' and trashed = false", out)
         self.assertIn("title=03_KichBan__ep01-bac-thi__script_20261110-1530.md", out)
+        self.assertIn("archive      search_files parentId = 'F-KB-E1'", out)    # CHANGED: unconditional
+        self.assertNotIn("first push", out)
+        self.assertNotIn("Before uploading a NEW file", out)
         self.assertRegex(out, r"base64Content=sha256:[0-9a-f]{64}:/\S+/projects/demo/ep01-bac-thi/script\.md")
         self.assertIn("record projects/demo --uploaded projects/demo/ep01-bac-thi/script.md --id <new ID>", out)
 

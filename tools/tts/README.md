@@ -78,7 +78,9 @@ giữ nguyên; `**đậm**`/`*nghiêng*` bị bỏ ký hiệu. Thư viện còn 
 
 **Bảng phát âm** `--pron` (CSV UTF-8, header `term,doc`, dòng `#` là chú thích): thay nguyên từ, cụm dài trước. Dùng
 cho tên Hán Việt model hay đọc sai hoặc cần đọc theo âm đã chọn trong `research.md`. Đặt ở bản làm việc dự án
-`projects/<project>/pronunciation.csv` (dữ liệu dự án, lưu Drive, không commit):
+`projects/<project>/pronunciation.csv` (dữ liệu dự án, không commit; trên Drive là `02_KinhThu/pronunciation.csv`, cạnh
+`SERIES.md`, CONVENTIONS §11.3; `tools/drive_sync.py plan` lập lệnh đẩy như mọi file chữ; dự án mới chép mẫu
+`templates/project/pronunciation.csv`):
 
 ```csv
 term,doc

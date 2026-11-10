@@ -190,6 +190,23 @@ class StageTest(StatusCase):
         self.assertNotIn("needs G1", out)
         self.assertNotIn("needs G3", out)
 
+    def test_only_a_date_passes_a_gate(self):
+        # `G2: false` / `no` / 0 / 'null' / free text are not an approval: the stage stays BLOCKED
+        md = (self.ep / "EPISODE.md").read_text(encoding="utf-8")
+        for value in ("false", "no", "0", "'null'", "chưa duyệt"):
+            (self.ep / "EPISODE.md").write_text(
+                md.replace(f"G2: {DATES['G2']}", f"G2: {value}"), encoding="utf-8")
+            code, out = self.run_status()
+            self.assertEqual(code, 1, value)
+            self.assertIn("BLOCKED: stage 5 needs G2 (not passed)", out, value)
+            self.assertRegex(out, r"note: EPISODE\.md: gates\.G2 = .* is not a date", value)
+            self.assertIn("· G2 - ·", out, value)
+        (self.ep / "EPISODE.md").write_text(md.replace(f"G2: {DATES['G2']}", f"G2: '{DATES['G2']}'"),
+                                            encoding="utf-8")          # a quoted date is a date
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertIn(f"G2 {DATES['G2']}", out)
+
     def test_every_gate_below_the_stage_is_listed(self):
         self.episode(stage=11, G2=True)
         code, d = self.data()
@@ -251,6 +268,29 @@ class BudgetTest(StatusCase):
         self.assertIn(f"python3 tools/ark.py video --resume-task cgt-123 {clip} --ledger {self.ledger}", out)
         self.assertRegex(out, r"OPEN\s+bb01 video ep01_s03_seedance25_v01\.mp4 · agent film-animator · age \d+[mhd]")
 
+    def test_printed_commands_quote_paths_with_spaces(self):
+        clip = self.media / "clips" / "my clip_s03_v01.mp4"
+        ledger = self.media / "my ledger.csv"
+        self.ledger = ledger
+        self.rows([dict(self.vid("x", "pending", "bb01", task="cgt-1"), out=str(clip)),
+                   self.img("ep01_s02_L4_bac-thi_v02.png", "pending", "cc01", model=PRO, note="lambda")])
+        code, out = self.run_status("--ledger", str(ledger))
+        self.assertIn(f"python3 tools/ark.py video --resume-task cgt-1 '{clip}' --ledger '{ledger}'", out)
+        self.assertIn(f"lambda-job finish --status-json <file> --image <image> --ledger '{ledger}'", out)
+
+    def test_task_id_comes_from_any_row_of_the_request(self):
+        # the final row lost the task id; the pending row of the same request still has it
+        self.rows([self.vid("ep01_s03_seedance25_v01.mp4", "pending", "bb01", task="cgt-7"),
+                   self.vid("ep01_s03_seedance25_v01.mp4", "failed", "bb01", note="polling stopped")])
+        code, out = self.run_status()
+        self.assertIn("video --resume-task cgt-7 ", out)
+
+    def test_request_known_only_by_its_task_id_is_shown_in_full(self):
+        self.rows([dict(self.vid("ep01_s03_seedance25_v01.mp4", "pending", "x", task="cgt-20261109-abc"), note="")])
+        code, out = self.run_status()
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"OPEN\s+task:cgt-20261109-abc video")
+
     def test_open_lambda_prints_the_finish_hint(self):
         self.mixed_ledger()
         code, out = self.run_status()
@@ -283,6 +323,15 @@ class BudgetTest(StatusCase):
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"MISSING\s+aa01 image .*ep01_s01_L1_nui_v01\.png")
         self.assertNotIn("ep01_s01_L2_suong_v01.png", out.split("ATTENTION")[1].split("SHOTS")[0])
+
+    def test_recorded_path_relative_to_the_repo_root_is_found(self):
+        # ledger rows written from the repo root, status run from another directory
+        self.rows([dict(self.img("a", "ok", "aa01"), out="tests/helpers.py")])
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.tmp)
+        code, d = self.data()
+        self.assertEqual((code, d["attention"]["missing"]), (0, []))
 
     def test_missing_falls_back_to_the_basename_under_the_media_folder(self):
         # rows written from another working directory: the recorded path does not resolve here

@@ -17,7 +17,7 @@ Exit codes: 0 nothing blocks; 1 something needs action (a BLOCKED line, an OPEN 
 The media folder comes from `media:` in EPISODE.md (relative to the repo root) or --media; the episode folder name
 is never parsed.
 """
-import argparse, csv, datetime, io, json, os, re, subprocess, sys, zipfile
+import argparse, csv, datetime, io, json, os, re, shlex, subprocess, sys, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(HERE)
@@ -34,6 +34,7 @@ NEXT_HEADING = "## Việc tiếp theo"
 RE_SHOT = re.compile(r"_(s\d{2})_")
 RE_VERSION = re.compile(r"_v(\d{2})\.")
 RE_RENDER = re.compile(r"_(draft|final)_v(\d{2})\.mp4$")
+RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 STATUSES = ["ok", "cut-502", "failed", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
@@ -68,9 +69,17 @@ def load_episode(ep_dir):
     return meta, body
 
 
-def gate_dates(meta):
+def gate_dates(meta, notes):
+    """Gate -> its date as text, or None. Only a date passes a gate: `G2: false`, `no`, 0 or 'null' do not."""
     g = meta.get("gates") if isinstance(meta.get("gates"), dict) else {}
-    return {k: (str(g[k]) if g.get(k) not in (None, "") else None) for k in GATES}
+    out = {}
+    for k in GATES:
+        v = g.get(k)
+        dated = isinstance(v, datetime.date) or (isinstance(v, str) and RE_DATE.match(v.strip()))
+        out[k] = str(v).strip() if dated else None
+        if not dated and v not in (None, ""):
+            notes.append(f"EPISODE.md: gates.{k} = {v!r} is not a date YYYY-MM-DD: counts as not passed")
+    return out
 
 
 def blocked_gates(stage, gates):
@@ -187,7 +196,7 @@ def media_index(media):
 
 def attention_section(rows, billed, ledger, media, bundled):
     """OPEN (pending, no final row), CUT/FAILED (final row not ok) and MISSING (ok, file gone) requests."""
-    led = show(ledger) if ledger else "L.csv"
+    led = shlex.quote(show(ledger)) if ledger else "L.csv"
     tasks = {}
     for r in rows:                                   # a request's task id may sit on any of its rows
         if r.get("task_id") and ark.req_id(r):
@@ -201,7 +210,8 @@ def attention_section(rows, billed, ledger, media, bundled):
         item = {"req": rid or (f"task:{task}" if task else "-"), "kind": r.get("kind") or "", "out": out,
                 "status": r.get("status"), "ts": r.get("ts") or "", "model": r.get("model") or "",
                 "size": r.get("size") or "", "agent": r.get("agent") or "", "task_id": task, "commands": []}
-        resume = " ".join(["python3 tools/ark.py video --resume-task", task] + ([out] if out else [])
+        resume = " ".join(["python3 tools/ark.py video --resume-task", shlex.quote(task)]
+                          + ([shlex.quote(out)] if out else [])
                           + ["--ledger", led])
         if r.get("status") == "pending":
             item["age"] = age_text(r.get("ts"))
@@ -417,6 +427,11 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
 
 
 # ------------------------------------------------------------------- output ---
+def short_id(req):
+    """The 8-character prefix of a request id; a request known only by its task id keeps the whole id."""
+    return req if req.startswith("task:") else req[:8]
+
+
 def notes_text(notes):
     return [f"  note: {n}" for n in notes]
 
@@ -438,7 +453,7 @@ def budget_text(d, notes):
     if any(att.values()):
         out.append("  ATTENTION")
     for o in att["open"]:
-        out.append(f"    OPEN     {o['req'][:8]} {o['kind']} {os.path.basename(o['out']) or '-'} · "
+        out.append(f"    OPEN     {short_id(o['req'])} {o['kind']} {os.path.basename(o['out']) or '-'} · "
                    f"agent {o['agent'] or '-'} · age {o['age']}" + ("" if o["commands"] else " (counted as spent)"))
         out += [f"             {c}" for c in o["commands"]]
     for o in att["cut_failed"]:
@@ -446,7 +461,7 @@ def budget_text(d, notes):
                    f"{os.path.basename(o['out']) or '-'} (billed or may be; do not retry unchanged)")
         out += [f"             {c}" for c in o["commands"]]
     for o in att["missing"][:LIST_MAX]:
-        out.append(f"    MISSING  {o['req'][:8]} {o['kind']} {o['out']} (paid, not on disk"
+        out.append(f"    MISSING  {short_id(o['req'])} {o['kind']} {o['out']} (paid, not on disk"
                    + (f"; inside bundles/{o['bundle']}" if o.get("bundle") else "") + ")")
     if len(att["missing"]) > LIST_MAX:
         out.append(f"             ... and {len(att['missing']) - LIST_MAX} more MISSING (see --json)")
@@ -538,7 +553,7 @@ def main(argv=None):
     stage = meta["stage"]
     bundled = bundle_names(media, notes["media"])
     d = {"stage": {"n": stage, "name": STAGES.get(stage, "?"), "length_s": meta.get("length_s")},
-         "gates": gate_dates(meta)}
+         "gates": gate_dates(meta, notes["stage"])}
     d["blocked"] = blocked_gates(stage, d["gates"])
     d["next"] = next_lines(body)
     led, budget_state = collect_ledger(ledger, a.budget or os.path.join(a.episode, "budget.yaml"), media, bundled,

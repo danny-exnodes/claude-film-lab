@@ -272,6 +272,20 @@ class TestProxyCutGuards(GuardCase):
         err = self.refused("lambda-job", "prepare", "x", self.png, "--ref", missing, *self.cost)
         self.assertIn(f"no such file: {missing}", err)
 
+    def test_ref_that_is_not_an_image(self):
+        bad = self.tmp / "notes.png"
+        bad.write_bytes(b"not an image")
+        err = self.refused(*self.image_args("--ref", str(bad)))
+        self.assertIn(f"cannot read image: {bad}", err)
+        err = self.refused("lambda-job", "prepare", "x", self.png, "--ref", str(bad), *self.cost)
+        self.assertIn(f"cannot read image: {bad}", err)
+        self.assertFalse((self.tmp / "lambda-refs").exists())
+
+    def test_size_with_non_ascii_digits_is_unknown(self):
+        err = self.refused(*self.image_args("--size", "\uff12K"))          # full-width 2
+        self.assertIn("unknown --size", err)
+        self.assertIn("unknown --size", self.refused(*self.image_args("--size", "\uff11\uff10x10")))
+
     def test_missing_first_frame(self):
         missing = str(self.tmp / "nope.png")
         err = self.refused(*self.video_args("--image", missing))
@@ -543,6 +557,20 @@ class TestLedgerHeader(GuardCase):
         self.write_ledger(self.GOOD.replace("status", "state"))
         with mock.patch.object(ark, "check_ledger_header", lambda path: None):
             self.assertIn("ledger header mismatch", self.refused("image", "x", str(self.tmp / "a.png"), *self.cost))
+
+    def test_ledger_that_is_not_utf8_refused(self):
+        """A UTF-16 export, or one Latin-1 row under a good header: exit 2, not a traceback."""
+        self.write_budget("images: 2\n")
+        Path(self.ledger).write_bytes((self.GOOD + "\n" + self.ROW.format(0)).encode("utf-16"))
+        err = self.refused(*self.image_args())
+        self.assertIn(f"ledger {self.ledger} cannot be read", err)
+        self.assertIn("nothing sent", err)
+        Path(self.ledger).write_bytes((self.GOOD + "\n" + self.ROW.format(0).replace("film-art", "caf\xe9")
+                                       + self.ROW.format(1) * 400).encode("latin-1"))
+        self.assertIn("cannot be read", self.refused(*self.video_args()))
+        self.assertIn("cannot be read", self.refused("image", "x", self.png, "--no-budget", *self.cost))
+        with mock.patch.object(ark, "check_ledger_header", lambda path: None):        # inside the lock as well
+            self.assertIn("cannot be read", self.refused("image", "x", str(self.tmp / "a.png"), *self.cost))
 
     def test_crlf_ledger_accepted_and_counted(self):
         self.write_budget("images: 5\n")

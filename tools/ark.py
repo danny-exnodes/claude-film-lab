@@ -32,7 +32,7 @@ agents cannot overrun a cap. Each request then gets a final row
 Exit codes of image / video / lambda-job prepare: 2 = refused locally (nothing sent, no ledger row, no output folder:
 fix the command), 3 = over a cap (refused-budget row), 1 = the request left this machine (see its ledger row).
 Local refusals, checked before anything is written or sent: a --size larger than 2K or a pro model on `image`
-(the proxy would cut it), a missing --ref / --image file, an output file that already exists (versions only go up;
+(the proxy would cut it), a missing --ref / --image file or a --ref that is not an image, an output file that already exists (versions only go up;
 --overwrite for ad-hoc use), a budget.yaml with an unknown key, a bad value or no cap for the request, and a ledger
 whose header is not the ledger header.
 
@@ -96,8 +96,17 @@ def ref_jpeg(path):
     return raw, desc
 
 
+def encode_ref(path):
+    """ref_jpeg() for a request that has not been reserved yet: a file that is not a readable image is a local
+    refusal (exit 2), not a traceback."""
+    try:
+        return ref_jpeg(path)
+    except Exception as e:
+        usage_error(f"cannot read image: {path} ({type(e).__name__})")
+
+
 def ref_data_uri(path):
-    raw, desc = ref_jpeg(path)
+    raw, desc = encode_ref(path)
     print("ref", desc)
     return "data:image/jpeg;base64," + base64.b64encode(raw).decode()
 
@@ -248,13 +257,23 @@ def _header_refusal(path):
     usage_error(f"ledger header mismatch in {path}: repair it or pull it again; nothing sent")
 
 
+def _unreadable_ledger(path, e):
+    """A ledger that is not UTF-8 text (a UTF-16 export, a folder) cannot be counted: refuse, do not crash."""
+    usage_error(f"ledger {path} cannot be read ({getattr(e, 'strerror', None) or type(e).__name__}): "
+                "repair it or pull it again; nothing sent")
+
+
 def check_ledger_header(path):
     """Early (unlocked) copy of the check reserve() repeats inside the ledger lock: a refusal here happens before
     the output folder exists. A ledger with a foreign header would be read as zero billed requests."""
     if path and os.path.exists(path) and os.path.getsize(path):
-        with open(path, newline="", encoding="utf-8") as f:
-            if not _header_ok(f.readline()):
-                _header_refusal(path)
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                head = f.readline()
+        except (OSError, UnicodeDecodeError) as e:
+            _unreadable_ledger(path, e)
+        if not _header_ok(head):
+            _header_refusal(path)
 
 
 def ledger_append(path, row):
@@ -432,7 +451,10 @@ def reserve(a, req, rid, tag="", budget=None):
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
             f.seek(0)
-            text = f.read()
+            try:
+                text = f.read()
+            except UnicodeDecodeError as e:       # e.g. one Latin-1 row under a good header
+                _unreadable_ledger(a.ledger, e)
             if text and not _header_ok(text):     # also with --no-budget: no row is appended to a foreign file
                 _header_refusal(a.ledger)
             over = budget_check(budget, _parse_rows(a.ledger, text), req) if budget else []
@@ -495,8 +517,8 @@ def ping(a):
 
 
 VERSION_RE = re.compile(r"_v(\d+)$")
-NAMED_SIZE_RE = re.compile(r"(\d+)K", re.I)
-WXH_RE = re.compile(r"(\d+)x(\d+)", re.I)
+NAMED_SIZE_RE = re.compile(r"(\d+)K", re.I | re.A)      # ASCII digits only: the value is sent as typed
+WXH_RE = re.compile(r"(\d+)x(\d+)", re.I | re.A)
 
 
 def need_files(paths):
@@ -547,6 +569,7 @@ def image(a):
     guard_output(a.out, a.overwrite)
     budget = checked_budget(a, "image", model)
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
+    refs = [ref_data_uri(p) for p in a.ref or []]      # exit 2 for a file that is not an image: before any folder
     make_out_dir(a.out)
     body = {"model": model, "prompt": a.prompt, "size": a.size, "response_format": "b64_json", "watermark": False}
     if a.seed is not None:
@@ -555,8 +578,7 @@ def image(a):
         body["negative_prompt"] = ", ".join(a.negative)
     if a.guidance is not None:
         body["guidance_scale"] = a.guidance
-    if a.ref:
-        refs = [ref_data_uri(p) for p in a.ref]
+    if refs:
         body["image"] = refs if len(refs) > 1 else refs[0]
     rid = new_req()
     reserve(a, req, rid, budget=budget)      # slow ref re-encoding is done above, outside the ledger lock
@@ -709,14 +731,14 @@ def lambda_prepare(a):
     budget = checked_budget(a, "image", model)
     rid = new_req()
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
+    encoded = [encode_ref(path) for path in a.ref or []]     # exit 2 for a file that is not an image: before any folder
     make_out_dir(a.out)
     payload = {"job_id": rid, "prompt": a.prompt, "model": model, "size": a.size}
     uploads = []
-    if a.ref:
+    if encoded:
         refs_dir = a.refs_dir or os.path.join(os.path.dirname(os.path.abspath(a.out)), "lambda-refs")
         os.makedirs(refs_dir, exist_ok=True)
-        for n, path in enumerate(a.ref, 1):
-            raw, desc = ref_jpeg(path)
+        for n, (raw, desc) in enumerate(encoded, 1):
             local = os.path.join(refs_dir, f"{rid}-{n}.jpg")
             with open(local, "wb") as f:
                 f.write(raw)

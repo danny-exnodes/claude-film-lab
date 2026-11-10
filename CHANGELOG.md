@@ -7,6 +7,26 @@
 Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi dùng lại.
 
 ### Thêm
+- `tools/ark.py lambda-job prepare|finish` (#13 bước 1): ảnh pro/4K tạo qua Lambda nay vào cùng ledger và cùng trần.
+  `prepare` làm bước kiểm trần + giữ chỗ nguyên tử như `image` (dòng `pending`, `note` = `req=<id>; lambda`; vượt trần →
+  `refused-budget`, mã 3, không in payload), nén `--ref` sẵn để tải lên `refs/<id>-<n>.jpg` và in payload Invoke có
+  `job_id` = `<id>`; `finish` đọc `jobs/<id>.json` của worker, lưu ảnh đã tải về đúng tên và ghi dòng cuối `ok`/`failed`
+  (chạy lại không thêm dòng). Không có ledger thì không có payload. Trần `models.dola-seedream-5-0-pro-260628` trong
+  `budget.yaml` từ nay có hiệu lực. `lambda/README.md` viết lại theo luồng này. Test: `tests/test_lambda.py`.
+- `tools/ark.py ledger-merge A.csv B.csv … -o OUT.csv` (#15 phần 2): hợp các bản ledger của một tập, khử trùng theo
+  `(req, status, task_id)`, ghi dưới `LOCK_EX`; không đầu vào → ledger rỗng có header. CONVENTIONS §7, §11.6 và
+  `film-pipeline`: hai bản `ledger.csv` (hai phiên, hai file trên Drive) thì **gộp**, không lấy bản mới nhất; trước khi
+  đẩy ledger thì gộp với bản đang ở Drive.
+- `budget.yaml` `ledger_required: true` (#15 phần 2, tuỳ chọn, bật từ khâu 4): `ark.py` thoát mã 2 khi file ledger chưa
+  có hoặc rỗng, để ledger chưa kéo từ Drive không làm trần tính lại từ 0.
+- `film-pipeline`: mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm, ghi vào `## Nhật ký` của EPISODE.md khi bắt đầu
+  và khi xong khâu 4–6 (#15 phần 2).
+- `tests/test_compose.py` (#16): 22 test cho `tools/compose/inline.py` (`--init` trên bản chép template cinecode đã ghim:
+  khối kit, 1920x1080, `READY` có `loadPlates`, look `plates`, dòng Format của STATE; chạy lại cho kết quả y hệt; từ chối
+  `Math.random`/`Date`/`performance.now`; template đổi mốc → báo lỗi, không ghi file) và `keyframe.py` (khung 1920x1080,
+  nền màu key, vị trí/chiều cao với pivot `center`, `bottom`, `top` và điểm neo). Fixture `tests/fixtures/cinecode/` (MIT).
+- `docs/RELEASING.md` (#14): bước phát hành – Claude sửa CHANGELOG, chạy test + doctor, mở PR và soạn nội dung release;
+  tag và GitHub Release do người dùng tạo tay (phiên cloud bị 403 khi push tag). Thêm dòng trong `CLAUDE.md`, `README.md`.
 - `tools/tts/vieneu_tts.py` (issue #8): lồng tiếng Việt local trên CPU bằng VieNeu-TTS v3 Turbo (`vieneu` 3.8.3,
   Apache-2.0, giọng mẫu dùng thương mại được): đọc `script.md` (quy tắc của `check_episode.py`) hoặc `vo-lines.json`,
   ghi `<id>.wav` 48 kHz + `tts-log.json` (model, phiên bản, giấy phép, watermark), so độ dài với khung `[mm:ss]`,
@@ -14,6 +34,18 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
   `tools/tts/README.md`. Test không cần model: `tests/test_tts.py`.
 
 ### Thay đổi
+- **cinecode được ghim** (#16) ở commit `67f9807` (`tools/compose/cinecode.ref` = `CINECODE_REF` trong
+  `docs/setup-script.sh`; test so hai giá trị). Setup script `fetch` đúng commit rồi `checkout`, không còn
+  `git pull --ff-only` mỗi lần. **Cần dán lại `docs/setup-script.sh` vào môi trường Film Lab.**
+- `tools/doctor.sh`: `skill-cinecode` báo WARN khi HEAD khác ghim; mục mới `compose-kit` (cả `--quick`) chạy
+  `inline.py --lint` và `--init` trên bản chép tạm của template cinecode đang cài → cinecode đổi template thì FAIL ngay
+  đầu phiên thay vì lúc dựng shot.
+- `lambda/ark_image_worker.py`: `job_id` đã có `jobs/<job_id>.json` thì không chạy lại (Lambda có thể giao sự kiện bất
+  đồng bộ nhiều lần; chạy lại là tính phí ảnh thứ hai). Cần triển khai (lại) theo `lambda/README.md`.
+- `ark.py image`: thông báo chặn model pro / 4K chỉ sang `lambda-job` thay vì gợi ý `--force`.
+- `docs/RUNBOOK.md`: 11 sự cố mới từ đợt kiểm thử khởi động máy sạch 2026-11-10 (kéo Drive bằng base64 tốn ngữ cảnh,
+  CSV của Sheet dùng CRLF, connector AWS `needs_reconnect`, thiếu/hai bản ledger, lỗi `lambda-job`, cinecode đổi
+  template, push tag 403).
 - **Repo = lõi** (công cụ, skill, agent, style pack, mẫu, quy trình, cài đặt). Dữ liệu từng dự án (kinh thư, nhân vật,
   bối cảnh, nghiên cứu, kịch bản, shot list, `EPISODE.md`, ngân sách, prompt, tiến độ, tài liệu gốc, media) nằm trên
   Drive `ClaudeFilmLab/<ProjectName>/` (gốc lab `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`) với cây chuẩn
@@ -125,4 +157,5 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/danny-exnodes/claude-film-lab/releases/tag/v1.0.0

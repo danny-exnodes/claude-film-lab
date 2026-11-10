@@ -47,6 +47,9 @@ python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>
 ```
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
+  Mọi job Lambda đi qua `ark.py lambda-job prepare` (kiểm trần, ghi `pending`, in payload) và `lambda-job finish`
+  (dòng cuối); không có ledger thì không gọi Lambda.
+- Hai bản `ledger.csv` của một tập (hai phiên, hai file trên Drive) → `ark.py ledger-merge`, không lấy bản mới nhất.
 - Video chạy dạng task bất đồng bộ, không bị giới hạn 30 s; một video 5 s mất ~2–3 phút → chạy Bash với timeout dài
   hoặc `run_in_background`.
 
@@ -64,3 +67,7 @@ python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.
 - Gặp lỗi mới → thêm vào `docs/RUNBOOK.md` (triệu chứng, nguyên nhân, cách xử lý).
 - Sửa `lambda/ark_image_worker.py` → triển khai lại theo `lambda/README.md`.
+- cinecode được ghim ở `tools/compose/cinecode.ref` (= `CINECODE_REF` trong `docs/setup-script.sh`); đổi ghim theo
+  `docs/RUNBOOK.md` ("cinecode đổi template"), không `git pull` trong thư mục skill.
+- Phát hành: `docs/RELEASING.md`. Claude chỉ sửa `CHANGELOG.md` và mở PR; **không** `git tag`, không push tag, không gọi
+  API release (phiên cloud bị chặn 403 – đúng như dự kiến, không thử lại). Tag và GitHub Release do người dùng tạo tay.

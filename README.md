@@ -27,7 +27,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `styles/` | Style pack: `thuy-mac` (ổn định), `moc-ban` (nháp), `_template` |
 | `templates/project/` | Mẫu dự án mới: `PROJECT.md` (manifest ID Drive), `SERIES.md`, `README_CauTruc.md`, `TienDo_SanXuat.csv` |
 | `templates/episode/` | Mẫu `EPISODE.md`, `budget.yaml`, `shots.csv`, `prompts.csv` |
-| `tools/ark.py` | CLI Ark: `ping`, `image`, `video`, có `--budget`/`--ledger` |
+| `tools/ark.py` | CLI Ark: `ping`, `image`, `video`, có `--budget`/`--ledger`; `lambda-job prepare/finish` (ảnh qua Lambda vào ledger), `ledger-merge` |
 | `tools/check_episode.py` | Kiểm tra tập và style pack (schema, nhịp, tên file) |
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
 | `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, đung đưa, chớp mắt, thở |
@@ -35,7 +35,8 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài riêng, xem `tools/tts/README.md` |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (miễn phí) |
-| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K) – chưa triển khai |
+| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – chưa triển khai |
+| `docs/RELEASING.md` | Bước phát hành: Claude sửa CHANGELOG + mở PR, người dùng tạo tag và GitHub Release |
 | `formats/` | Định dạng cinecode đã lưu (`CINECODE_FORMATS`) |
 | `tests/` | `python3 -m unittest discover -s tests` |
 | `projects/` | Bản làm việc chữ của dự án, kéo từ Drive (git bỏ qua) |
@@ -48,10 +49,11 @@ python3 tools/check_episode.py style styles/thuy-mac
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>   # sau khi kéo dự án từ Drive
 tools/doctor.sh
 ```
-Đổi schema → sửa `docs/CONVENTIONS.md` trước. Thay đổi ghi vào `CHANGELOG.md`.
+Đổi schema → sửa `docs/CONVENTIONS.md` trước. Thay đổi ghi vào `CHANGELOG.md`. Phát hành: `docs/RELEASING.md`
+(tag và GitHub Release do người dùng tạo tay; phiên cloud không push tag được).
 
 ## Cấu hình môi trường (trên claude.ai, làm một lần)
 - **Network secrets**: khóa Ark cho `ark.ap-southeast.bytepluses.com` (proxy chèn vào request).
 - **Connectors**: Google Drive (dữ liệu dự án và sản phẩm, bắt buộc), AWS (Lambda, khi triển khai).
-- **Setup script**: dán nội dung `docs/setup-script.sh` (cài ffmpeg, font, Chrome, `rembg`, cinecode và shim
+- **Setup script**: dán nội dung `docs/setup-script.sh` (cài ffmpeg, font, Chrome, `rembg`, cinecode **ghim ở commit đã kiểm** và shim
   `/opt/byteplus/ark.py` gọi sang `tools/ark.py` của repo). Hook khởi động vẫn kiểm tra lại font và gói Python.

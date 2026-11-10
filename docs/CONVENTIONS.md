@@ -207,13 +207,15 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   **một lần** theo dòng cuối (`ok/failed/cut-502`) mới nhất, chưa có dòng cuối thì theo dòng `pending` (coi như đã tính phí).
   Dòng không có cả `req=` lẫn `task_id` (ledger cũ) mỗi dòng tính một lần như trước. `refused-budget` không tính.
 - Trước khi gọi API: tổng đã dùng + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget` (không có `pending`), thoát mã 3.
+- Kiểm và giữ chỗ là **một bước nguyên tử**: một khoá `LOCK_EX` trên `ledger.csv` bao quanh việc đọc ledger, cộng tổng
+  và ghi dòng `pending` (hoặc `refused-budget`), rồi mới mở khoá. Việc chậm (nén ảnh `--ref`, đọc khung đầu, tạo thư mục,
+  đọc `budget.yaml`) làm trước khi lấy khoá; lệnh gọi API làm sau khi mở khoá (khoá không giữ trong lúc gọi API).
+  Nhờ vậy N agent chạy song song trong cùng container không vượt trần.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
 - Thư mục chứa file đầu ra được tạo trước khi kiểm ngân sách và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
   tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
 - `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
   poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.
-- Giới hạn đã biết: khoá chỉ bao quanh lúc đọc/ghi ledger, không giữ trong lúc gọi API, nên N agent chạy song song có thể
-  vượt trần tối đa N−1 request. Chấp nhận ở v1 (tối đa 3 agent tạo ảnh song song, §10); đặt trần có dư tương ứng.
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5
   (được viết dần từ khâu 3). Trước đó thiếu file chỉ là WARN.
 

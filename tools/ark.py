@@ -12,8 +12,9 @@
 
 Budget and ledger (docs/CONVENTIONS.md §7): --ledger/--budget (or env FILM_LEDGER/FILM_BUDGET).
 image/video refuse to run (exit 2) without BOTH a budget and a ledger, unless --no-budget is given
-(ad-hoc tests in the main session only). The budget is checked BEFORE the call (over a cap: exit 3).
-Each request appends a 'pending' row (note req=<id>) before the API call and a final row
+(ad-hoc tests in the main session only). The budget is checked BEFORE the call (over a cap: exit 3),
+in the same exclusive ledger lock that appends the request's 'pending' row (note req=<id>), so parallel
+agents cannot overrun a cap. Each request then gets a final row
 (ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row.
 
 Credentials: in a Claude cloud session the agent proxy injects the real Ark key
@@ -150,27 +151,43 @@ def utc_now():
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _ledger_record(row):
+    rec = {k: "" for k in LEDGER_FIELDS}
+    rec.update({k: v for k, v in row.items() if k in rec and v is not None})
+    rec["ts"] = rec["ts"] or utc_now()
+    rec["agent"] = rec["agent"] or os.environ.get("FILM_AGENT", "")
+    return rec
+
+
+def _write_locked(f, row):
+    """Append one row to an open ledger whose LOCK_EX the caller holds; header when the file is empty."""
+    f.seek(0, os.SEEK_END)
+    buf = io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
+    if f.tell() == 0:
+        w.writeheader()
+    w.writerow(_ledger_record(row))
+    f.write(buf.getvalue())
+    f.flush()
+    os.fsync(f.fileno())
+
+
+def _parse_rows(path, text):
+    rows = list(csv.DictReader(io.StringIO(text)))
+    if rows and list(rows[0].keys()) != LEDGER_FIELDS:
+        print(f"warning: {path} header differs from {','.join(LEDGER_FIELDS)}", file=sys.stderr)
+    return rows
+
+
 def ledger_append(path, row):
     """Append one row under an exclusive flock; writes the header when the file is new/empty."""
     if not path:
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    rec = {k: "" for k in LEDGER_FIELDS}
-    rec.update({k: v for k, v in row.items() if k in rec and v is not None})
-    rec["ts"] = rec["ts"] or utc_now()
-    rec["agent"] = rec["agent"] or os.environ.get("FILM_AGENT", "")
     with open(path, "a+", newline="", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
-            f.seek(0, os.SEEK_END)
-            buf = io.StringIO()
-            w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
-            if f.tell() == 0:
-                w.writeheader()
-            w.writerow(rec)
-            f.write(buf.getvalue())
-            f.flush()
-            os.fsync(f.fileno())
+            _write_locked(f, row)
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
 
@@ -184,10 +201,7 @@ def ledger_rows(path):
             text = f.read()
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
-    rows = list(csv.DictReader(io.StringIO(text)))
-    if rows and list(rows[0].keys()) != LEDGER_FIELDS:
-        print(f"warning: {path} header differs from {','.join(LEDGER_FIELDS)}", file=sys.stderr)
-    return rows
+    return _parse_rows(path, text)
 
 
 def load_budget(path):
@@ -265,15 +279,29 @@ def budget_check(budget, rows, req):
     return over
 
 
-def guard_budget(a, req):
-    """Budget check before any generation call. Exits 3 (and logs refused-budget) when over a cap.
-    main() already guaranteed budget+ledger, or --no-budget."""
-    if a.no_budget:
+def reserve(a, req, rid):
+    """Atomic budget check + reservation (docs/CONVENTIONS.md §7), called just before the POST.
+    One LOCK_EX on the ledger covers reading it, summing the billed requests and appending either the
+    'pending' row (note req=<rid>) or, over a cap, the 'refused-budget' row (then exit 3). Parallel
+    agents are serialised here, so they can no longer all pass the check before any pending row exists.
+    Slow work (ref re-encoding, folders, loading budget.yaml) happens before the lock; the API call after it.
+    --no-budget: no check, the pending row is still written when a ledger is given."""
+    budget = None if a.no_budget else load_budget(a.budget)
+    pending = dict(req, status="pending", note=f"req={rid}")
+    if not a.ledger:          # only possible with --no-budget (main() guarantees budget+ledger otherwise)
         return
-    budget = load_budget(a.budget)
-    over = budget_check(budget, ledger_rows(a.ledger), req)
+    os.makedirs(os.path.dirname(os.path.abspath(a.ledger)), exist_ok=True)
+    with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            over = []
+            if budget:
+                f.seek(0)
+                over = budget_check(budget, _parse_rows(a.ledger, f.read()), req)
+            _write_locked(f, dict(req, status="refused-budget", note="; ".join(over)) if over else pending)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
     if over:
-        ledger_append(a.ledger, dict(req, status="refused-budget", note="; ".join(over)))
         print(f"REFUSED (budget {a.budget}): " + "; ".join(over) + "\n"
               "Nothing was sent to the API. Ask the user (main session) to raise the cap in budget.yaml.",
               file=sys.stderr)
@@ -339,7 +367,6 @@ def image(a):
                      "(possibly still billed). Use 2K, or --force to try anyway.")
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
     make_out_dir(a.out)
-    guard_budget(a, req)
     body = {"model": model, "prompt": a.prompt, "size": a.size, "response_format": "b64_json", "watermark": False}
     if a.seed is not None:
         body["seed"] = a.seed
@@ -350,9 +377,9 @@ def image(a):
     if a.ref:
         refs = [ref_data_uri(p) for p in a.ref]
         body["image"] = refs if len(refs) > 1 else refs[0]
-    print("model", model)
     rid = new_req()
-    log_row(a, req, rid, "pending")
+    reserve(a, req, rid)      # slow ref re-encoding is done above, outside the ledger lock
+    print("model", model)
     try:
         r = api("POST", "/images/generations", body)
     except BaseException as e:
@@ -386,14 +413,13 @@ def video(a):
     ratio = a.ratio or ("adaptive" if a.image else "16:9")
     req = {"kind": "video", "model": a.model, "size": a.resolution, "seconds": a.duration, "count": 1, "out": a.out}
     make_out_dir(a.out)
-    guard_budget(a, req)
     body = {"model": a.model, "content": content, "duration": a.duration, "resolution": a.resolution,
             "ratio": ratio, "watermark": False}
     if a.no_audio:
         body["generate_audio"] = False
-    print("model", a.model, "| ratio", ratio, "| audio", "off" if a.no_audio else "model default")
     rid = new_req()
-    log_row(a, req, rid, "pending")
+    reserve(a, req, rid)
+    print("model", a.model, "| ratio", ratio, "| audio", "off" if a.no_audio else "model default")
     try:
         task = api("POST", "/contents/generations/tasks", body)["id"]
     except BaseException as e:

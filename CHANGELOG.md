@@ -32,6 +32,12 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
 - `templates/project/`: `PROJECT.md`, `SERIES.md`, `README_CauTruc.md` (Google Doc cho người đọc),
   `TienDo_SanXuat.csv` (header của Google Sheet tiến độ).
 
+### Sửa
+- `tools/ark.py`: kiểm ngân sách và giữ chỗ thành một bước nguyên tử (`reserve()`: một `LOCK_EX` trên ledger bao quanh
+  đọc ledger, cộng tổng, ghi `pending` hoặc `refused-budget`; nén `--ref` làm trước khoá). N agent song song không còn
+  vượt trần tối đa N−1 request; gỡ "giới hạn đã biết" ở CONVENTIONS §7 và WORKFLOW §4. Thêm test 8 tiến trình
+  tranh trần 3 ảnh (#15 phần 1).
+
 ### Gỡ bỏ
 - `series/son-hai-kinh/` khỏi repo (đã chuyển lên Drive `ClaudeFilmLab/SonHaiKinh/`).
 

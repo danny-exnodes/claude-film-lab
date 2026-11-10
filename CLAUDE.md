@@ -1,7 +1,8 @@
 # AI Film Lab – quy trình chuẩn cho Claude
 
-Repo này chứa mã, quy trình và tài liệu cho các phiên Claude Code cloud làm phim AI
+Repo này chứa **lõi dùng lại** (mã, skill, agent, style pack, mẫu, quy trình) cho các phiên Claude Code cloud làm phim AI
 (BytePlus ModelArk: Seedream cho ảnh, Seedance cho video; skill `cinecode` để dựng phim bằng code).
+Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong repo.
 
 ## Quy tắc bắt buộc
 - **Không bao giờ in, ghi log, đọc hay tìm API key** (Ark, AWS, Google). Trong phiên cloud, proxy tự chèn
@@ -9,6 +10,18 @@ Repo này chứa mã, quy trình và tài liệu cho các phiên Claude Code clo
 - Không yêu cầu người dùng dán khóa vào chat. Khóa cho Lambda do người dùng tự nhập ở AWS Console.
 - Tạo ảnh/video là có tính phí: không gen thử ngoài yêu cầu; kiểm tra miễn phí trước (`tools/doctor.sh`).
 - Request bị proxy cắt (502 sau ~30 s) **có thể vẫn bị tính phí** → không tự thử lại.
+- **Dữ liệu dự án không bao giờ commit vào repo** (kinh thư, nhân vật, bối cảnh, nghiên cứu, kịch bản, shot list,
+  `EPISODE.md`, ngân sách, prompt, tiến độ, tài liệu gốc, media). Nó chỉ nằm trên Drive và trong bản làm việc
+  `projects/<project>/` + `out/<project>/` (git bỏ qua).
+
+## Dự án trên Drive
+- Gốc lab: Drive `ClaudeFilmLab` (ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục `<ProjectName>/`
+  (vd. `SonHaiKinh/`): `00_QuanLy · 01_TaiLieuGoc · 02_KinhThu · 03_KichBan · 04_SanXuat · 05_ThanhPham · 99_LuuTru`.
+  Cấu trúc, `PROJECT.md`, ánh xạ đường dẫn, quy tắc đặt tên: `docs/CONVENTIONS.md` §11. Mẫu: `templates/project/`.
+- **Kéo** đầu phiên, trước mọi việc: đọc `00_QuanLy/PROJECT.md` trước (ID mọi thư mục), tải kinh thư, tập đang làm và
+  `ledger.csv` về `projects/<project>/` và `out/<project>/ep<NN>/` bằng connector Google Drive (không có CLI).
+- **Đẩy** file chữ đã đổi sau mỗi khâu và trước khi dừng phiên (container bị thu hồi khi rảnh); cập nhật
+  `TienDo_SanXuat`. Bản mới = file mới; bản cũ chuyển vào `99_LuuTru/` (§11.6). Không xoá gì trên Drive.
 
 ## Làm phim
 - Mọi việc làm tập phim đi qua skill `film-pipeline` (phiên chính là đạo diễn): đọc `EPISODE.md` của tập trước,
@@ -40,10 +53,12 @@ python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>
 ## Quy ước file
 - Media gen ra để trong `out/<project>/ep<NN>/{plates,clips,renders}/` (git bỏ qua), đặt tên theo
   `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
-- Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` rồi tải zip lên Google Drive
-  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với tham chiếu file
-  `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải lên riêng.
-- Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình phải commit + push trước khi kết thúc.
+- Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` rồi tải zip lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với
+  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải
+  lên riêng (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
+- Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình (lõi) phải commit + push; dữ liệu dự án phải đẩy lên Drive
+  trước khi kết thúc.
 
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.

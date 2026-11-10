@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Zip one shot's media for a single Drive upload (docs/CONVENTIONS.md §9).
 
-  python3 tools/bundle.py out/<project>/ep<NN> --shot s03 [--series-dir projects/<project>/ep<NN>-<slug>]
+  python3 tools/bundle.py out/<project>/ep<NN> --shot s03 [--episode-dir projects/<project>/ep<NN>-<slug>]
 
 The zip holds every file under plates/ and clips/ whose name contains `_s03_`, the prompts.csv rows for
 that shot (header kept) and the anchors.json entries for that shot's files, if those files exist. It is
 written to out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
-Without --series-dir the episode text folder is looked up as projects/<project>/ep<NN>-*/ in the repo.
+Without --episode-dir the episode text folder is looked up in the project working copy
+projects/<project>/ep<NN>-*/ (git-ignored, pulled from Drive), then in the legacy series/<project>/ep<NN>-*/.
+The zip goes to Drive ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/ (docs/CONVENTIONS.md §11).
 Prints the path, size and the Drive connector file reference `sha256:<hex>:<absolute path>`.
 """
 import argparse, csv, datetime, glob, hashlib, io, json, os, re, sys, zipfile
@@ -15,10 +17,18 @@ LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STORED = {".png", ".jpg", ".jpeg", ".mp4", ".webp", ".zip"}   # already compressed
 
 
+EPISODE_ROOTS = ("projects", "series")   # project working copy first; series/ is the pre-Drive layout
+
+
 def find_series_dir(media):
+    """Episode text folder for out/<project>/ep<NN>: projects/<project>/ep<NN>-*/ (or legacy series/...)."""
     ep = os.path.basename(os.path.normpath(media))
-    series = os.path.basename(os.path.dirname(os.path.abspath(media)))
-    hits = sorted(d for d in glob.glob(os.path.join(LAB, "series", series, ep + "-*")) if os.path.isdir(d))
+    project = os.path.basename(os.path.dirname(os.path.abspath(media)))
+    hits = []
+    for root in EPISODE_ROOTS:
+        hits = sorted(d for d in glob.glob(os.path.join(LAB, root, project, ep + "-*")) if os.path.isdir(d))
+        if hits:
+            break
     if len(hits) > 1:
         print(f"warning: several episode folders match, using {hits[0]}", file=sys.stderr)
     return hits[0] if hits else None
@@ -138,7 +148,8 @@ def main(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
     p.add_argument("media", help="out/<project>/ep<NN>")
     p.add_argument("--shot", required=True, help="shot id, e.g. s03")
-    p.add_argument("--series-dir", default=None, help="projects/<project>/ep<NN>-<slug> (prompts.csv, anchors.json)")
+    p.add_argument("--episode-dir", "--series-dir", dest="series_dir", default=None,
+                   help="projects/<project>/ep<NN>-<slug> (prompts.csv, anchors.json); default: looked up")
     p.add_argument("--with-film", action="store_true",
                    help="also include the cinecode film sources under <media>/film (html, md, json...; no media)")
     a = p.parse_args(argv)
@@ -146,7 +157,7 @@ def main(argv=None):
     size = os.path.getsize(out)
     print(f"bundle {out}")
     print(f"files  {len(files)} media" + (", " + ", ".join(notes) if notes else "")
-          + ("" if sdir else " (no series dir found: prompts.csv/anchors.json not included)"))
+          + ("" if sdir else " (no episode dir found under projects/: prompts.csv/anchors.json not included)"))
     print(f"size   {size} bytes ({size / 1e6:.2f} MB)")
     print(f"drive  sha256:{sha256(out)}:{out}")
 

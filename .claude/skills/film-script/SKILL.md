@@ -10,7 +10,9 @@ description: >-
 # film-script – kịch bản tập phim 2.5D
 
 Đầu ra nằm trong `projects/<project>/ep<NN>-<slug>/`: `research.md` (nếu chưa có), `script.md`, `shots.csv`.
-Hợp đồng file: `docs/CONVENTIONS.md` §4–§6. Phương pháp viết chung (đi rộng rồi thu hẹp, một cú lật, viết kết trước,
+Đây là bản làm việc (git bỏ qua) của thư mục `03_KichBan/ep<NN>-<slug>/` trên Google Drive: mọi file của tập, kể cả
+`research.md` và tài liệu gốc, thuộc về dự án trên Drive, không bao giờ vào repo; đạo diễn đẩy lên Drive sau khâu.
+Hợp đồng file: `docs/CONVENTIONS.md` §4–§6, §11. Phương pháp viết chung (đi rộng rồi thu hẹp, một cú lật, viết kết trước,
 cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root/.claude/skills/cinecode/references/writing.md` §1–§4, §8,
 §14–§15; file này chỉ ghi phần riêng của Film Lab.
 
@@ -20,13 +22,16 @@ cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root
 2. `projects/<project>/SERIES.md`: khán giả, ngôn ngữ, quy ước riêng.
 3. `styles/<style>/STYLE.md`, mục **`## Giọng kể và nhịp`**: giọng, tốc độ đọc, motif quen, nhịp cắt. Mục này thắng các
    mặc định dưới đây khi khác. Chưa có mục đó: dùng mặc định ở đây và ghi "chưa có giọng kể của style" vào báo cáo.
-4. `characters/` và `locations/` của series: nhân vật, bối cảnh đã có thì dùng lại (`reuse_of`), không vẽ lại.
+4. `characters/` và `locations/` của dự án: nhân vật, bối cảnh đã có thì dùng lại (`reuse_of`), không vẽ lại.
+5. Tài liệu gốc của dự án đã kéo về `projects/<project>/sources/` (bản trên Drive: `01_TaiLieuGoc/`, tên theo
+   CONVENTIONS §11.4). Cần tài liệu chưa kéo về: ghi tên file vào báo cáo để đạo diễn kéo.
 
 ## 1. Nguồn trước, chữ sau
 
 - Nguồn chữ Hán: **zh.wikisource.org** (bản thô: `https://zh.wikisource.org/w/index.php?title=<trang>&action=raw`).
   ctext.org chặn truy cập tự động (trả trang "robot"), chỉ dùng khi người dùng tự mở để đối chiếu.
-- Chép **nguyên văn** đoạn dùng vào `research.md`: chữ Hán, link trang, `oldid` (bản sửa), ngày truy cập. Chú thích
+- Chép **nguyên văn** đoạn dùng vào `research.md`: chữ Hán, link trang, `oldid` (bản sửa), ngày truy cập; nguồn là tài
+  liệu gốc của dự án thì ghi tên file trong `01_TaiLieuGoc/` (và trang/tờ). Chú thích
   (ví dụ chú của Quách Phác, trong wikitext là `{{*|...}}`) chép riêng, ghi rõ là chú. Không chép từ trí nhớ; nguồn
   không tới được thì ghi "không truy cập được".
 - WebFetch tóm tắt trang qua model nhỏ, có thể đổi chữ: đoạn nguyên văn phải lấy từ bản thô (`action=raw`) hoặc để đạo

@@ -17,9 +17,11 @@ Bạn là chỉ đạo mỹ thuật của AI Film Lab. Làm theo skill `film-pro
 Trước khi viết prompt, đọc bộ nhớ của bạn (`.claude/agent-memory/film-art-director/MEMORY.md`).
 
 Đầu vào: hợp đồng giao việc, `research.md`, `script.md`, `shots.csv`, `styles/<style>/style.yaml` và `prompts/`,
-`characters/`, `locations/` hiện có, mục "Đã khóa" trong `EPISODE.md`.
+`characters/`, `locations/`, `style/` (ghi chú phong cách riêng của dự án) hiện có trong `projects/<project>/`, mục "Đã khóa"
+trong `EPISODE.md`.
 Đầu ra: `projects/<project>/characters/<slug>/CHARACTER.md`, `locations/<slug>/LOCATION.md` (bảng giải phẫu từ nguồn, prompt
-khóa), `projects/<project>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống).
+khóa), `projects/<project>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống). Đây là bản làm việc của dự án
+trên Drive (git bỏ qua): không commit, đạo diễn đẩy lên Drive.
 
 Giới hạn: không có Bash, không tạo ảnh/video; không nêu tên họa sĩ còn sống hay phim thương mại; không hỏi người dùng,
 không tự qua cổng, không in hay tìm API key. Xong việc: ghi bài học prompt mới (lỗi lặp lại, cụm hiệu quả theo style) vào

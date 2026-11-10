@@ -19,6 +19,11 @@
 | Bản nháp bị giữ vì **TOO STILL** | Chuyển động nhỏ trên tranh nhạt có điểm 0,2–0,45 so với ngưỡng 1,0 của cinecode | Đúng như dự kiến với tranh tĩnh: cắt shot ngắn lại, thêm hành động hoặc đẩy máy rõ hơn (`film-compose-shot` §6) |
 | Bản nháp bị giữ vì **SOUND THIN / SOUND ALL CODE** | Âm thanh chỉ do code tạo | Thêm bản ghi thật (gió, bước chân…) theo `styles/<id>/sound.md` |
 | Plugin GitHub lỗi `Authorization header is badly formatted` | Lỗi kết nối plugin | Không ảnh hưởng clone/push (đi qua git proxy); kết nối lại plugin trong cài đặt nếu cần GitHub API |
+| Không có `projects/<project>/` hay `EPISODE.md` khi bắt đầu phiên | Dữ liệu dự án không nằm trong repo; container mới chưa kéo | Kéo từ Drive theo `docs/CONVENTIONS.md` §11.6: `ClaudeFilmLab/<ProjectName>/00_QuanLy/PROJECT.md` trước. Không có Drive connector → dừng, báo người dùng bật connector (không tạo lại từ trí nhớ) |
+| Ngân sách tập "còn nguyên" dù đã tạo ảnh ở phiên trước | `out/<project>/ep<NN>/ledger.csv` chưa được kéo về | Kéo `04_SanXuat/ep<NN>-<slug>/ledger.csv` trước khi gọi `ark.py`; đẩy lại sau mỗi khâu có tạo ảnh/video |
+| Hai file cùng tên trong một thư mục Drive | Lần đẩy trước bị ngắt giữa "tải bản mới" và "chuyển bản cũ" | Giữ file `modifiedTime` mới nhất, chuyển file cũ vào `99_LuuTru/` với tên có giờ (§11.6 bước 3) |
+| `update_file` không đổi được nội dung file trên Drive | Connector chỉ sửa metadata (tên, thư mục) | Đúng thiết kế: đẩy bản mới bằng `create_file`, chuyển bản cũ vào `99_LuuTru/` |
+| CSV/Markdown tải lên thành Google Sheet/Doc | Thiếu `disableConversionToGoogleType: true` | Chuyển file đó vào `99_LuuTru/`, tải lại với cờ này (chỉ `README_CauTruc`, `TienDo_SanXuat` được chuyển đổi) |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

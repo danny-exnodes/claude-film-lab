@@ -125,7 +125,7 @@ khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách n�
   âm theo chuyển động hay rơi đúng điểm cắt. Không đủ thì `make.py` giữ bản nháp (`SOUND THIN`, `SOUND ALL CODE`).
 - Liệt kê mọi sự kiện trên hình trong `review/sound-audit.md` của thư mục phim (`make.py` đọc file này): bảng
   thời điểm · sự kiện · âm · bus, và dòng `events N · sounded M · silent by choice K`. Chép bản chữ sang
-  `projects/<project>/ep<NN>-<slug>/review/sound-audit.md` (git).
+  `projects/<project>/ep<NN>-<slug>/review/sound-audit.md` (đạo diễn đẩy lên Drive `03_KichBan/ep<NN>-<slug>/review/`).
 - **Nhạc luôn do người dùng chọn** (câu hỏi của cinecode: bản thu giấy phép mở ★ · nhạc của họ · code · không), ghi
   vào dòng `Music:` của `STATE.md` kèm `(user)`. Không tự viết `score()` khi họ chưa chọn code.
 - Âm thanh được đo, không nghe: mỗi lần giao bản nháp nhờ người dùng nghe, nêu các giây quan trọng.
@@ -149,16 +149,19 @@ vậy một shot chỉ có lớp tranh giữ khung dài sẽ bị báo. Cách x�
 lớn đi ngang khung, sương trước dày quét qua chủ thể), hoặc ghi vào `STATE.md` là cố ý (khoảng lặng trước sự kiện)
 và nói với người dùng trong một dòng. `make.py` chỉ giữ một lượt sửa; bản sau được giao kèm điều còn lại.
 
-## 7. Lưu trữ (CONVENTIONS §9)
+## 7. Lưu trữ (CONVENTIONS §9, §11)
 
 - Gói mỗi shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
-  `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`.
+  `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (đạo diễn tải; compositor không tải lên Drive).
   Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
-- Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không có
-  trong git**: gói kèm bằng `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
+- Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
+  trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.
-- Bản dựng duyệt (`renders/*.mp4`) tải riêng từng file.
-- Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill phải commit + push trước khi dừng.
+- Bản dựng duyệt tải riêng từng file: bản nháp vào `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối vào
+  `05_ThanhPham/ep<NN>-<slug>/`.
+- Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill (lõi) phải commit + push trước khi dừng;
+  dữ liệu của tập không bao giờ commit.
 
 ## 8. Sự cố thường gặp
 

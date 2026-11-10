@@ -243,9 +243,12 @@ def check_front_matter(ep_dir, rep):
         exp_media = f"out/{series}/ep{ep:02d}"
         if isinstance(meta.get("media"), str) and meta["media"].rstrip("/") != exp_media:
             rep.warn(W, f"media '{meta['media']}' differs from the convention '{exp_media}'")
-        exp_drive = f"AI Film Lab/{series}/ep{ep:02d}"
-        if isinstance(meta.get("drive"), str) and meta["drive"].rstrip("/") != exp_drive:
-            rep.warn(W, f"drive '{meta['drive']}' differs from the convention '{exp_drive}'")
+        slug = meta.get("slug") if isinstance(meta.get("slug"), str) else "<slug>"
+        exp_drive = f"ClaudeFilmLab/<ProjectName>/03_KichBan/ep{ep:02d}-{slug}"
+        drive = meta.get("drive")
+        if isinstance(drive, str) and not re.fullmatch(
+                rf"ClaudeFilmLab/[A-Za-z0-9]+/03_KichBan/ep{ep:02d}-{re.escape(slug)}", drive.rstrip("/")):
+            rep.warn(W, f"drive '{drive}' differs from the convention '{exp_drive}' (docs/CONVENTIONS.md §11)")
 
     headings = {nfc(l.rstrip()) for l in body.splitlines() if l.startswith("## ")}
     for sec in EPISODE_SECTIONS:

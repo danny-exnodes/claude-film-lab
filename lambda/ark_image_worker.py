@@ -11,6 +11,11 @@ Writes to s3://$BUCKET:
   images/<job_id>.<ext>   (and images/<job_id>-<n>.<ext> for extra images)
   jobs/<job_id>.json      status: running -> succeeded | failed, plus model, usage, seconds, error
 
+job_id is the request id printed by `tools/ark.py lambda-job prepare` (which also checks the episode budget and
+writes the ledger's pending row); `lambda-job finish` reads jobs/<job_id>.json back into the ledger.
+A job_id that already has a jobs/<job_id>.json is NOT run again (Lambda delivers async events at least once;
+a second run would bill a second image): the handler returns {"skipped": "duplicate"}.
+
 Env: BUCKET, SECRET_ID (Secrets Manager secret holding the Ark API key as plain
 text), ARK_BASE (default https://ark.ap-southeast.bytepluses.com/api/v3).
 """
@@ -54,6 +59,15 @@ def put_status(job_id, **fields):
                   Body=json.dumps({"job_id": job_id, **fields}, ensure_ascii=False).encode())
 
 
+def existing_status(job_id):
+    """The job's status object if it exists. A missing key raises (NoSuchKey, or AccessDenied without
+    s3:ListBucket): both mean 'not there'; a real S3 outage fails at the first put_status instead."""
+    try:
+        return json.loads(S3.get_object(Bucket=BUCKET, Key=f"jobs/{job_id}.json")["Body"].read())
+    except Exception:
+        return None
+
+
 def ref_data_uri(key):
     raw = S3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
     return f"data:{sniff(raw)[1]};base64," + base64.b64encode(raw).decode()
@@ -63,6 +77,10 @@ def handler(event, context):
     job_id = event.get("job_id") or context.aws_request_id
     model = event.get("model") or DEFAULT_MODEL
     t0 = time.time()
+    if event.get("job_id"):
+        seen = existing_status(job_id)
+        if seen is not None:     # duplicate delivery or a repeated invoke: never generate (and bill) twice
+            return {"job_id": job_id, "skipped": "duplicate", "status": seen.get("status")}
     put_status(job_id, status="running", model=model, started=t0)
     try:
         body = {"model": model, "prompt": event["prompt"], "size": event.get("size", "2K"),

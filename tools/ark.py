@@ -9,10 +9,21 @@
                        [--ratio adaptive|16:9] [--duration 5] [--resolution 1080p] [--no-audio]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video --resume-task TASK_ID [out.mp4] --ledger L.csv
+  python3 ark.py lambda-job prepare "prompt" out.png [--model dola-seedream-5-0-pro-260628] [--size 2K|4K] [--ref a.png ...]
+                       [--refs-dir DIR] [--payload FILE] --ledger L.csv (--budget B.yaml | --no-budget)
+  python3 ark.py lambda-job finish --status-json jobs/<job_id>.json [--job ID] [--image downloaded.jpg] [--out out.png] --ledger L.csv
+  python3 ark.py ledger-merge A.csv B.csv [...] -o OUT.csv
+
+lambda-job (lambda/README.md): pro and 4K images run on the AWS Lambda worker, outside the proxy. `prepare` does the
+same atomic budget check + 'pending' row as `image` and prints the Lambda payload (job_id = the request id);
+`finish` turns the worker's jobs/<job_id>.json into the request's final row. No ledger, no Lambda call.
+ledger-merge: union of ledgers pulled from Drive or written by two sessions (rows deduplicated by
+(req, status, task_id)), so no billed row is lost when two copies exist (docs/CONVENTIONS.md §7, §11.6).
 
 Budget and ledger (docs/CONVENTIONS.md §7): --ledger/--budget (or env FILM_LEDGER/FILM_BUDGET).
 image/video refuse to run (exit 2) without BOTH a budget and a ledger, unless --no-budget is given
-(ad-hoc tests in the main session only). The budget is checked BEFORE the call (over a cap: exit 3),
+(ad-hoc tests in the main session only). budget.yaml `ledger_required: true` also refuses (exit 2) when the ledger
+file does not exist yet: pull it from Drive first. The budget is checked BEFORE the call (over a cap: exit 3),
 in the same exclusive ledger lock that appends the request's 'pending' row (note req=<id>), so parallel
 agents cannot overrun a cap. Each request then gets a final row
 (ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row.
@@ -83,6 +94,8 @@ def ref_data_uri(path):
 IMAGE_DEFAULT = "seedream-5-0-lite-260128"        # Dola-Seedream-5.0-lite, 2K ~25s
 IMAGE_FAST = "dola-seedream-5-0-flash-260915"     # Dola-Seedream-5.0-flash
 IMAGE_SLOW = {"dola-seedream-5-0-pro-260628"}     # always > proxy cutoff
+LAMBDA_DEFAULT = "dola-seedream-5-0-pro-260628"   # lambda-job: the model the Lambda worker exists for
+LAMBDA_NOTE = "lambda"                            # note tag of rows written by lambda-job
 VIDEO_DEFAULT = "dreamina-seedance-2-5-260628"    # Dreamina-Seedance-2.5
 PROXY_CUTOFF = 30  # seconds: the agent proxy cuts synchronous requests here
 POLL_SECONDS = 10  # video task polling interval
@@ -215,7 +228,8 @@ def load_budget(path):
     models = b.get("models") or {}
     if not isinstance(models, dict):
         sys.exit(f"budget {path}: 'models' must be a mapping model-id -> cap")
-    return {"images": b.get("images"), "video_seconds": b.get("video_seconds"), "models": models}
+    return {"images": b.get("images"), "video_seconds": b.get("video_seconds"), "models": models,
+            "ledger_required": bool(b.get("ledger_required"))}
 
 
 def _num(x):
@@ -279,17 +293,25 @@ def budget_check(budget, rows, req):
     return over
 
 
-def reserve(a, req, rid):
+def reserve(a, req, rid, tag=""):
     """Atomic budget check + reservation (docs/CONVENTIONS.md §7), called just before the POST.
     One LOCK_EX on the ledger covers reading it, summing the billed requests and appending either the
     'pending' row (note req=<rid>) or, over a cap, the 'refused-budget' row (then exit 3). Parallel
     agents are serialised here, so they can no longer all pass the check before any pending row exists.
     Slow work (ref re-encoding, folders, loading budget.yaml) happens before the lock; the API call after it.
-    --no-budget: no check, the pending row is still written when a ledger is given."""
+    --no-budget: no check, the pending row is still written when a ledger is given.
+    budget.yaml `ledger_required: true`: the ledger file must already exist and be non-empty (pulled from Drive),
+    else exit 2 before anything is written - an empty ledger would restart every cap from zero."""
     budget = None if a.no_budget else load_budget(a.budget)
-    pending = dict(req, status="pending", note=f"req={rid}")
+    pending = dict(req, status="pending", note="; ".join(x for x in (f"req={rid}", tag) if x))
     if not a.ledger:          # only possible with --no-budget (main() guarantees budget+ledger otherwise)
         return
+    if budget and budget.get("ledger_required") and not (os.path.exists(a.ledger) and os.path.getsize(a.ledger)):
+        print(f"error: {a.budget} has ledger_required: true but {a.ledger} does not exist (or is empty).\n"
+              "Pull the episode's ledger.csv from Drive first (04_SanXuat/ep<NN>-<slug>/ledger.csv, "
+              "docs/CONVENTIONS.md §11.6). Only when Drive has none yet (no image/video made for this episode): "
+              f"python3 tools/ark.py ledger-merge -o {a.ledger}", file=sys.stderr)
+        sys.exit(USAGE_EXIT)
     os.makedirs(os.path.dirname(os.path.abspath(a.ledger)), exist_ok=True)
     with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
@@ -361,10 +383,12 @@ def image(a):
     if not a.force:
         if model in IMAGE_SLOW:
             sys.exit(f"{model} always takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
-                     "(possibly still billed). Use --force to try anyway.")
+                     "(possibly still billed). Run it on the Lambda worker: `ark.py lambda-job prepare` "
+                     "(lambda/README.md).")
         if a.size.upper() == "4K":
             sys.exit(f"--size 4K takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
-                     "(possibly still billed). Use 2K, or --force to try anyway.")
+                     "(possibly still billed). Use 2K, or the Lambda worker: `ark.py lambda-job prepare` "
+                     "(lambda/README.md).")
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
     make_out_dir(a.out)
     body = {"model": model, "prompt": a.prompt, "size": a.size, "response_format": "b64_json", "watermark": False}
@@ -495,6 +519,155 @@ def poll_and_save(a, req, rid, tag=""):
     print("saved", a.out)
 
 
+# --- Lambda jobs: pro / 4K images outside the proxy (lambda/README.md) ---------
+def lambda_prepare(a):
+    """Budget check + pending row for an image the Lambda worker will make; prints the Invoke payload.
+    Nothing is sent anywhere: the caller invokes the Lambda with the payload (AWS MCP run_script)."""
+    model = a.model or LAMBDA_DEFAULT
+    rid = new_req()
+    req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
+    make_out_dir(a.out)
+    payload = {"job_id": rid, "prompt": a.prompt, "model": model, "size": a.size}
+    uploads = []
+    if a.ref:
+        refs_dir = a.refs_dir or os.path.join(os.path.dirname(os.path.abspath(a.out)), "lambda-refs")
+        os.makedirs(refs_dir, exist_ok=True)
+        for n, path in enumerate(a.ref, 1):
+            raw, desc = ref_jpeg(path)
+            local = os.path.join(refs_dir, f"{rid}-{n}.jpg")
+            with open(local, "wb") as f:
+                f.write(raw)
+            print("ref", desc, file=sys.stderr)
+            uploads.append((local, f"refs/{rid}-{n}.jpg"))
+        payload["ref_keys"] = [key for _, key in uploads]
+    reserve(a, req, rid, LAMBDA_NOTE)     # exit 3 over a cap: no payload is printed, so nothing can be invoked
+    text = json.dumps(payload, ensure_ascii=False)
+    if a.payload:
+        os.makedirs(os.path.dirname(os.path.abspath(a.payload)), exist_ok=True)
+        with open(a.payload, "w", encoding="utf-8") as f:
+            f.write(text + "\n")
+    print(text)
+    for local, key in uploads:
+        print(f"upload {local} -> s3 key {key} before invoking", file=sys.stderr)
+    print(f"reserved req={rid} in {a.ledger}. Invoke the Lambda once with this payload, then:\n"
+          f"  python3 tools/ark.py lambda-job finish --status-json <jobs/{rid}.json> --image <downloaded image>"
+          f" --ledger {a.ledger}", file=sys.stderr)
+
+
+def lambda_finish(a):
+    """Final ledger row for a Lambda job from the worker's jobs/<job_id>.json; saves the downloaded image."""
+    with open(a.status_json, encoding="utf-8") as f:
+        st = json.load(f)
+    job = a.job or st.get("job_id")
+    if not job or (st.get("job_id") and st["job_id"] != job):
+        usage_error(f"job id mismatch: --job {a.job!r}, status file says {st.get('job_id')!r}")
+    known = [r for r in ledger_rows(a.ledger) if req_id(r) == job]
+    if not known:
+        usage_error(f"job {job} has no row in {a.ledger}: every Lambda job starts with 'lambda-job prepare' "
+                    "(budget check + pending row). Check that this is the episode's ledger")
+    status = st.get("status")
+    if status not in ("succeeded", "failed"):
+        print(f"job {job} is {status or 'unknown'}: no final row written; read jobs/{job}.json again later",
+              file=sys.stderr)
+        sys.exit(1)
+    last = known[-1]
+    req = {k: last.get(k, "") for k in ("kind", "model", "size", "seconds", "count", "out")}
+    out = a.out or req.get("out")
+    req["out"] = out
+    done = [r for r in known if r.get("status") in FINAL]
+    secs = f"{LAMBDA_NOTE}; seconds={st.get('seconds', '?')}"
+    usage = json.dumps(st.get("usage") or {}, separators=(",", ":"))
+    if status == "failed":
+        if not done:
+            log_row(a, req, job, "failed", f"{secs}; {str(st.get('error', ''))[:240]}")
+        print(f"job {job} FAILED: {st.get('error')}\nIt may still have been billed; it stays counted. Not retried.",
+              file=sys.stderr)
+        sys.exit(1)
+    final = dict(count=max(1, len(st.get("keys") or [])), usage=usage)
+    if a.image:
+        try:
+            make_out_dir(out)
+            with open(a.image, "rb") as f:
+                save_image(f.read(), out)
+            print("saved", out)
+        except Exception as e:
+            if not done:
+                log_row(a, req, job, "failed", f"{secs}; save-failed: " + err_note(e), **final)
+            print(f"SAVE FAILED ({err_note(e)}): the image was generated and billed; it is still in S3 "
+                  f"({', '.join(st.get('keys') or [])})", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print(f"no --image given: the image is still in S3 ({', '.join(st.get('keys') or [])}), "
+              f"download it to {out}", file=sys.stderr)
+    if done:
+        print(f"job {job} already has a final row ({done[-1].get('status')}); ledger unchanged")
+        return
+    log_row(a, req, job, "ok", secs, **final)
+    print("usage", usage, "| seconds", st.get("seconds"))
+
+
+def _merge_key(row):
+    rid = req_id(row)
+    if rid:
+        return (rid, row.get("status") or "", row.get("task_id") or "")
+    return tuple(row.get(k) or "" for k in LEDGER_FIELDS)     # old rows without req=: identical rows only
+
+
+def merge_rows(row_lists):
+    """Union of ledgers: first occurrence of each (req, status, task_id) wins; ordered by time, a request's
+    pending rows before its final row. Rows that are not ledger-shaped (no ts/kind/status) are dropped."""
+    seen, out = set(), []
+    for rows in row_lists:
+        for r in rows:
+            if not (r.get("ts") and r.get("kind") and r.get("status")):
+                continue
+            k = _merge_key(r)
+            if k not in seen:
+                seen.add(k)
+                out.append({f: r.get(f) or "" for f in LEDGER_FIELDS})
+    out.sort(key=lambda r: (r["ts"], 0 if r["status"] == "pending" else 1))
+    return out
+
+
+def ledger_merge(a):
+    """Write the union of the input ledgers to --out under its exclusive lock (it may be one of the inputs).
+    With no input: an empty ledger with the header (first generation of an episode with ledger_required)."""
+    missing = [p for p in a.ledgers if not os.path.exists(p)]
+    if missing:
+        usage_error("no such ledger: " + ", ".join(missing))
+    os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    with open(a.out, "a+", newline="", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            current = f.read()
+            if not a.ledgers and _parse_rows(a.out, current):
+                usage_error(f"{a.out} already has rows; pass the ledgers to merge (it was left untouched)")
+            lists = []
+            for path in a.ledgers:
+                if os.path.exists(a.out) and os.path.samefile(path, a.out):
+                    lists.append(_parse_rows(path, current))
+                else:
+                    lists.append(ledger_rows(path))
+            rows = merge_rows(lists)
+            buf = io.StringIO()
+            w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
+            w.writeheader()
+            w.writerows(rows)
+            f.seek(0)
+            f.truncate()
+            f.write(buf.getvalue())
+            f.flush()
+            os.fsync(f.fileno())
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    counts = ", ".join(f"{os.path.basename(p)}: {len(l)}" for p, l in zip(a.ledgers, lists)) or "no input"
+    billed = billed_requests(rows)
+    print(f"{a.out}: {len(rows)} row(s) from {counts} · billed requests: "
+          f"{sum(units(r) for r in billed if r.get('kind') == 'image'):g} image(s), "
+          f"{sum(units(r) for r in billed if r.get('kind') == 'video'):g} video second(s)")
+
+
 def add_cost_args(sp):
     sp.add_argument("--ledger", default=None,
                     help="ledger.csv: a pending row before the call and a final row after it (env FILM_LEDGER); "
@@ -533,6 +706,26 @@ v.add_argument("--no-audio", action="store_true", help="send generate_audio=fals
 v.add_argument("--resume-task", metavar="TASK_ID", default=None,
                help="resume polling + download of an existing task (no new request, no budget check; needs --ledger)")
 add_cost_args(v)
+lj = sp.add_parser("lambda-job", help="budget + ledger rows for images made by the Lambda worker (pro, 4K)")
+ljs = lj.add_subparsers(dest="lcmd", required=True)
+lp = ljs.add_parser("prepare", help="budget check + pending row; prints the Lambda Invoke payload (no network)")
+lp.add_argument("prompt"); lp.add_argument("out")
+lp.add_argument("--model", default=None, help=f"default {LAMBDA_DEFAULT}")
+lp.add_argument("--size", default="2K")
+lp.add_argument("--ref", nargs="*", help="reference image(s): re-encoded like `image --ref` into --refs-dir as "
+                "<job_id>-<n>.jpg, to upload to the bucket as refs/<job_id>-<n>.jpg")
+lp.add_argument("--refs-dir", default=None, help="where the re-encoded refs go (default <out dir>/lambda-refs)")
+lp.add_argument("--payload", default=None, metavar="FILE", help="also write the payload JSON to this file")
+add_cost_args(lp)
+lf = ljs.add_parser("finish", help="final ledger row from the worker's jobs/<job_id>.json (no network)")
+lf.add_argument("--status-json", required=True, help="local copy of s3 jobs/<job_id>.json")
+lf.add_argument("--job", default=None, help="job id (default: job_id in the status file)")
+lf.add_argument("--image", default=None, help="the downloaded image; saved to --out (converted to its extension)")
+lf.add_argument("--out", default=None, help="output path (default: the out recorded by prepare)")
+lf.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
+lm = sp.add_parser("ledger-merge", help="union of ledger copies (two sessions, two Drive files) into one")
+lm.add_argument("ledgers", nargs="*", help="ledgers to merge (none: create an empty ledger with the header)")
+lm.add_argument("-o", "--out", required=True, help="merged ledger; may be one of the inputs")
 
 
 def usage_error(msg):
@@ -570,6 +763,16 @@ def check_cost_args(a):
 
 def main(argv=None):
     a = p.parse_args(argv)
+    if a.cmd == "ledger-merge":
+        return ledger_merge(a)
+    if a.cmd == "lambda-job":
+        a.ledger = a.ledger or os.environ.get("FILM_LEDGER") or None
+        if not a.ledger:      # a Lambda call bypasses the proxy AND every cap unless it is in the ledger
+            usage_error("lambda-job needs --ledger (or FILM_LEDGER): no ledger, no Lambda call")
+        if a.lcmd == "finish":
+            return lambda_finish(a)
+        check_cost_args(a)
+        return lambda_prepare(a)
     if a.cmd not in ("image", "video"):
         return ping(a)
     check_cost_args(a)

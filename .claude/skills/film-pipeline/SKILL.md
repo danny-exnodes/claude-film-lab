@@ -39,7 +39,9 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 2. Theo bảng CONVENTIONS §11.3: `02_KinhThu/` (SERIES.md, CHARACTER.md, LOCATION.md, PhongCach) → `projects/<project>/`;
    tập đang làm `03_KichBan/ep<NN>-<slug>/` (cả `prompts/`, `review/`) → `projects/<project>/ep<NN>-<slug>/`;
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
-   ngân sách cộng dồn từ ledger); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
+   ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
+   `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –
+   CONVENTIONS §7, §11.6); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
    Ảnh khóa, gói shot, tài liệu gốc: chỉ kéo khi cần.
 3. Chụp dấu và giờ kéo: `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
    (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo).
@@ -142,6 +144,14 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Mã thoát 3 = vượt trần (`refused-budget`): agent dừng và báo; bạn hỏi người dùng nâng trần hay cắt bớt.
   Bạn tự gọi ark.py ở phiên chính cũng dùng `--ledger/--budget` (cột `agent` trống = phiên chính).
   ark.py cũng đọc `FILM_LEDGER`/`FILM_BUDGET` từ môi trường, nhưng hợp đồng giao việc luôn ghi cờ tường minh.
+- **Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm.** Ledger là một bản trong container của từng phiên, nên
+  hai phiên cùng tạo cho một tập thì mỗi phiên tưởng mình còn đủ trần. Trước khi bắt đầu khâu 4–6: đọc `## Nhật ký` của
+  EPISODE.md vừa kéo; có dòng "bắt đầu tạo ảnh/video" của phiên khác chưa có dòng "xong" → dừng, hỏi người dùng. Không có
+  → ghi dòng `bắt đầu tạo ảnh/video – phiên <tên phiên>` và đẩy EPISODE.md ngay; xong khâu thì ghi `xong tạo ảnh/video`,
+  gộp ledger với bản trên Drive (`ark.py ledger-merge`, §11.6 mục đẩy) rồi đẩy. Phiên khác (TTS, hạ tầng, thử nghiệm)
+  không gọi `ark.py image|video|lambda-job` với ledger của tập đó. Từ khâu 4 bật `ledger_required: true` trong `budget.yaml`.
+- Ảnh pro/4K (khi Lambda đã triển khai): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
+  (`lambda/README.md`); không Invoke bằng payload tự viết.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
   Chỉ **một** `film-compositor` mỗi tập.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
@@ -186,7 +196,7 @@ Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau kh�
 ## 8. Không làm
 
 - Không in, ghi log, đọc hay tìm API key; không yêu cầu người dùng dán khóa.
-- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ qua Lambda (v1.0.0 chưa triển khai → dùng 2K).
+- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ qua Lambda bằng `ark.py lambda-job` (chưa triển khai → dùng 2K).
 - Không đặt file trạng thái tên `STATE.md` (tên đó của cinecode).
 - Không làm lại mục đã khóa; không qua cổng thay người dùng.
 - Không commit dữ liệu dự án vào repo; không xoá hay `trash_file` trên Drive (chuyển vào `99_LuuTru/`).

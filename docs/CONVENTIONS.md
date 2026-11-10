@@ -190,6 +190,7 @@ images: 40               # tổng số ảnh tối đa (mọi model)
 video_seconds: 60        # tổng giây video tối đa
 models:                  # (tuỳ chọn) trần riêng theo model, đơn vị ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6
+ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có: buộc kéo ledger từ Drive trước; bật từ khâu 4
 ```
 `ledger.csv` (đặt ở `out/<project>/ep<NN>/ledger.csv`; bản gốc trên Drive `04_SanXuat/ep<NN>-<slug>/ledger.csv`, kéo về đầu
 phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
@@ -216,6 +217,19 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
 - `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
   poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.
+- `ledger_required: true` trong `budget.yaml`: `ark.py` thoát mã 2 (không gọi API, không ghi gì) khi file ledger chưa
+  tồn tại hoặc rỗng – một ledger trống sẽ tính lại mọi trần từ 0. Kéo ledger của tập từ Drive trước; chỉ khi Drive chưa
+  có (tập chưa tạo ảnh/video nào) mới tạo ledger rỗng có header bằng `python3 tools/ark.py ledger-merge -o <ledger>`.
+- **Ảnh qua Lambda** (pro, 4K; `lambda/README.md`) dùng cùng ledger và cùng cách đếm:
+  `ark.py lambda-job prepare` làm đúng bước nguyên tử ở trên (dòng `pending`, `note` = `req=<id>; lambda`, vượt trần →
+  `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
+  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
+  Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
+- **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
+  `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
+  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX` (`OUT` được phép là một trong các đầu vào). Dùng mỗi khi có hai bản ledger
+  của một tập (hai phiên, hai file trên Drive, bản Drive + bản trong container): **không bao giờ** "lấy bản mới nhất"
+  cho ledger, vì bản kia chứa các request đã tính phí (§11.6).
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5
   (được viết dần từ khâu 3). Trước đó thiếu file chỉ là WARN.
 
@@ -359,7 +373,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `parentId = '<id>' and trashed = false`, tải từng file chữ (`download_file_content`, giải base64) về đúng đường dẫn;
    thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
-   cũ vào `99_LuuTru/` theo bước 3 của mục đẩy.
+   cũ vào `99_LuuTru/` theo bước 3 của mục đẩy. **Ngoại lệ `ledger.csv`:** tải **mọi** bản về
+   (`out/<project>/ep<NN>/ledger.drive-1.csv`, `…-2.csv`) rồi gộp, không chọn bản mới nhất:
+   `python3 tools/ark.py ledger-merge out/<project>/ep<NN>/ledger.drive-*.csv -o out/<project>/ep<NN>/ledger.csv`
+   (§7); lần đẩy ledger kế tiếp sẽ đưa các bản cũ vào `99_LuuTru/`.
 4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
    `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>` (từ thư mục gốc repo).
    Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
@@ -400,6 +417,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `03_KichBan__ep01-bac-thi__script_20261110-1530.md`. Kết quả: mỗi thư mục luôn có đúng một bản hiện hành mỗi tên;
    mọi bản cũ nằm ở `99_LuuTru/`, tìm lại được theo tên. Tải lên trước, chuyển sau: bị ngắt giữa chừng chỉ để lại
    bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
+   **`ledger.csv` trước khi đẩy:** phiên khác có thể đã đẩy ledger của cùng tập sau lần kéo. Tải bản đang ở Drive về
+   `out/<project>/ep<NN>/ledger.drive-1.csv`, `ark.py ledger-merge out/<project>/ep<NN>/ledger.csv
+   out/<project>/ep<NN>/ledger.drive-1.csv -o out/<project>/ep<NN>/ledger.csv`, xoá bản tạm, rồi mới đẩy bản đã gộp
+   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào).
 4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
    trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
    dùng), xung đột thì hỏi người dùng; rồi mới đẩy. Với file NEW, mọi kết quả `search_files` có ID không nằm trong

@@ -6,4 +6,5 @@
 images: 40               # tổng số ảnh tối đa, mọi model (gồm nháp --fast và ảnh hỏng)
 video_seconds: 30        # tổng giây video Seedance tối đa (≈ 6 clip 5 s)
 models:                  # (tuỳ chọn) trần riêng theo model: ảnh hoặc giây video
-  dola-seedream-5-0-pro-260628: 6   # ảnh pro: CHƯA có hiệu lực ở v1.0.0 (ark.py chặn model pro; Lambda chưa ghi ledger)
+  dola-seedream-5-0-pro-260628: 6   # ảnh pro chỉ qua Lambda: `ark.py lambda-job prepare/finish` đếm vào trần này (lambda/README.md)
+# ledger_required: true   # bật từ khâu 4: ark.py từ chối khi out/<project>/ep<NN>/ledger.csv chưa có (phải kéo từ Drive trước)

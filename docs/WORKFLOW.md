@@ -78,6 +78,11 @@ Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-m
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Kiểm ngân sách và ghi dòng `pending` nằm trong cùng
   một khóa, nên agent song song không vượt trần (CONVENTIONS §7).
+- Ảnh pro/4K đi qua Lambda (`lambda/README.md`) và vẫn vào cùng ledger: `ark.py lambda-job prepare` (kiểm trần, dòng
+  `pending`, in payload) → Invoke → `ark.py lambda-job finish` (dòng cuối). Không có ledger thì không gọi Lambda.
+- Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm (ghi vào `## Nhật ký` của EPISODE.md khi bắt đầu khâu 4–6). Có
+  hai bản ledger của một tập thì gộp bằng `ark.py ledger-merge`, không lấy bản mới nhất; `ledger_required: true` trong
+  `budget.yaml` (bật từ khâu 4) chặn việc tạo ảnh khi chưa kéo ledger (CONVENTIONS §7, §11.6).
 - Tiết kiệm nhất ở G2: một ảnh thử (2K hoặc `--fast`) và một shot mẫu được duyệt trước khi tạo hàng loạt.
 
 ## 5. Lưu trữ

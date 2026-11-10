@@ -127,8 +127,10 @@ upload = (f"upload out/ark_image_worker.zip to s3://{bucket}/{ZIP_KEY} (get_pres
 try:
     head = await c("s3", "HeadObject", Bucket=bucket, Key=ZIP_KEY)
     etag = str(head.get("ETag") or "").strip('"').lower()
-    # A plain ETag is the object's MD5. Multipart or KMS ETags have another shape: left to the check at the end.
-    if len(etag) == 32 and all(ch in "0123456789abcdef" for ch in etag) and etag != ZIP_MD5:
+    # A plain ETag is the object's MD5. A multipart ETag has another shape and an SSE-KMS object's ETag is 32 hex
+    # digits that are not the MD5: both are left to the CodeSha256 check at the end.
+    kms = "kms" in str(head.get("ServerSideEncryption") or "").lower()
+    if not kms and len(etag) == 32 and all(ch in "0123456789abcdef" for ch in etag) and etag != ZIP_MD5:
         out["state"] = "zip-stale"
         out["next"] = "the bucket holds another zip than this program was built with: " + upload
 except Exception:

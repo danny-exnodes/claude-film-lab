@@ -176,7 +176,8 @@ def handler(event, context):
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 resp = json.loads(r.read())
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"HTTP {e.code}: {e.read().decode(errors='replace')[:600]}")
+            # redact before cutting: a key that straddles the cut would otherwise leave its first characters
+            raise RuntimeError(f"HTTP {e.code}: {redact(e.read().decode(errors='replace'), secret)[:600]}")
         keys = []
         for i, d in enumerate(resp.get("data", [])):
             raw = base64.b64decode(d["b64_json"])

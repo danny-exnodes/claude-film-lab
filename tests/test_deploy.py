@@ -34,6 +34,7 @@ class FakeAws:
         self.function = None            # {"Timeout": ..., "CodeSha256": ...}
         self.invoke_config = None
         self.sha_of = {}                # ETag -> CodeSha256 Lambda computes for that object
+        self.sse = None                 # ServerSideEncryption HeadObject reports for every object
 
     def ops(self, service=None):
         return [op for svc, op, _ in self.calls if service in (None, svc)]
@@ -61,7 +62,8 @@ class FakeAws:
     def HeadObject(self, Bucket, Key):
         if Key not in self.objects:
             raise RuntimeError("An error occurred (404) when calling the HeadObject operation: Not Found")
-        return {"ETag": self.objects[Key], "ContentLength": 1}
+        return {"ETag": self.objects[Key], "ContentLength": 1,
+                **({"ServerSideEncryption": self.sse} if self.sse else {})}
 
     def DescribeSecret(self, SecretId):
         if self.secret is None:
@@ -267,6 +269,19 @@ class TestProgram(unittest.TestCase):
         self.assertIn("UpdateFunctionCode", self.aws.ops())
         self.assertEqual((out["state"], out["code_matches_repo"]), ("code-mismatch", False))
         self.assertIn(self.sha, out["error"])
+
+    def test_kms_etag_is_not_an_md5_and_does_not_block_the_right_zip(self):
+        kms = '"' + "2" * 32 + '"'                           # SSE-KMS: 32 hex digits, not the object's MD5
+        self.aws.objects[ZIP_KEY] = kms
+        self.aws.sha_of[kms] = self.sha                      # the right zip, as Lambda hashes it
+        self.aws.sse = "aws:kms"
+        out = self.run_program()
+        self.assertEqual((out["state"], out["code_matches_repo"]), ("Active", True))
+        self.aws.sha_of[kms] = "b2xkLXdvcmtlci1jb2RlLXNoYTI1Ng=="   # a wrong zip under KMS: caught at the end
+        out = self.run_program()
+        self.assertEqual(out["state"], "code-mismatch")
+        self.aws.sse = "AES256"                              # the same ETag without KMS is a stale zip
+        self.assertEqual(self.run_program()["state"], "zip-stale")
 
     def test_program_never_reads_the_secret_value(self):
         self.aws.objects[ZIP_KEY] = self.good

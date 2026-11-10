@@ -451,6 +451,14 @@ class TestWorker(unittest.TestCase):
             self.assertEqual((st["status"], st["sent"], st["error"]), ("failed", False, BAD_SECRET), bad)
         self.assertEqual(self.posts, [])
 
+    def test_key_at_the_cut_of_a_long_error_body_leaves_no_prefix(self):
+        body = ("x" * 585 + FAKE_KEY + " tail").encode()     # the 600-character cut falls inside the key
+        self.fail = self.w.urllib.error.HTTPError("http://x", 401, "Unauthorized", {}, io.BytesIO(body))
+        with self.assertRaises(RuntimeError) as cm:
+            self.w.handler(self.ev, self.ctx)
+        self.assertTrue(self.status()["error"].endswith("x<redacted> tail"), self.status()["error"])
+        self.assert_no_secret(FAKE_KEY[:8], exc=cm.exception)
+
     def test_key_echoed_in_http_error_body_is_redacted(self):
         body = ('{"error": {"message": "invalid key %s"}}' % FAKE_KEY).encode() + b"\xff"
         self.fail = self.w.urllib.error.HTTPError("http://x", 401, "Unauthorized", {}, io.BytesIO(body))

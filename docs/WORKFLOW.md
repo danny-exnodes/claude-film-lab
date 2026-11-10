@@ -33,7 +33,7 @@ flowchart TD
 
 | # | Khâu | Ai làm | Đầu ra | Cổng |
 |---|---|---|---|---|
-| 0 | Mở tập | đạo diễn | `EPISODE.md`, `budget.yaml` | người dùng chốt độ dài, style, trần chi phí |
+| 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, trần chi phí |
 | 1 | Nghiên cứu nguồn | `film-researcher` | `research.md` (nguyên văn, link, cách đọc tên) | – |
 | 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
@@ -53,7 +53,7 @@ Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, khôn
 
 | Agent | Vai | Skill nạp sẵn | Công cụ | Model | Ghi chú |
 |---|---|---|---|---|---|
-| *(phiên chính)* | Đạo diễn | `film-pipeline` | tất cả | – | giữ cổng, nói chuyện với người dùng, cập nhật EPISODE.md, commit/push, Drive |
+| *(phiên chính)* | Đạo diễn | `film-pipeline` | tất cả | – | giữ cổng, nói chuyện với người dùng, cập nhật EPISODE.md, kéo/đẩy Drive |
 | `film-researcher` | Nghiên cứu nguồn | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` |
 | `film-writer` | Biên kịch | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash |
 | `film-art-director` | Thiết kế, prompt lớp | `film-prompt-layers` | Read, Write, Edit, Glob, Grep | opus | `memory: project`, không tạo ảnh |
@@ -72,7 +72,7 @@ Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` 
 
 - `budget.yaml` trong thư mục tập: `images`, `video_seconds`, `models` (trần riêng theo model).
 - Mọi lần tạo ảnh/video:
-  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<series>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
+  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<project>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
   `ark.py` bắt buộc có `--budget` và `--ledger` (thiếu → thoát mã 2), cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Khóa không giữ trong lúc gọi API, nên N agent song
@@ -81,14 +81,33 @@ Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` 
 
 ## 5. Lưu trữ
 
-- Chữ (kịch bản, prompt, CSV, EPISODE.md): git. Cuối mỗi khâu: commit + push.
-- Media: `out/<series>/ep<NN>/{plates,clips,renders}/` (git bỏ qua). Container bị thu hồi khi rảnh → media chưa lưu là mất.
-- Sau khi duyệt: `python3 tools/bundle.py out/<series>/ep<NN> --shot s03` → một zip mỗi shot, tải lên Drive
-  `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản dựng duyệt tải riêng từng file.
-  Link ghi vào cột `drive_link` của `prompts.csv`.
+Repo chỉ giữ lõi dùng lại (công cụ, skill, agent, style pack, mẫu, quy trình). Mọi dữ liệu của dự án nằm trên Google
+Drive `ClaudeFilmLab/<ProjectName>/` (gốc lab ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`) – chi tiết `docs/CONVENTIONS.md` §11.
+
+```
+ClaudeFilmLab/<ProjectName>/
+├── 00_QuanLy/      PROJECT.md (manifest ID) · README_CauTruc (Doc) · TienDo_SanXuat (Sheet)
+├── 01_TaiLieuGoc/  _ChoPhanLoai/ · SachThamKhao/ · NguyenVan/ · HinhAnhThamKhao/
+├── 02_KinhThu/     SERIES.md · NhanVat/ · BoiCanh/ · PhongCach/
+├── 03_KichBan/ep<NN>-<slug>/            chữ của tập (= projects/<project>/ep<NN>-<slug>/)
+├── 04_SanXuat/ep<NN>-<slug>/<ngày>/     gói shot, bản nháp; ledger.csv
+├── 05_ThanhPham/ep<NN>-<slug>/          bản cuối, xuất bản
+└── 99_LuuTru/      bản cũ (không xoá gì)
+```
+
+- **Đầu phiên – kéo:** `00_QuanLy/PROJECT.md` trước, rồi kinh thư, tập đang làm và `ledger.csv` về `projects/<project>/`
+  và `out/<project>/ep<NN>/` (git bỏ qua). Không có bản làm việc thì không làm tiếp.
+- **Cuối mỗi khâu – đẩy:** file chữ đã đổi lên thư mục tương ứng (file mới; bản cũ chuyển vào `99_LuuTru/` với tên có
+  giờ), `ledger.csv` nếu có tạo ảnh/video, cập nhật dòng của tập trong `TienDo_SanXuat`. Trước khi dừng phiên cũng đẩy:
+  container bị thu hồi khi rảnh → chữ và media chưa đẩy là mất.
+- Media: `out/<project>/ep<NN>/{plates,clips,renders}/` (git bỏ qua). Sau khi duyệt:
+  `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → một zip mỗi shot, tải lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản nháp
+  duyệt cũng vào đó; bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`. Link ghi vào cột `drive_link` của `prompts.csv`.
+- Thay đổi lõi (công cụ, skill, style pack) mới commit + push vào repo; dữ liệu dự án không bao giờ commit.
 
 ## 6. Chuyển giao giữa phiên
 
-Phiên mới đọc `EPISODE.md` trước, không dựa vào lịch sử chat. EPISODE.md giữ: khâu hiện tại (`stage`), cổng đã qua
+Phiên mới kéo dự án từ Drive rồi đọc `EPISODE.md` trước, không dựa vào lịch sử chat. EPISODE.md giữ: khâu hiện tại (`stage`), cổng đã qua
 (`gates` có ngày), ghi chú người dùng nguyên văn, mục đã khóa (không làm lại), việc tiếp theo, nhật ký mỗi khâu (ngày,
-kết quả, commit). Ghi chú được đổi thành con số/tham số trước khi làm lại; phần người dùng đã khen thì khóa.
+kết quả, giờ đẩy Drive). Ghi chú được đổi thành con số/tham số trước khi làm lại; phần người dùng đã khen thì khóa.

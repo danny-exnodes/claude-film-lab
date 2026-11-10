@@ -5,7 +5,7 @@ description: >-
   độ sâu, máy quay tiến về chủ thể, rung nhẹ, sương cuộn, tàn lửa, quầng sáng, đuôi/tóc/vạt áo đung đưa, mắt nhắm mở,
   thở; clip Seedance đã tách nền cho cử động lớn; âm thanh; render stills → draft → final; gói và lưu Drive. Dùng khi
   người dùng nói "dựng shot", "ghép lớp", "ghép tranh", "parallax", "làm sống tranh", "cho con thú cử động",
-  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<series>/ep<NN>/plates/.
+  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<project>/ep<NN>/plates/.
 ---
 
 # film-compose-shot
@@ -21,8 +21,8 @@ API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `refere
 
 ## 0. Trước khi dựng (miễn phí)
 
-- Đầu vào: `series/<series>/ep<NN>-<slug>/{EPISODE.md, shots.csv, anchors.json}`, lớp tranh đã duyệt trong
-  `out/<series>/ep<NN>/plates/`, `styles/<id>/{style.yaml, motion.md, sound.md}`.
+- Đầu vào: `projects/<project>/ep<NN>-<slug>/{EPISODE.md, shots.csv, anchors.json}`, lớp tranh đã duyệt trong
+  `out/<project>/ep<NN>/plates/`, `styles/<id>/{style.yaml, motion.md, sound.md}`.
 - Mỗi `code_motion` trong `shots.csv` phải là id có trong `tools/compose/motions.json` (`mist-bands`, `embers`,
   `sun-glow`, `strip-warp`, `eyelid`, `breath`, `parallax`, `push-in`) và có trong `style.yaml` `motion:`.
 - `strip-warp`, `eyelid`, `breath`, `push-in` cần điểm neo trong `anchors.json` (`tools/layers/anchors.py set`; hộp =
@@ -37,13 +37,13 @@ API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `refere
 Nạp skill `cinecode` bằng Skill tool trước (để guard của nó chạy), rồi:
 
 ```bash
-mkdir -p out/<series>/ep<NN>/film && cd out/<series>/ep<NN>/film
+mkdir -p out/<project>/ep<NN>/film && cd out/<project>/ep<NN>/film
 python3 ~/.claude/skills/cinecode/scripts/init_film.py <slug> --quick --title "<Tên tập>"
 cd <slug>
-python3 $FILM_LAB/tools/compose/inline.py film.html --init --anchors $FILM_LAB/series/<series>/ep<NN>-<slug>/anchors.json
+python3 $FILM_LAB/tools/compose/inline.py film.html --init --anchors $FILM_LAB/projects/<project>/ep<NN>-<slug>/anchors.json
 ```
 
-- Một tập = một phim cinecode (`out/<series>/ep<NN>/film/<slug>/film.html`), mỗi shot = một dòng `SCENES`.
+- Một tập = một phim cinecode (`out/<project>/ep<NN>/film/<slug>/film.html`), mỗi shot = một dòng `SCENES`.
   Lớp tranh được tham chiếu tương đối: `'../../plates/<file>'`.
 - `inline.py --init` làm một lần trên film.html mới: chèn bộ mã (một khối `<script>` giữa hai dấu `compose-kit`,
   không sửa tay), đổi kích thước mặc định 1080x1920 → **1920x1080**, nối `loadPlates` vào `window.READY`, thay các cảnh
@@ -114,7 +114,7 @@ khung đầu = nhân vật trên nền key phẳng đúng vị trí trên sân k
 `ark.py video` model `dreamina-seedance-2-5-260628`, 720p 5 s (~2,5 phút, chạy nền), `--ratio 16:9`, `--no-audio`
 khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách nền từng khung bằng
 `tools/layers/matte.py chroma` có khử loang màu (despill; `rembg` chỉ để dự phòng: viền nhấp nháy) → chuỗi PNG
-`out/<series>/ep<NN>/clips/<tên-clip>/000001.png` → lớp `seq` trong `PLATES`. Request 502 không tự thử lại.
+`out/<project>/ep<NN>/clips/<tên-clip>/000001.png` → lớp `seq` trong `PLATES`. Request 502 không tự thử lại.
 
 ## 5. Âm thanh
 
@@ -125,7 +125,7 @@ khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách n�
   âm theo chuyển động hay rơi đúng điểm cắt. Không đủ thì `make.py` giữ bản nháp (`SOUND THIN`, `SOUND ALL CODE`).
 - Liệt kê mọi sự kiện trên hình trong `review/sound-audit.md` của thư mục phim (`make.py` đọc file này): bảng
   thời điểm · sự kiện · âm · bus, và dòng `events N · sounded M · silent by choice K`. Chép bản chữ sang
-  `series/<series>/ep<NN>-<slug>/review/sound-audit.md` (git).
+  `projects/<project>/ep<NN>-<slug>/review/sound-audit.md` (đạo diễn đẩy lên Drive `03_KichBan/ep<NN>-<slug>/review/`).
 - **Nhạc luôn do người dùng chọn** (câu hỏi của cinecode: bản thu giấy phép mở ★ · nhạc của họ · code · không), ghi
   vào dòng `Music:` của `STATE.md` kèm `(user)`. Không tự viết `score()` khi họ chưa chọn code.
 - Âm thanh được đo, không nghe: mỗi lần giao bản nháp nhờ người dùng nghe, nêu các giây quan trọng.
@@ -139,7 +139,7 @@ khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách n�
    container cloud (CPU, 2 worker): ~10 khung/s ở 1080p, nhanh hơn ở 960x540; 8 s phim ≈ 20 s render + kiểm.
    Phim 60 s ≈ 2–3 phút.
 3. Sau khi người dùng duyệt bản nháp: `python3 tools/make.py final` (kiểm tất định, 1920x1080, master −14 LUFS).
-4. Chép bản dựng sang tên chuẩn: `out/<series>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` /
+4. Chép bản dựng sang tên chuẩn: `out/<project>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` /
    `ep<NN>_final_v<NN>.mp4` (phiên bản luôn tăng, không ghi đè); ghi `EPISODE.md` Nhật ký.
 
 **"TOO STILL":** `make.py` đo phần thay đổi còn lại sau khi trừ chuyển động máy quay (ngưỡng 1,0 mức xám, mẫu 4
@@ -149,16 +149,19 @@ vậy một shot chỉ có lớp tranh giữ khung dài sẽ bị báo. Cách x�
 lớn đi ngang khung, sương trước dày quét qua chủ thể), hoặc ghi vào `STATE.md` là cố ý (khoảng lặng trước sự kiện)
 và nói với người dùng trong một dòng. `make.py` chỉ giữ một lượt sửa; bản sau được giao kèm điều còn lại.
 
-## 7. Lưu trữ (CONVENTIONS §9)
+## 7. Lưu trữ (CONVENTIONS §9, §11)
 
-- Gói mỗi shot: `python3 tools/bundle.py out/<series>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
-  `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/`.
+- Gói mỗi shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
+  `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (đạo diễn tải; compositor không tải lên Drive).
   Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
-- Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không có
-  trong git**: gói kèm bằng `python3 tools/bundle.py out/<series>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
+- Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
+  trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.
-- Bản dựng duyệt (`renders/*.mp4`) tải riêng từng file.
-- Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill phải commit + push trước khi dừng.
+- Bản dựng duyệt tải riêng từng file: bản nháp vào `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối vào
+  `05_ThanhPham/ep<NN>-<slug>/`.
+- Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill (lõi) phải commit + push trước khi dừng;
+  dữ liệu của tập không bao giờ commit.
 
 ## 8. Sự cố thường gặp
 

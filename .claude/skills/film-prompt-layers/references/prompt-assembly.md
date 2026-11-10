@@ -9,7 +9,7 @@
 {light}                  ← style.yaml light, giống nhau cho mọi lớp của một shot
 ```
 Mẫu theo vai trong `styles/<id>/prompts/` (vd. `bg.txt`, `mid.txt`, `fg.txt`, `character.txt`, `part.txt`): chọn mẫu
-theo lớp, thay chỗ trống, lưu kết quả vào `series/<series>/ep<NN>-<slug>/prompts/<tên-ảnh>.txt`. Không sửa mẫu của style
+theo lớp, thay chỗ trống, lưu kết quả vào `projects/<project>/ep<NN>-<slug>/prompts/<tên-ảnh>.txt`. Không sửa mẫu của style
 pack trong tập; cần đổi mẫu thì báo đạo diễn (style pack là chung cho mọi series).
 
 ## 2. Ví dụ `{subject}` và `{constraints}` (nhân vật L4, thủy mặc, minh họa)

@@ -1,11 +1,12 @@
 ---
 name: film-pipeline
 description: >-
-  Điều phối một tập phim AI Film Lab từ đầu đến cuối ở phiên chính (vai đạo diễn): đọc EPISODE.md, chạy khâu 0–11,
-  giữ cổng duyệt G1–G4, giao việc cho các agent film-*, kiểm ngân sách qua ledger, cập nhật EPISODE.md, commit/push,
-  đóng gói shot và lưu Drive. Dùng khi người dùng nói "làm tập phim", "làm tập mới", "mở tập", "tiếp tục tập",
+  Điều phối một dự án/tập phim AI Film Lab từ đầu đến cuối ở phiên chính (vai đạo diễn): mở dự án trên Google Drive,
+  kéo dự án về projects/<project>/, đọc EPISODE.md, chạy khâu 0–11, giữ cổng duyệt G1–G4, giao việc cho các agent
+  film-*, kiểm ngân sách qua ledger, cập nhật EPISODE.md và TienDo_SanXuat, đẩy chữ và gói shot lên Drive. Dùng khi
+  người dùng nói "dự án mới", "mở dự án", "kéo dự án", "làm tập phim", "làm tập mới", "mở tập", "tiếp tục tập",
   "làm tiếp ep01", "tập tiếp theo", "duyệt kịch bản", "qua cổng", "duyệt shot mẫu", "duyệt bản nháp", "bản cuối",
-  "lưu Drive", hoặc nhắc tới EPISODE.md, budget.yaml, ledger.csv, series/<series>/ep<NN>-<slug>.
+  "lưu Drive", hoặc nhắc tới PROJECT.md, EPISODE.md, budget.yaml, ledger.csv, projects/<project>/ep<NN>-<slug>.
 ---
 
 # film-pipeline – đạo diễn một tập phim
@@ -14,16 +15,62 @@ Bạn là **đạo diễn** ở phiên chính. Bạn không tự vẽ, không t�
 nói chuyện với người dùng và giữ trạng thái tập trong `EPISODE.md`. Hợp đồng chung: `docs/CONVENTIONS.md` (thắng khi khác
 file này). Bản cho người đọc: `docs/WORKFLOW.md`.
 
+Dữ liệu dự án **không nằm trong repo** và không bao giờ commit: nguồn gốc là Google Drive `ClaudeFilmLab/<ProjectName>/`
+(gốc lab ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`); bạn làm trên bản làm việc `projects/<project>/` (chữ) và
+`out/<project>/` (media), cả hai git bỏ qua. Cấu trúc, `PROJECT.md`, ánh xạ, quy tắc phiên bản: CONVENTIONS §11.
+
+## 0. Mở dự án / Kéo về / Đẩy lên Drive
+
+Mọi thao tác Drive dùng connector Google Drive (`search_files`, `download_file_content`, `create_file`, `update_file`);
+không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo tên. Không bao giờ xoá trên Drive: chuyển vào `99_LuuTru/`.
+
+**Dự án mới (khâu 0 của dự án, một lần):**
+1. Hỏi người dùng một lần: tên dự án, slug `<project>`, tên thư mục `<ProjectName>` (PascalCase không dấu), style mặc định.
+2. Tạo `ClaudeFilmLab/<ProjectName>/` và cây thư mục CONVENTIONS §11.1 (`create_file`, mimeType
+   `application/vnd.google-apps.folder`, `parentId` = thư mục cha), ghi từng ID.
+3. Chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv}` vào `projects/<project>/`, điền slug, tên, style, ID.
+   Đẩy `PROJECT.md` → `00_QuanLy/`, `SERIES.md` → `02_KinhThu/` (file chữ, `disableConversionToGoogleType: true`).
+4. `templates/project/README_CauTruc.md` (thay `<ProjectName>`, `<Tên dự án>`) → `00_QuanLy/README_CauTruc` dạng Google
+   Doc; `TienDo_SanXuat.csv` → `00_QuanLy/TienDo_SanXuat` dạng Google Sheet (để Drive chuyển đổi). Ghi hai ID vào
+   `drive.files`, đẩy lại `PROJECT.md`. Báo người dùng link thư mục và chỗ thả tài liệu (`01_TaiLieuGoc/_ChoPhanLoai/`).
+
+**Kéo (đầu mỗi phiên, trước mọi việc khác):**
+1. `00_QuanLy/PROJECT.md` trước → `projects/<project>/PROJECT.md` (chưa biết ID: tìm `<ProjectName>` một lần trong gốc lab).
+2. Theo bảng CONVENTIONS §11.3: `02_KinhThu/` (SERIES.md, CHARACTER.md, LOCATION.md, PhongCach) → `projects/<project>/`;
+   tập đang làm `03_KichBan/ep<NN>-<slug>/` (cả `prompts/`, `review/`) → `projects/<project>/ep<NN>-<slug>/`;
+   `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
+   ngân sách cộng dồn từ ledger); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
+   Ảnh khóa, gói shot, tài liệu gốc: chỉ kéo khi cần.
+3. Chụp dấu và giờ kéo: `find projects/<project> -type f ! -name '.*' -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`;
+   `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`.
+4. Có file trong `01_TaiLieuGoc/_ChoPhanLoai/`: đặt tên theo §11.4, chuyển vào đúng thư mục, ghi `DanhMuc.csv`, báo người dùng.
+
+**Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
+1. File đã đổi/mới: dòng `>` của
+   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`;
+   thêm `ledger.csv` nếu khâu có tạo ảnh/video (`TienDo_SanXuat` theo bước 3).
+2. Mỗi file: `create_file` vào thư mục Drive tương ứng (tham chiếu `sha256:<hex>:<đường dẫn tuyệt đối>`,
+   `disableConversionToGoogleType: true`), ghi `<giờ UTC> <đường dẫn> <ID mới>` vào `projects/<project>/.pushed.log`;
+   thành công rồi mới tìm bản cũ bằng `search_files` (`parentId = '<id>' and title = '<tên>' and trashed = false`) và
+   `update_file` chuyển **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`, đổi tên
+   `<thư mục logic, / → __>__<tên>_<YYYYMMDD-HHMM>.<đuôi>` (CONVENTIONS §11.6 – connector không ghi đè nội dung được).
+   File trên Drive có `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về,
+   gộp trước khi đẩy.
+3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
+   theo §11.6 bước 5.
+4. Cập nhật dấu chỉ cho file đã tải lên thành công (thay đúng dòng trong `.pulled.sha256`); ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+
 ## 1. Việc đầu tiên mỗi phiên
 
-1. Đọc `series/<series>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì ghi trong EPISODE.md,
-   file trong thư mục tập và `git log` mới là sự thật.
-2. Đọc `budget.yaml` và (nếu có) `out/<series>/ep<NN>/ledger.csv` để biết còn bao nhiêu ảnh/giây video.
-3. Kiểm `out/<series>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
+1. Kéo dự án (mục 0), rồi đọc `projects/<project>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì
+   ghi trong EPISODE.md và file của tập trên Drive mới là sự thật. Không kéo được (không có Drive connector): dừng, báo
+   người dùng; không dựng lại dữ liệu từ trí nhớ.
+2. Đọc `budget.yaml` và `out/<project>/ep<NN>/ledger.csv` (vừa kéo về) để biết còn bao nhiêu ảnh/giây video.
+3. Kiểm `out/<project>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
    trong `prompts.csv`), media chưa lưu là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
 4. Báo người dùng 3–5 dòng: khâu hiện tại, cổng đã qua, việc tiếp theo, ngân sách còn lại. Rồi làm `## Việc tiếp theo`.
 
-Chưa có tập: mở tập ở khâu 0 (mục 3).
+Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở khâu 0 (mục 3).
 
 ## 2. Khâu và cổng duyệt
 
@@ -48,7 +95,7 @@ Quy tắc cổng:
 - Cổng **chỉ** qua ở phiên chính, khi người dùng nói rõ là duyệt. Ghi ngày vào `gates: {G1: YYYY-MM-DD}`.
   Agent không bao giờ tự qua cổng, không hỏi người dùng thay bạn.
 - Trước mỗi cổng chạy
-  `python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> --out review/check-v<N>.txt`
+  `python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> --out review/check-v<N>.txt`
   (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md; từ G3, trước khâu 9 và G4 thêm
   `--probe` để file có số đo ffprobe/LUFS). Mã thoát 1 = còn ERROR: không mở
   cổng, giao lại agent của khâu đó kèm nguyên văn dòng lỗi. WARN thì nêu cho người dùng.
@@ -59,18 +106,21 @@ Quy tắc cổng:
 
 ## 3. Mở tập (khâu 0)
 
-1. Tạo `series/<series>/ep<NN>-<slug>/`, chép `templates/episode/EPISODE.md` và `budget.yaml` (không có mẫu thì theo
-   CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`), `length_s`, `media`, `drive`.
+1. Tạo `projects/<project>/ep<NN>-<slug>/`, chép `templates/episode/EPISODE.md` và `budget.yaml` (không có mẫu thì theo
+   CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`), `length_s`, `media`
+   (`out/<project>/ep<NN>`), `drive` (`ClaudeFilmLab/<ProjectName>/03_KichBan/ep<NN>-<slug>`).
 2. Hỏi người dùng một lần: độ dài, style (mặc định của series), trần ảnh và giây video. Ghi câu trả lời nguyên văn vào
    `## Ghi chú người dùng (nguyên văn)`.
-3. Commit + push: `ep<NN> khâu 0: mở tập <slug>`.
+3. Trên Drive tạo `03_KichBan/ep<NN>-<slug>/` (+ `prompts/`, `review/`), `04_SanXuat/ep<NN>-<slug>/`,
+   `05_ThanhPham/ep<NN>-<slug>/`; ghi ID vào `PROJECT.md`; thêm dòng tập vào `TienDo_SanXuat` và bảng `## Tập` của `SERIES.md`.
+4. Đẩy (mục 0): `PROJECT.md`, `SERIES.md`, `EPISODE.md`, `budget.yaml`, `TienDo_SanXuat`.
 
 ## 4. Giao việc cho agent
 
 Mỗi lần gọi agent, viết **hợp đồng giao việc** đủ 6 mục (agent không thấy lịch sử chat):
 
 ```
-Tập: series/<series>/ep<NN>-<slug>/   (media: out/<series>/ep<NN>/)
+Tập: projects/<project>/ep<NN>-<slug>/   (media: out/<project>/ep<NN>/)
 Khâu: <số> – <tên khâu>
 Đầu vào: <danh sách file đọc>; đã khóa (chỉ đọc, không làm lại): <file/shot>
 Đầu ra: <danh sách file tạo/sửa, tên theo CONVENTIONS §2>
@@ -83,7 +133,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 - Agent tạo ảnh/video (`film-plate-maker`, `film-animator`) luôn gọi:
   ```
   FILM_AGENT=<tên-agent> python3 tools/ark.py image ... \
-    --ledger out/<series>/ep<NN>/ledger.csv --budget series/<series>/ep<NN>-<slug>/budget.yaml
+    --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml
   ```
   Mã thoát 3 = vượt trần (`refused-budget`): agent dừng và báo; bạn hỏi người dùng nâng trần hay cắt bớt.
   Bạn tự gọi ark.py ở phiên chính cũng dùng `--ledger/--budget` (cột `agent` trống = phiên chính).
@@ -111,19 +161,22 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 ## 6. Sau mỗi khâu
 
 1. Cập nhật EPISODE.md: `stage`, `gates`, `## Việc tiếp theo` (việc cụ thể, ai làm), thêm một hàng vào bảng
-   `## Nhật ký`: `| YYYY-MM-DD | <khâu> | <kết quả ngắn, số ảnh/giây đã tiêu> | <commit ngắn> |`.
-2. Commit phần chữ (không commit ảnh/video, `out/` bị git bỏ qua) và push. Mẫu thông điệp:
-   `ep<NN> khâu <n>: <việc> (<số liệu>)`, ví dụ `ep01 khâu 2: kịch bản 60 s, 9 shot`.
-   Container bị thu hồi khi rảnh: chưa push là mất.
+   `## Nhật ký`: `| YYYY-MM-DD | <khâu> | <kết quả ngắn, số ảnh/giây đã tiêu> | <giờ đẩy Drive> |`.
+2. Đẩy lên Drive (mục 0): mọi file chữ đã đổi của tập và kinh thư, `ledger.csv` nếu có tạo ảnh/video, dòng của tập
+   trong `TienDo_SanXuat`. **Không commit dữ liệu dự án vào repo** (`projects/`, `out/` bị git bỏ qua).
+   Container bị thu hồi khi rảnh: chưa đẩy là mất.
+3. Chỉ khi bạn sửa lõi (công cụ, skill, style pack, mẫu) mới commit + push repo, tách khỏi dữ liệu dự án.
 
 ## 7. Lưu media lên Drive
 
 Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot, G3/G4 cho bản dựng):
-1. `python3 tools/bundle.py out/<series>/ep<NN> --shot s03` → `out/<series>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
+1. `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → `out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
    (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot). Lệnh in sẵn tham chiếu `sha256:<hex>:<đường dẫn>`.
-2. Tải lên Drive `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với tham chiếu
-   đó); người dùng duyệt từng lần tải. Bản dựng duyệt (`renders/*.mp4`) tải riêng từng file.
-3. Ghi `drive_link` và `approved=yes` vào `prompts.csv`, ghi Nhật ký, commit + push.
+2. Tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (tạo thư mục ngày nếu chưa có,
+   ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp duyệt
+   (`renders/*_draft_*.mp4`) vào cùng thư mục ngày; bản cuối (`renders/*_final_*.mp4`) vào `05_ThanhPham/ep<NN>-<slug>/`.
+   Ảnh khóa nhân vật/bối cảnh duyệt ở G2 → `02_KinhThu/NhanVat/<c>/`, `02_KinhThu/BoiCanh/<l>/`.
+3. Ghi `drive_link` và `approved=yes` vào `prompts.csv`, ghi Nhật ký, đẩy chữ (mục 0).
 
 ## 8. Không làm
 
@@ -131,3 +184,4 @@ Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau kh�
 - Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ qua Lambda (v1.0.0 chưa triển khai → dùng 2K).
 - Không đặt file trạng thái tên `STATE.md` (tên đó của cinecode).
 - Không làm lại mục đã khóa; không qua cổng thay người dùng.
+- Không commit dữ liệu dự án vào repo; không xoá hay `trash_file` trên Drive (chuyển vào `99_LuuTru/`).

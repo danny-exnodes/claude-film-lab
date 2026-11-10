@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Free schema/timing/naming checks for AI Film Lab episodes and style packs (docs/CONVENTIONS.md).
 
-  python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> [--media out/<series>/ep<NN>] [--probe] [--out review/check-v1.txt]
+  python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--media out/<project>/ep<NN>] [--probe] [--out review/check-v1.txt]
   python3 tools/check_episode.py style styles/<id>
 
 Prints ERROR / WARN lines and a summary. Exit 1 when there is any ERROR, else 0.
 Relative --out paths are taken relative to the episode directory (so `--out review/check-v1.txt`
-lands in series/<series>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
+lands in projects/<project>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
 front matter is used (relative to the repo root).
 
 --probe measures every clip and render mp4 with ffprobe (size, fps, duration, audio) and, for
@@ -243,9 +243,12 @@ def check_front_matter(ep_dir, rep):
         exp_media = f"out/{series}/ep{ep:02d}"
         if isinstance(meta.get("media"), str) and meta["media"].rstrip("/") != exp_media:
             rep.warn(W, f"media '{meta['media']}' differs from the convention '{exp_media}'")
-        exp_drive = f"AI Film Lab/{series}/ep{ep:02d}"
-        if isinstance(meta.get("drive"), str) and meta["drive"].rstrip("/") != exp_drive:
-            rep.warn(W, f"drive '{meta['drive']}' differs from the convention '{exp_drive}'")
+        slug = meta.get("slug") if isinstance(meta.get("slug"), str) else "<slug>"
+        exp_drive = f"ClaudeFilmLab/<ProjectName>/03_KichBan/ep{ep:02d}-{slug}"
+        drive = meta.get("drive")
+        if isinstance(drive, str) and not re.fullmatch(
+                rf"ClaudeFilmLab/[A-Za-z0-9]+/03_KichBan/ep{ep:02d}-{re.escape(slug)}", drive.rstrip("/")):
+            rep.warn(W, f"drive '{drive}' differs from the convention '{exp_drive}' (docs/CONVENTIONS.md §11)")
 
     headings = {nfc(l.rstrip()) for l in body.splitlines() if l.startswith("## ")}
     for sec in EPISODE_SECTIONS:
@@ -826,9 +829,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
     sp = p.add_subparsers(dest="cmd", required=True)
-    e = sp.add_parser("episode", help="check an episode folder series/<series>/ep<NN>-<slug>")
+    e = sp.add_parser("episode", help="check an episode folder projects/<project>/ep<NN>-<slug>")
     e.add_argument("episode")
-    e.add_argument("--media", default=None, help="media folder out/<series>/ep<NN> (default: EPISODE.md media:)")
+    e.add_argument("--media", default=None, help="media folder out/<project>/ep<NN> (default: EPISODE.md media:)")
     e.add_argument("--probe", action="store_true",
                    help="measure clips/renders with ffprobe and final renders' loudness with ffmpeg ebur128")
     e.add_argument("--out", default=None, help="also write the report here (relative = inside the episode folder)")

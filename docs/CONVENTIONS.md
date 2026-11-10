@@ -1,7 +1,12 @@
 # Quy ước và schema (v1)
 
 Hợp đồng chung cho mọi skill, agent, công cụ trong repo. Đổi schema = đổi file này trước, rồi mới đổi code.
-Quyết định cho các đề xuất ở issue #1–#7 được ghi ở cuối file.
+Quyết định thiết kế được ghi ở §10.
+
+**Repo = lõi dùng lại** (công cụ, skill, agent, style pack, mẫu, quy trình, cài đặt). **Dữ liệu của từng dự án phim**
+(kinh thư, nhân vật, bối cảnh, nghiên cứu, kịch bản, shot list, `EPISODE.md`, ngân sách, prompt, tiến độ, tài liệu gốc,
+media) **nằm trên Google Drive** `ClaudeFilmLab/<ProjectName>/` (§11) và không bao giờ được commit. Trong phiên, dự án
+được kéo về bản làm việc `projects/<project>/` (git bỏ qua); media ở `out/<project>/` (git bỏ qua).
 
 ## 1. Cấu trúc thư mục
 
@@ -13,15 +18,23 @@ claude-film-lab/
 │   ├── skills/film-pipeline/ · film-script/ · film-prompt-layers/ · film-compose-shot/   # skill lõi
 │   ├── agents/film-<vai>.md                                                               # subagent theo vai
 │   └── agent-memory/<agent>/MEMORY.md                                                     # bài học (memory: project)
-├── styles/<style-id>/            # style pack: STYLE.md, style.yaml, prompts/, motion.md, sound.md, examples.md
-├── series/<series>/              # CHỈ CHỮ: SERIES.md, characters/, locations/, ep<NN>-<slug>/
+├── styles/<style-id>/            # style pack dùng lại: STYLE.md, style.yaml, prompts/, motion.md, sound.md, examples.md
 ├── templates/episode/            # EPISODE.md, budget.yaml, shots.csv, prompts.csv mẫu
+├── templates/project/            # PROJECT.md, SERIES.md, README_CauTruc.md, TienDo_SanXuat.csv mẫu (§11)
 ├── formats/                      # CINECODE_FORMATS (định dạng cinecode đã lưu, xem §9)
 ├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, layers/, compose/
 ├── tests/                        # python3 -m unittest discover -s tests
 ├── lambda/ · docs/
-└── out/<series>/ep<NN>/          # git bỏ qua: plates/, clips/, film/, renders/, ledger.csv
+├── projects/<project>/           # git bỏ qua – bản làm việc CHỈ CHỮ kéo từ Drive (§11):
+│   ├── PROJECT.md                #   manifest: slug, tên, style, ID thư mục Drive
+│   ├── SERIES.md · characters/<c>/CHARACTER.md · locations/<l>/LOCATION.md · style/
+│   ├── ep<NN>-<slug>/            #   EPISODE.md, budget.yaml, research.md, script.md, shots.csv, prompts.csv, ...
+│   └── sources/                  #   tài liệu gốc dạng chữ, kéo về khi cần
+└── out/<project>/                # git bỏ qua – media: ep<NN>/{plates,clips,film,renders,bundles}/, ep<NN>/ledger.csv,
+                                  #   ảnh khóa characters/<c>/, locations/<l>/, tài liệu gốc dạng ảnh sources/
 ```
+`<project>` = slug dự án (ASCII kebab-case, vd. `son-hai-kinh`), cũng là giá trị `series:` trong `SERIES.md`/`EPISODE.md`.
+`<ProjectName>` = tên thư mục dự án trên Drive (PascalCase không dấu, vd. `SonHaiKinh`). Một dự án = một series phim.
 
 ## 2. Đặt tên
 
@@ -31,9 +44,11 @@ claude-film-lab/
 | Skill theo kỹ thuật dựng | `film-compose-<kỹ thuật>` | `film-compose-3d` |
 | Agent | `film-<vai>` | `film-reviewer` |
 | Style id | kebab-case không dấu | `thuy-mac`, `moc-ban` |
-| Series / nhân vật / bối cảnh | slug không dấu | `son-hai-kinh`, `bac-thi`, `nui-co` |
-| Thư mục tập (chữ) | `series/<series>/ep<NN>-<slug>/` | `series/son-hai-kinh/ep01-bac-thi/` |
-| Thư mục tập (media) | `out/<series>/ep<NN>/` | `out/son-hai-kinh/ep01/` |
+| Dự án (series) / nhân vật / bối cảnh | slug không dấu | `son-hai-kinh`, `bac-thi`, `nui-co` |
+| Thư mục dự án trên Drive | `ClaudeFilmLab/<ProjectName>/` (PascalCase không dấu) | `ClaudeFilmLab/SonHaiKinh/` |
+| Bản làm việc dự án | `projects/<project>/` (git bỏ qua) | `projects/son-hai-kinh/` |
+| Thư mục tập (chữ) | `projects/<project>/ep<NN>-<slug>/` | `projects/son-hai-kinh/ep01-bac-thi/` |
+| Thư mục tập (media) | `out/<project>/ep<NN>/` | `out/son-hai-kinh/ep01/` |
 | Shot id | `s<NN>` (2 chữ số, tăng dần) | `s03` |
 | Lớp tranh | `ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.<png\|jpg>` | `ep01_s03_L4_bac-thi_v02.png` |
 | Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` |
@@ -49,10 +64,10 @@ Regex chuẩn (dùng trong `tools/check_episode.py`):
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
-Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<series>/ep<NN>/{plates,clips,renders}/`.
+Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/ep<NN>/{plates,clips,renders}/`.
 Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1); khung gốc trước khi
 tách nền: `clips/<tên clip không đuôi>/raw/000001.png`.
-Thư mục film cinecode của tập: `out/<series>/ep<NN>/film/<tên>/` (có `STATE.md` riêng của cinecode).
+Thư mục film cinecode của tập: `out/<project>/ep<NN>/film/<tên>/` (có `STATE.md` riêng của cinecode).
 
 ## 3. Style pack: `styles/<id>/style.yaml`
 
@@ -92,9 +107,12 @@ type: {latin: "Cormorant Garamond", cjk: "Noto Serif CJK TC"}
 Prompt mẫu trong `styles/<id>/prompts/*.txt` dùng chỗ trống `{style_block}`, `{subject}`, `{constraints}`, `{light}`.
 Thêm trường phái mới = chép `styles/_template/`, không sửa skill.
 
-## 4. Series và tập
+## 4. Dự án (series) và tập
 
-`series/<series>/SERIES.md` (đầu file là khối YAML):
+Đường dẫn dưới đây là của bản làm việc `projects/<project>/`; nơi lưu thật trên Drive xem bảng ánh xạ §11.3.
+Dự án mới: chép `templates/project/` (§11.5).
+
+`projects/<project>/PROJECT.md`: manifest dự án (§11.2). `projects/<project>/SERIES.md` (đầu file là khối YAML):
 ```yaml
 ---
 series: son-hai-kinh
@@ -105,21 +123,25 @@ language: vi
 format: {width: 1920, height: 1080, fps: 24}
 ---
 ```
-`characters/<slug>/CHARACTER.md`: nguồn nguyên văn + link, cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa.
+`series:` = slug dự án = tên thư mục `projects/<project>/`. `characters/<slug>/CHARACTER.md`: nguồn nguyên văn + link,
+cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa.
+`locations/<slug>/LOCATION.md`: như CHARACTER.md cho bối cảnh. `style/`: ghi chú phong cách riêng của dự án và prompt
+mẫu đã duyệt (style pack dùng chung vẫn ở `styles/<id>/` trong repo).
 
-Thư mục tập `series/<series>/ep<NN>-<slug>/`:
+Thư mục tập `projects/<project>/ep<NN>-<slug>/`:
 
 | File | Ai viết | Nội dung |
 |---|---|---|
 | `EPISODE.md` | đạo diễn | trạng thái tập (§5). **Không đặt tên `STATE.md`** – tên đó thuộc cinecode |
 | `budget.yaml` | đạo diễn | trần chi phí (§7) |
-| `research.md` | film-researcher | nguyên văn, link, cách đọc tên |
+| `research.md` | film-researcher | nguyên văn, link, cách đọc tên; tài liệu gốc dùng tới ghi theo tên file trong `01_TaiLieuGoc/` (§11.4) |
 | `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`. Mọi dòng không phải tiêu đề `#`, dòng trống, chú thích `<!-- -->` hay trích dẫn `>` đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>` |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
 | `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-<v>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
+| `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
 
 ## 5. `EPISODE.md`
 
@@ -134,10 +156,13 @@ length_s: 60
 stage: 2                 # 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/ep01
-drive: "AI Film Lab/son-hai-kinh/ep01"
+drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/ep01-bac-thi"   # thư mục chữ của tập trên Drive (§11)
 ---
 ```
-Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký` (mỗi khâu một dòng: ngày, khâu, kết quả, commit).
+`series` = slug dự án; `media` = `out/<project>/ep<NN>`; `drive` = `ClaudeFilmLab/<ProjectName>/03_KichBan/ep<NN>-<slug>`
+(ID thư mục lấy từ `PROJECT.md`, không tìm theo tên). Lệch quy ước → `check_episode.py` báo WARN.
+Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
+(mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
 ## 6. CSV (RFC 4180, UTF-8, có header, trường có dấu phẩy/xuống dòng phải đặt trong ngoặc kép)
 
@@ -166,7 +191,8 @@ video_seconds: 60        # tổng giây video tối đa
 models:                  # (tuỳ chọn) trần riêng theo model, đơn vị ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6
 ```
-`ledger.csv` (đặt ở `out/<series>/ep<NN>/ledger.csv`), header:
+`ledger.csv` (đặt ở `out/<project>/ep<NN>/ledger.csv`; bản gốc trên Drive `04_SanXuat/ep<NN>-<slug>/ledger.csv`, kéo về đầu
+phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
 `ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note`
 - `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
 - Ngân sách không phải tuỳ chọn: `ark.py image|video` từ chối (thoát mã 2, không gọi API, không ghi ledger) nếu thiếu
@@ -195,22 +221,177 @@ models:                  # (tuỳ chọn) trần riêng theo model, đơn vị �
 Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở phiên chính; agent không hỏi người dùng, không tự qua cổng.
 
 ## 9. Lưu trữ
-- Chữ: git. Media: `out/` (git bỏ qua) – mất khi container bị thu hồi.
-- Lưu Drive theo **gói mỗi shot**: `python3 tools/bundle.py out/<series>/ep<NN> --shot s03` → một file zip, một lần duyệt tải lên
-  Drive `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/`. Bản dựng duyệt (`renders/*.mp4`) tải lên riêng từng file.
+- **Mã lõi** (repo này): git, commit + push. **Dữ liệu dự án** (chữ và media): Google Drive `ClaudeFilmLab/<ProjectName>/`
+  là nguồn gốc (§11); `projects/<project>/` (chữ) và `out/<project>/` (media) chỉ là bản làm việc, git bỏ qua, mất khi
+  container bị thu hồi → đẩy chữ lên Drive sau mỗi khâu và trước khi dừng phiên (§11.6).
+- Không bao giờ commit dữ liệu dự án vào repo (kể cả "tạm"). Ví dụ trong style pack (`styles/<id>/examples.md`) chỉ
+  chép prompt đã duyệt, không chép kịch bản hay kinh thư.
+- Media lưu Drive theo **gói mỗi shot**: `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → một file zip, một lần
+  duyệt tải lên `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`. Bản nháp duyệt
+  (`renders/*_draft_*.mp4`) cũng vào `04_SanXuat/…/<YYYY-MM-DD>/`; bản cuối (`renders/*_final_*.mp4`) vào
+  `05_ThanhPham/ep<NN>-<slug>/`, tải riêng từng file.
 - cinecode lưu định dạng ở `~/.cinecode/formats`; hook đặt `CINECODE_FORMATS=<repo>/formats` để định dạng sống qua các phiên.
 
-## 10. Quyết định cho issue #1–#7 (v1.0.0)
+## 10. Quyết định thiết kế
 | Đề xuất | Quyết định |
 |---|---|
+| Kinh thư, kịch bản, tập phim nằm trong repo (`series/`) | **Repo chỉ là lõi dùng lại**; dữ liệu mỗi dự án nằm trên Drive `ClaudeFilmLab/<ProjectName>/`, bản làm việc `projects/<project>/` git bỏ qua (§11, sau v1.0.0) |
 | Style pack tự viết motion/sound | Kế thừa recipe cinecode qua `base:`; style pack chỉ ghi phần riêng (prompt Seedream, lớp, matte, model) |
 | `STATE.md` cho tập | Đổi thành `EPISODE.md` |
 | `key_bg #FF00FF` + rembg cho mọi lớp | `matte.per_layer`: thủy mặc dùng `luminance` cho L2/L3 (giữ vệt mực loang), `rembg` cho L4/P |
 | Ngân sách ghi bằng prompt | `ark.py --budget/--ledger` chặn trong công cụ |
 | `cost_note` | `usage` JSON nguyên văn (API không trả tiền) |
-| Lưu Drive từng file | Gói zip theo shot (`tools/bundle.py`); S3 khi Lambda sẵn sàng |
+| Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); S3 khi Lambda sẵn sàng. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
 | Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-<v>.txt` |
 | Song song plate-maker | Tối đa 3 agent song song; ledger dùng khoá file |
 | Kiểm tra kịch bản bằng mắt | `tools/check_episode.py` kiểm schema, thời lượng, nhịp, tên file |
 | Ảnh `--ref` nặng | `ark.py` nén ref thành JPEG q90, cạnh ≤ 2048 trước khi gửi |
 | ctext.org | Chặn truy cập tự động; dùng zh.wikisource.org |
+
+## 11. Dự án trên Drive
+
+Mọi dữ liệu của một dự án phim nằm trên Google Drive, dưới thư mục gốc của lab `ClaudeFilmLab`
+(ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục. Drive là **nguồn gốc**; `projects/<project>/` và
+`out/<project>/` chỉ là bản làm việc trong container. Đồng bộ do Claude làm bằng connector Google Drive
+(`search_files`, `download_file_content`, `create_file`, `update_file`); không có CLI.
+
+### 11.1 Cấu trúc
+
+```
+ClaudeFilmLab/<ProjectName>/            PascalCase không dấu, vd. SonHaiKinh
+├── 00_QuanLy/      PROJECT.md (manifest, §11.2) · README_CauTruc (Google Doc cho người đọc) · TienDo_SanXuat (Google Sheet, mỗi tập một dòng)
+├── 01_TaiLieuGoc/  _ChoPhanLoai/ (hộp thư đến) · SachThamKhao/<MaSach>_<NoiDung>/ · NguyenVan/ · HinhAnhThamKhao/ · DanhMuc.csv
+├── 02_KinhThu/     SERIES.md · NhanVat/<slug>/CHARACTER.md (+ ảnh khóa) · BoiCanh/<slug>/LOCATION.md (+ ảnh khóa) · PhongCach/
+├── 03_KichBan/ep<NN>-<slug>/            EPISODE.md, budget.yaml, research.md, script.md, shots.csv, prompts.csv, anchors.json, prompts/, review/, publish.md
+├── 04_SanXuat/ep<NN>-<slug>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt
+├── 05_ThanhPham/ep<NN>-<slug>/          bản cuối, thumbnail, tài liệu xuất bản
+└── 99_LuuTru/      bản cũ và thứ bỏ đi (chuyển vào đây, không xoá)
+```
+- Thư mục cấp 1 đánh số `NN_TenKhongDau` để giữ thứ tự; thư mục tập dùng đúng tên `ep<NN>-<slug>` như bản làm việc.
+- File chữ (`.md`, `.csv`, `.yaml`, `.json`, `.txt`) lưu **nguyên dạng**, không chuyển sang Google Docs/Sheets
+  (`disableConversionToGoogleType: true`) để kéo về được y nguyên. Chỉ `README_CauTruc` (Doc) và `TienDo_SanXuat`
+  (Sheet) là file Google cho người đọc.
+- `HinhAnhThamKhao/` chỉ để tham khảo không khí: **không** dùng làm `--ref`, không đưa vào phim.
+- `PhongCach/` giữ ghi chú phong cách riêng của dự án và prompt đã duyệt; style pack dùng chung ở `styles/<id>/` (repo).
+
+### 11.2 `PROJECT.md` (manifest)
+
+Đọc **đầu tiên** mỗi phiên: ánh xạ mọi đường dẫn của bản làm việc sang ID thư mục Drive. Mẫu: `templates/project/PROJECT.md`.
+```yaml
+---
+project: son-hai-kinh            # slug: projects/<project>/, out/<project>/, series: trong SERIES.md và EPISODE.md
+title: Sơn Hải Kinh
+style: thuy-mac                  # style mặc định, styles/<id>/
+drive:
+  name: SonHaiKinh               # tên thư mục dự án trên Drive (<ProjectName>)
+  lab_root: 19yQarw7ATu90uzXjboGP4sy5FzlQhd0y   # ClaudeFilmLab
+  root: <ID thư mục ClaudeFilmLab/<ProjectName>>
+  folders:                       # đường dẫn logic (tính từ thư mục dự án, dấu /) -> ID thư mục
+    00_QuanLy: <id>
+    02_KinhThu/NhanVat/bac-thi: <id>
+    03_KichBan/ep01-bac-thi: <id>
+    03_KichBan/ep01-bac-thi/prompts: <id>
+    04_SanXuat/ep01-bac-thi: <id>
+    # ... mọi thư mục đã tạo, kể cả thư mục con
+  files:                         # chỉ file Google cố định (file chữ đổi ID mỗi lần đẩy, §11.6)
+    00_QuanLy/README_CauTruc: <id>
+    00_QuanLy/TienDo_SanXuat: <id>
+---
+```
+- Có ID thì dùng ID, không tìm thư mục theo tên. Tạo thư mục mới (`create_file`, mimeType
+  `application/vnd.google-apps.folder`, `parentId` từ manifest) → ghi ID vào `drive.folders` ngay và đẩy `PROJECT.md`.
+- Thư mục `<YYYY-MM-DD>/` trong `04_SanXuat` cũng ghi vào `folders` (`04_SanXuat/ep01-bac-thi/2026-11-10: <id>`).
+
+### 11.3 Ánh xạ Drive ↔ bản làm việc
+
+| Đường dẫn logic trên Drive | Bản làm việc | Kéo / đẩy |
+|---|---|---|
+| `00_QuanLy/PROJECT.md` | `projects/<project>/PROJECT.md` | kéo đầu tiên; đẩy khi thêm thư mục |
+| `00_QuanLy/TienDo_SanXuat` (Sheet) | `projects/<project>/TienDo_SanXuat.csv` | kéo bằng xuất CSV; cập nhật sau mỗi khâu (§11.6) |
+| `00_QuanLy/README_CauTruc` (Doc) | – | tạo một lần từ `templates/project/README_CauTruc.md` |
+| `01_TaiLieuGoc/<…>` | chữ: `projects/<project>/sources/<…>` · ảnh, PDF: `out/<project>/sources/<…>` | kéo khi cần; chỉ thêm, không sửa file gốc |
+| `01_TaiLieuGoc/DanhMuc.csv` (ngoại lệ: được sửa) | `projects/<project>/sources/DanhMuc.csv` (mẫu `templates/project/DanhMuc.csv`) | thêm một dòng cho mỗi tài liệu mới; đẩy như file chữ (§11.6) |
+| `02_KinhThu/SERIES.md` | `projects/<project>/SERIES.md` | kéo đầu phiên; đẩy khi đổi |
+| `02_KinhThu/NhanVat/<c>/CHARACTER.md` | `projects/<project>/characters/<c>/CHARACTER.md` | như trên |
+| `02_KinhThu/NhanVat/<c>/<ảnh khóa>` | `out/<project>/characters/<c>/` | kéo khi cần làm `--ref`; đẩy sau G2 |
+| `02_KinhThu/BoiCanh/<l>/LOCATION.md` · ảnh | `projects/<project>/locations/<l>/LOCATION.md` · `out/<project>/locations/<l>/` | như nhân vật |
+| `02_KinhThu/PhongCach/` | `projects/<project>/style/` | kéo đầu phiên; đẩy khi đổi |
+| `03_KichBan/ep<NN>-<slug>/` (cả `prompts/`, `review/`) | `projects/<project>/ep<NN>-<slug>/` | kéo tập đang làm; đẩy sau mỗi khâu |
+| `04_SanXuat/ep<NN>-<slug>/ledger.csv` | `out/<project>/ep<NN>/ledger.csv` | **kéo đầu phiên** (ngân sách cộng dồn từ ledger); đẩy sau mỗi khâu có tạo ảnh/video |
+| `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` | `out/<project>/ep<NN>/bundles/*.zip`, `renders/*_draft_*.mp4` | chỉ đẩy, sau khi duyệt |
+| `05_ThanhPham/ep<NN>-<slug>/` | `out/<project>/ep<NN>/renders/*_final_*.mp4`, thumbnail | chỉ đẩy, sau G4 |
+| `99_LuuTru/` | – | không kéo |
+
+Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<project>/ep<NN>-<slug>`,
+`bundle.py out/<project>/ep<NN>` (tự tìm `projects/<project>/ep<NN>-*/`).
+
+### 11.4 Đặt tên tài liệu gốc
+
+- File trong `01_TaiLieuGoc/`: `<masach>_<noidung>_<NN>_<chitiet>.<ext>`, chữ thường ASCII không dấu, trong mỗi phần
+  dùng `-` (vd. `shk-banminhhoa_mucluc_03_tr002-003.jpg`, `shk-quachphac_namsonkinh_01_co-son.txt`). Thư mục sách:
+  `SachThamKhao/<MaSach>_<NoiDung>/`. Giữ nguyên file gốc, không nén lại, không sửa.
+- Tài liệu mới (người dùng gửi vào chat hoặc thả vào `_ChoPhanLoai/`): Claude đổi tên theo quy tắc, chuyển vào thư
+  mục đúng (`update_file` với `title` và `parentId`), ghi một dòng vào `01_TaiLieuGoc/DanhMuc.csv`
+  (`file,thu_muc,mo_ta,nguon,ngay_them`) và báo người dùng.
+- `research.md` dẫn tài liệu gốc bằng tên file này (kèm link Drive), nguồn trên mạng bằng link + ngày truy cập.
+
+### 11.5 Mở dự án mới (khâu 0 của dự án)
+
+1. Người dùng chốt: tên dự án, `<project>` (slug), `<ProjectName>`, style mặc định.
+2. Tạo thư mục `ClaudeFilmLab/<ProjectName>/` và cây §11.1 bằng `create_file` (folder), ghi từng ID.
+3. Bản làm việc: chép `templates/project/{PROJECT.md, SERIES.md, TienDo_SanXuat.csv}` vào `projects/<project>/`, điền
+   slug, tên, style và ID. Đẩy `PROJECT.md` lên `00_QuanLy/`, `SERIES.md` lên `02_KinhThu/` (file chữ, không chuyển đổi).
+4. `README_CauTruc.md` (thay `<ProjectName>`) → `create_file` với `contentMimeType: text/markdown`, **để** chuyển sang
+   Google Doc; `TienDo_SanXuat.csv` → `text/csv`, chuyển sang Google Sheet. Ghi hai ID vào `drive.files`, đẩy lại `PROJECT.md`.
+
+### 11.6 Kéo về, đẩy lên, phiên bản mới
+
+**Kéo (đầu mỗi phiên, trước mọi việc):**
+1. `PROJECT.md`: ID thư mục lấy từ người dùng hoặc tìm một lần `parentId = '<lab_root>'` → `<ProjectName>` →
+   `00_QuanLy`; tải `PROJECT.md` về `projects/<project>/PROJECT.md`.
+2. Với mỗi thư mục cần (bảng §11.3: kinh thư, tập đang làm, ledger): `search_files` với
+   `parentId = '<id>' and trashed = false`, tải từng file chữ (`download_file_content`, giải base64) về đúng đường dẫn;
+   thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
+3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
+   cũ vào `99_LuuTru/` theo bước 3 của mục đẩy.
+4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
+   `find projects/<project> -type f ! -name '.*' -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`
+   và `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`. Mọi lần tải lên trong phiên ghi một dòng
+   `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log`.
+
+**Đẩy (sau mỗi khâu, sau mỗi lần sửa theo ghi chú, và trước khi dừng phiên – container bị thu hồi khi rảnh):**
+1. File chữ mới hoặc đã đổi = các dòng `>` của
+   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`
+   (`TienDo_SanXuat.csv` đi theo bước 5, không tải lên như file chữ).
+   Cộng `out/<project>/ep<NN>/ledger.csv` nếu khâu vừa rồi có tạo ảnh/video.
+2. Mỗi file: `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
+   `sha256:<hex>:<đường dẫn tuyệt đối>` (hex từ `sha256sum`), `contentMimeType` (`.md` `text/markdown`, `.csv` `text/csv`,
+   `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`.
+3. **Quy tắc phiên bản (chọn vì đơn giản và chắc):** connector không ghi đè được nội dung file (`update_file` chỉ sửa
+   tên, thư mục, thuộc tính), nên lịch sử phiên bản của Drive không dùng được. Mỗi lần đẩy là **file mới**; chỉ sau khi
+   tải lên thành công, tìm bản cũ ngay lúc đó bằng `search_files` (`parentId = '<id thư mục>' and title = '<tên file>'
+   and trashed = false`) – không dựa vào ID nhớ từ lúc kéo, vì đẩy nhiều lần trong phiên hoặc ngữ cảnh bị nén sẽ làm
+   mất ID – rồi **mọi kết quả trừ ID vừa tạo** được `update_file` chuyển vào `99_LuuTru/` (`parentId`) và đổi tên
+   `<đường dẫn logic của thư mục, '/' → '__'>__<tên không đuôi>_<YYYYMMDD-HHMM>.<đuôi>` (giờ UTC lúc thay), vd.
+   `03_KichBan__ep01-bac-thi__script_20261110-1530.md`. Kết quả: mỗi thư mục luôn có đúng một bản hiện hành mỗi tên;
+   mọi bản cũ nằm ở `99_LuuTru/`, tìm lại được theo tên. Tải lên trước, chuyển sau: bị ngắt giữa chừng chỉ để lại
+   bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
+4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
+   trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
+   dùng), xung đột thì hỏi người dùng; rồi mới đẩy.
+5. `TienDo_SanXuat` (Sheet): sửa dòng của tập trong `projects/<project>/TienDo_SanXuat.csv` (cột theo
+   `templates/project/TienDo_SanXuat.csv`). Có công cụ sửa Google Sheets thì sửa đúng dòng đó tại chỗ (giữ link); không
+   có thì tải CSV lên **có** chuyển đổi (Sheet mới tên `TienDo_SanXuat` trong `00_QuanLy/`), chuyển Sheet cũ vào
+   `99_LuuTru/` theo bước 3, cập nhật `drive.files` và đẩy `PROJECT.md`.
+6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (thay đúng dòng của file đó trong `.pulled.sha256`;
+   file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách); ghi giờ đẩy vào cột cuối dòng
+   `## Nhật ký` của EPISODE.md.
+7. Mỗi lần tải lên người dùng duyệt: gom file của một khâu đẩy một lượt, báo trước danh sách.
+
+**Media:** gói shot, bản nháp, bản cuối, ảnh khóa chỉ đẩy sau khi người dùng duyệt (§9); đã có trên Drive thì kéo về
+khi cần, không tạo lại bằng API.
+
+### 11.7 Không xoá
+
+Không xoá, không `trash_file` gì trên Drive. Thứ không dùng nữa (bản cũ, tập huỷ, ảnh hỏng đã lỡ tải lên) chuyển vào
+`99_LuuTru/` bằng `update_file` (`parentId`), đổi tên theo §11.6 bước 3 nếu có thể trùng tên.

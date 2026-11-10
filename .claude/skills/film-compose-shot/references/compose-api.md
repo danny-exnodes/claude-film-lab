@@ -37,12 +37,12 @@ async function loadPlates() {
 Mọi ảnh được `decode()` và chép sang canvas; mọi texture (sương, tàn lửa, quầng sáng, phần cắt của rig) dựng xong
 trước khi `load` trả về. Ảnh lỗi làm READY thất bại với tên lớp và đường dẫn.
 
-## 2. `anchors.json` (film-plate-maker viết bằng `tools/layers/anchors.py`, `series/<series>/ep<NN>-<slug>/anchors.json`)
+## 2. `anchors.json` (film-plate-maker viết bằng `tools/layers/anchors.py`, `projects/<project>/ep<NN>-<slug>/anchors.json`)
 
 ```bash
-python3 tools/layers/anchors.py set  series/<s>/ep01-<slug>/anchors.json ep01_s03_L4_bac-thi_v02.png subject 540 995
-python3 tools/layers/anchors.py set  series/<s>/ep01-<slug>/anchors.json ep01_s03_L4_bac-thi_v02.png tail_tl 1290 760
-python3 tools/layers/anchors.py mark out/<s>/ep01/plates/ep01_s03_L4_bac-thi_v02.png series/<s>/ep01-<slug>/anchors.json /tmp/mark.png
+python3 tools/layers/anchors.py set  projects/<p>/ep01-<slug>/anchors.json ep01_s03_L4_bac-thi_v02.png subject 540 995
+python3 tools/layers/anchors.py set  projects/<p>/ep01-<slug>/anchors.json ep01_s03_L4_bac-thi_v02.png tail_tl 1290 760
+python3 tools/layers/anchors.py mark out/<p>/ep01/plates/ep01_s03_L4_bac-thi_v02.png projects/<p>/ep01-<slug>/anchors.json /tmp/mark.png
 ```
 ```json
 { "ep01_s03_L4_bac-thi_v02.png": {

@@ -12,7 +12,7 @@ PLATES = ["ep01_s01_L1_nui-co_v01.png", "ep01_s02_L4_bac-thi_v02.png", "ep01_s02
 class EpisodeCase(TmpDirCase, unittest.TestCase):
     def setUp(self):
         super().setUp()
-        self.ep = self.tmp / "series" / "test-series" / "ep01-test-ep"
+        self.ep = self.tmp / "projects" / "test-series" / "ep01-test-ep"
         shutil.copytree(EPISODE_FIX, self.ep)
         self.media = self.tmp / "out" / "test-series" / "ep01"
         for sub, names in (("plates", PLATES), ("clips", ["ep01_s02_seedance25_v01.mp4"]),
@@ -80,8 +80,19 @@ class TestEpisodeGood(EpisodeCase):
 
 class TestEpisodeFrontMatter(EpisodeCase):
     def test_missing_key(self):
-        self.edit("EPISODE.md", 'drive: "AI Film Lab/test-series/ep01"\n', "")
+        self.edit("EPISODE.md", 'drive: "ClaudeFilmLab/TestSeries/03_KichBan/ep01-test-ep"\n', "")
         self.assert_error(r"front matter key 'drive' missing")
+
+    def test_fixture_drive_follows_convention(self):
+        code, out, _ = self.check()
+        self.assertNotIn("WARN  EPISODE.md: drive", out)
+
+    def test_legacy_drive_path_is_warn(self):
+        self.edit("EPISODE.md", 'drive: "ClaudeFilmLab/TestSeries/03_KichBan/ep01-test-ep"', 'drive: "AI Film Lab/test-series/ep01"')
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("drive 'AI Film Lab/test-series/ep01' differs from the convention "
+                      "'ClaudeFilmLab/<ProjectName>/03_KichBan/ep01-test-ep'", out)
 
     def test_missing_section(self):
         self.edit("EPISODE.md", "## Việc tiếp theo", "## Viec tiep theo")

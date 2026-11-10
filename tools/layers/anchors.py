@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anchor points for layer images (series/<series>/ep<NN>-<slug>/anchors.json, docs/CONVENTIONS.md §4).
+"""Anchor points for layer images (projects/<project>/ep<NN>-<slug>/anchors.json, docs/CONVENTIONS.md §4).
 
   python3 tools/layers/anchors.py set  ANCHORS_JSON FILE NAME X Y     add or update a point (pixel coords)
   python3 tools/layers/anchors.py mark IMAGE ANCHORS_JSON OUT         draw labelled crosshairs for IMAGE's points

@@ -8,9 +8,9 @@ Dùng khi shot cần cử động mà code không làm được trên ảnh ph�
 Nhân vật trên **nền key phẳng**, đúng vị trí và cỡ trên sân khấu 1920x1080 như trong phim (máy quay ở trạng thái nghỉ):
 
 ```bash
-python3 tools/compose/keyframe.py out/<s>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the>_v<NN>.png \
-    out/<s>/ep<NN>/clips/ep<NN>_s<NN>_start_v<NN>.png \
-    --x <place.x> --y <place.y> --h <place.h> --pivot feet --anchors series/<s>/ep<NN>-<slug>/anchors.json --key "<matte.key_bg>"
+python3 tools/compose/keyframe.py out/<p>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the>_v<NN>.png \
+    out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v<NN>.png \
+    --x <place.x> --y <place.y> --h <place.h> --pivot feet --anchors projects/<p>/ep<NN>-<slug>/anchors.json --key "<matte.key_bg>"
 ```
 - `--key` lấy từ `style.yaml matte.key_bg`; chọn màu xa màu nhân vật (xanh lá cho mực đen/xám, magenta cho sinh vật
   xanh). Khung ra 16:9 nên clip ra 16:9 (ảnh vuông cho clip vuông, ví dụ 960×960 ở 720p).
@@ -23,9 +23,9 @@ python3 tools/compose/keyframe.py out/<s>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the
 FILM_AGENT=<tên agent hoặc để trống> python3 tools/ark.py video \
   "<style_block>. <một chuyển động duy nhất, ví dụ: the beast slowly turns its head toward the camera>. Static camera, \
 flat <key colour> background stays perfectly uniform, no new objects, same ink-wash style." \
-  out/<s>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
-  --image out/<s>/ep<NN>/clips/ep<NN>_s<NN>_start_v01.png --duration 5 --resolution 720p --ratio 16:9 --no-audio \
-  --ledger out/<s>/ep<NN>/ledger.csv --budget series/<s>/ep<NN>-<slug>/budget.yaml
+  out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
+  --image out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v01.png --duration 5 --resolution 720p --ratio 16:9 --no-audio \
+  --ledger out/<p>/ep<NN>/ledger.csv --budget projects/<p>/ep<NN>-<slug>/budget.yaml
 ```
 - Model mặc định `dreamina-seedance-2-5-260628` (`docs/MODELS.md`). Chạy Bash `run_in_background` (hoặc timeout dài).
 - Prompt: **một** chuyển động, giữ phong cách, **máy quay tĩnh**, nền key đồng nhất.
@@ -38,14 +38,14 @@ flat <key colour> background stays perfectly uniform, no new objects, same ink-w
 ## 3. Tách nền từng khung
 
 ```bash
-mkdir -p out/<s>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw
-ffmpeg -i out/<s>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
-  out/<s>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw/%06d.png
+mkdir -p out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw
+ffmpeg -i out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
+  out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw/%06d.png
 python3 tools/layers/matte.py chroma ...   # xem --help: key = matte.key_bg, có despill; ra PNG RGBA cùng tên
 ```
 - **Chroma key + despill** ổn định theo thời gian; `rembg` từng khung làm viền nhấp nháy giữa các khung, chỉ dùng
   khi nền không phẳng.
-- Kết quả: `out/<s>/ep<NN>/clips/<tên clip không đuôi>/000001.png ...` (RGBA, cỡ gốc của clip, ví dụ 1280x720: lớp `seq` không `place` tự co phủ sân khấu). Xem 3 khung (đầu, giữa,
+- Kết quả: `out/<p>/ep<NN>/clips/<tên clip không đuôi>/000001.png ...` (RGBA, cỡ gốc của clip, ví dụ 1280x720: lớp `seq` không `place` tự co phủ sân khấu). Xem 3 khung (đầu, giữa,
   cuối) trước khi dùng: viền xanh còn sót → tăng despill.
 
 ## 4. Đưa vào phim

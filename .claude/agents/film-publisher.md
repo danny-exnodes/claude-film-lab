@@ -13,7 +13,7 @@ Bạn là người lo xuất bản của AI Film Lab.
 
 Đầu vào: hợp đồng giao việc, `EPISODE.md` (G4 phải có ngày), `script.md` (mốc chương), `research.md` (nguồn, link),
 `shots.csv`, `prompts.csv` (model đã dùng), `SERIES.md`.
-Đầu ra: `series/<series>/ep<NN>-<slug>/publish.md`: tiêu đề (≤ 70 ký tự, 3 phương án), mô tả, chương `mm:ss` lấy từ
+Đầu ra: `projects/<project>/ep<NN>-<slug>/publish.md`: tiêu đề (≤ 70 ký tự, 3 phương án), mô tả, chương `mm:ss` lấy từ
 `script.md`, nguồn nguyên văn và link, credit (model Seedream/Seedance, công cụ, giọng đọc), tag, prompt thumbnail theo
 style (không chữ trong ảnh; chữ thêm sau).
 

@@ -7,7 +7,7 @@ length_s: 30
 stage: 5
 gates: {G1: 2026-11-01, G2: null, G3: null, G4: null}
 media: out/test-series/ep01
-drive: "AI Film Lab/test-series/ep01"
+drive: "ClaudeFilmLab/TestSeries/03_KichBan/ep01-test-ep"
 ---
 # Tập 1: Tập thử
 

@@ -274,10 +274,23 @@ class TestBundle(TmpDirCase, unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("no files containing _s07_", err)
 
+    def test_finds_episode_dir_in_projects(self):
+        lab = self.tmp / "lab"
+        ep_dir = lab / "projects" / "test-series" / "ep01-test-ep"
+        shutil.copytree(EPISODE_FIX, ep_dir)
+        (lab / "series" / "test-series" / "ep01-old").mkdir(parents=True)   # legacy layout loses to projects/
+        old_lab, bundle.LAB = bundle.LAB, str(lab)
+        try:
+            self.assertEqual(bundle.find_series_dir(str(self.media)), str(ep_dir))
+            shutil.rmtree(lab / "projects")
+            self.assertEqual(bundle.find_series_dir(str(self.media)), str(lab / "series" / "test-series" / "ep01-old"))
+        finally:
+            bundle.LAB = old_lab
+
     def test_without_series_dir(self):
         code, so, err = run_main(bundle.main, [str(self.media), "--shot", "s01"])
         self.assertEqual(code, 0, err)
-        self.assertIn("no series dir found", so)
+        self.assertIn("no episode dir found", so)
 
 
 if __name__ == "__main__":

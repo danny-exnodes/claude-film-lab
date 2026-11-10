@@ -5,7 +5,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TOOLS = REPO / "tools"
 FIX = Path(__file__).resolve().parent / "fixtures"
-EPISODE_FIX = FIX / "series" / "test-series" / "ep01-test-ep"
+EPISODE_FIX = FIX / "projects" / "test-series" / "ep01-test-ep"
 STYLE_FIX = FIX / "styles" / "test-style"
 
 # Safety net: nothing in the tests may reach the real Ark API. ark.call is always mocked, and the

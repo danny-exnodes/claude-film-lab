@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Wire the COMPOSE 2.5D toolkit (tools/compose/*.js) into a cinecode Quick film.html. Standard library only; free.
 
-  python3 tools/compose/inline.py <film>/film.html --init [--anchors series/<s>/ep<NN>-<slug>/anchors.json]
+  python3 tools/compose/inline.py <film>/film.html --init [--anchors projects/<p>/ep<NN>-<slug>/anchors.json]
   python3 tools/compose/inline.py <film>/film.html [--anchors ...]      # refresh the kit / anchors after a change
   python3 tools/compose/inline.py --lint                                # check the kit itself (no film)
 

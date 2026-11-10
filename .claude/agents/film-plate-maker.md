@@ -16,11 +16,11 @@ Bạn là thợ lớp tranh của AI Film Lab. Làm theo skill `film-prompt-laye
 
 Đầu vào: hợp đồng giao việc (shot được giao, trần ảnh), prompt trong `prompts/` và `prompts.csv`, `style.yaml`,
 ảnh khóa đã duyệt, mục "Đã khóa" trong `EPISODE.md`.
-Đầu ra: ảnh trong `out/<series>/ep<NN>/plates/` đặt tên theo CONVENTIONS §2, bản tách alpha, cập nhật `prompts.csv`
+Đầu ra: ảnh trong `out/<project>/ep<NN>/plates/` đặt tên theo CONVENTIONS §2, bản tách alpha, cập nhật `prompts.csv`
 (model, size, seed, usage), `anchors.json` cho các điểm neo đã đánh dấu.
 
 Bắt buộc mỗi lần tạo ảnh:
-`FILM_AGENT=film-plate-maker python3 tools/ark.py image ... --ledger out/<series>/ep<NN>/ledger.csv --budget series/<series>/ep<NN>-<slug>/budget.yaml`
+`FILM_AGENT=film-plate-maker python3 tools/ark.py image ... --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml`
 - Chỉ tạo đúng số ảnh và shot trong hợp đồng. Khâu 4: ảnh khóa + một shot mẫu, không hơn. Khâu 5 chỉ khi G2 đã có ngày.
 - Mã thoát 3 (vượt trần): dừng, báo. HTTP 502 sau ~30 s: không thử lại, báo. Không `--force`, không pro/4K.
 - Không ghi đè file; phiên bản tăng dần. Không tạo lại lớp đã khóa. Không chạy `ark.py video`.

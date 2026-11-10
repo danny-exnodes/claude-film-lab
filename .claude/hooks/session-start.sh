@@ -48,4 +48,9 @@ if [ ! -f /root/.rembg/models/u2net/u2net.onnx ] && [ ! -f ~/.u2net/u2net.onnx ]
     || echo "film-lab: u2net prefetch failed; rembg will download it on first use"
 fi
 
+# 6. Project data lives on Google Drive (docs/CONVENTIONS.md §11), never in the repo: remind to pull it
+if [ -z "$(ls -A "$LAB/projects" 2>/dev/null)" ]; then
+  echo "film-lab: projects/ is empty - project data lives on Drive ClaudeFilmLab/<ProjectName>/; pull it first (film-pipeline §0, PROJECT.md first)"
+fi
+
 "$LAB/tools/doctor.sh" --quick || true

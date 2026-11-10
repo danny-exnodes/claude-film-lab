@@ -7,7 +7,7 @@
 ## Cách ghi một ví dụ
 
 ```markdown
-### <lớp> – <chủ thể> (<series>/ep<NN>/s<NN>)
+### <lớp> – <chủ thể> (<project>/ep<NN>/s<NN>)
 - File: `ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.png` · model `<id>` · size `<size>` · seed `<seed hoặc trống>`
 - Mẫu: `prompts/<file>.txt` · refs: `<file;file>` · tách: `<method low/high>`
 - Drive: <link gói shot>

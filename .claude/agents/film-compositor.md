@@ -17,9 +17,9 @@ Bạn là người dựng phim của AI Film Lab. Làm theo skill `film-compose-
 Chỉ có một compositor cho mỗi tập: không để hai agent sửa cùng file.
 
 Đầu vào: hợp đồng giao việc, `script.md`, `shots.csv`, `anchors.json`, `prompts.csv` (lớp đã duyệt), lớp trong
-`out/<series>/ep<NN>/plates/`, clip trong `clips/`, `styles/<style>/` (motion, sound), mục "Đã khóa" và ghi chú đã đổi
+`out/<project>/ep<NN>/plates/`, clip trong `clips/`, `styles/<style>/` (motion, sound), mục "Đã khóa" và ghi chú đã đổi
 thành tham số trong `EPISODE.md`.
-Đầu ra: film.html theo shot, `out/<series>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` (960×540) hoặc
+Đầu ra: film.html theo shot, `out/<project>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` (960×540) hoặc
 `ep<NN>_final_v<NN>.mp4` (1920×1080, -14 LUFS), `review/sound-audit.md`.
 
 Giới hạn:

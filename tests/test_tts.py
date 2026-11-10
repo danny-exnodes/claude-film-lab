@@ -721,6 +721,73 @@ class TestSpeed(CliCase, unittest.TestCase):
         self.assertIn("0,9–1,1", (REPO / "tools" / "tts" / "README.md").read_text(encoding="utf-8"))
 
 
+class TestReviewHardening(CliCase, unittest.TestCase):
+    """Hostile inputs found in review: each one is an input error (exit 2, one stderr line, no engine)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        self.script = write_script(self.ep, ["Một.", "Hai."])
+        self.base = ["--script", str(self.script), "--out", str(self.out)]
+
+    def assert_input_error(self, argv, needle):
+        code, so, err, _, made = self.run_tool(argv)
+        self.assertEqual((code, made), (tts.EXIT_INPUT, []), err)
+        self.assertIn(needle, err)
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+
+    def test_length_must_be_a_positive_finite_number(self):
+        for bad in ("nan", "inf", "-inf", "0", "-4", "abc"):
+            for extra in (["--dry-run", "--strict"], ["--strict"]):
+                with self.subTest(length=bad, extra=extra):
+                    code, _, err, _, made = self.run_tool(self.base + ["--length", bad] + extra)
+                    self.assertEqual((code, made), (tts.EXIT_INPUT, []), err)
+                    self.assertIn("--length", err)
+        self.assertFalse(self.out.exists())
+
+    def test_unusable_length_s_in_episode_md_is_an_input_error(self):
+        for raw in (b"---\nlength_s: 1.2.3\n---\n", b"\xff\xfe"):
+            with self.subTest(raw=raw):
+                (self.ep / "EPISODE.md").write_bytes(raw)
+                self.assert_input_error(self.base + ["--dry-run"], "EPISODE.md")
+
+    def test_lines_with_a_huge_number_or_deep_nesting(self):
+        huge = self.tmp / "huge.json"
+        huge.write_text('{"lines": [{"id": "A", "text": "x", "start_s": 1' + "0" * 400 + "}]}", encoding="utf-8")
+        self.assert_input_error(["--lines", str(huge), "--dry-run"], "start_s")
+        deep = self.tmp / "deep.json"
+        deep.write_text("[" * 100000, encoding="utf-8")
+        self.assert_input_error(["--lines", str(deep), "--dry-run"], "cannot read")
+
+    def test_out_that_cannot_be_a_folder_is_refused_before_the_engine(self):
+        blocker = self.tmp / "afile"
+        blocker.write_text("x", encoding="utf-8")
+        for out in (blocker, blocker / "vo"):
+            with self.subTest(out=out):
+                self.assert_input_error(["--script", str(self.script), "--length", "10", "--out", str(out)], "--out")
+                self.assert_input_error(["--audition", "Nam Một", "--text", "Xin chào.", "--out", str(out)], "--out")
+        self.assertEqual(blocker.read_text(encoding="utf-8"), "x")
+
+    def test_only_without_an_id_is_refused(self):
+        self.assert_input_error(self.base + ["--length", "10", "--only", ","], "--only")
+
+    def test_log_is_in_script_order_whatever_the_render_order(self):
+        base = self.base + ["--length", "10"]
+        self.assertEqual(self.run_tool(base + ["--only", "VO2"])[0], 0)
+        self.assertEqual(self.run_tool(base + ["--only", "VO1"])[0], 0)
+        self.assertEqual([e["id"] for e in self.read_log(self.out)], ["VO1", "VO2"])
+
+    def test_retiring_the_same_orphan_twice_keeps_both_wavs(self):
+        full = self.base + ["--length", "10"]
+        with mock.patch.object(tts.time, "strftime", return_value="20260101T000000Z"):
+            for _ in range(3):                      # three takes of VO2 leave the script in the same second
+                write_script(self.ep, ["Một.", "Hai."])
+                self.assertEqual(self.run_tool(full)[0], 0)
+                write_script(self.ep, ["Một."])
+                self.assertEqual(self.run_tool(full + ["--length", "4"])[0], 0)
+        self.assertEqual(len(list((self.out / "_stale").glob("VO2*.wav"))), 3)
+
+
 class TestNarratorAgent(unittest.TestCase):
     AGENTS = REPO / ".claude" / "agents"
 

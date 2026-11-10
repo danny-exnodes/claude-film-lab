@@ -157,7 +157,7 @@ def load_lines(path):
     try:
         with open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, RecursionError) as e:
         raise InputError(f"{path}: cannot read: {e}") from None
     if not isinstance(data, dict) or not isinstance(data.get("lines"), list):
         raise InputError(f'{path}: expected an object {{"lines": [{{"id": "VO1", "text": "..."}}]}}')
@@ -181,8 +181,8 @@ def load_lines(path):
             v = ln.get(k)
             if v is None:
                 continue
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
-                raise InputError(f"{path}: line {i} ({lid}): {k} must be a number of seconds, got {v!r}")
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v < 1e9:   # nan, inf: False
+                raise InputError(f"{path}: line {i} ({lid}): {k} must be a number of seconds, got {str(v)[:40]}")
             row[k] = float(v)
         out.append(row)
     return out
@@ -523,7 +523,11 @@ def collect_lines(a):
         except (OSError, ValueError) as e:
             fail(f"{a.script}: cannot read: {e}")
         if length is None:
-            length = episode_length(a.script)
+            try:
+                length = episode_length(a.script)
+            except ValueError as e:                 # not UTF-8, or a length_s that is not a number
+                fail(f"{os.path.join(os.path.dirname(os.path.abspath(a.script)), 'EPISODE.md')}: cannot read"
+                     f" length_s: {e}")
         problems = script_problems(text, length)
         if problems:
             fail("\n".join(f"{a.script}:{n}: {why}" for n, why in problems))
@@ -545,6 +549,8 @@ def collect_lines(a):
     selected = lines
     if a.only:
         keep = {x for o in a.only for x in o.split(",") if x}
+        if not keep:
+            fail("--only: no id given")
         unknown = keep - {ln["id"] for ln in lines}
         if unknown:
             fail(f"--only: unknown id(s) {', '.join(sorted(unknown))}")
@@ -658,7 +664,11 @@ def retire_orphans(out, by_id, orphans):
         os.makedirs(os.path.join(out, STALE_DIR), exist_ok=True)
         dst = os.path.join(out, STALE_DIR, f"{i}.wav")
         if os.path.exists(dst):
-            dst = os.path.join(out, STALE_DIR, f"{i}.{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}.wav")
+            stem = os.path.join(out, STALE_DIR, f"{i}.{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
+            dst, n = f"{stem}.wav", 1
+            while os.path.exists(dst):              # never replace a retired take
+                n += 1
+                dst = f"{stem}-{n}.wav"
         os.replace(src, dst)
         print(f"moved {i}.wav to {os.path.join(STALE_DIR, os.path.basename(dst))}")
 
@@ -745,6 +755,10 @@ def run_lines(a, lines, pron, make_engine, all_lines=None):
         print(f"--strict: {unread} unread token(s); nothing rendered", file=sys.stderr)
         return 1
     need_ffmpeg(a)
+    try:
+        os.makedirs(a.out, exist_ok=True)
+    except OSError as e:
+        fail(f"--out {a.out}: cannot create the folder: {e}")
     tracked = bool(a.script or a.lines)             # --text takes are one-offs: no stale/orphan bookkeeping
     log_path = os.path.join(a.out, LOG_NAME)
     by_id = {e["id"]: e for e in open_log(log_path)}
@@ -758,7 +772,6 @@ def run_lines(a, lines, pron, make_engine, all_lines=None):
              f" pass --allow-stale")
     eng = make_engine(a)
     voice = a.voice or eng.default_voice()
-    os.makedirs(a.out, exist_ok=True)
     entries, total_audio, total_cpu = [], 0.0, 0.0
     for ln in lines:
         path = os.path.join(a.out, f"{ln['id']}.wav")
@@ -884,10 +897,13 @@ def run_audition(a, lines, pron, make_engine):
         print(f"--strict: {unread} unread token(s); nothing rendered", file=sys.stderr)
         return 1
     need_ffmpeg(a)
+    try:
+        os.makedirs(a.out, exist_ok=True)
+    except OSError as e:
+        fail(f"--out {a.out}: cannot create the folder: {e}")
     eng = make_engine(a)
     voices = pick_voices(a.audition, eng)
     meta = {v["name"]: v for v in eng.voices()}
-    os.makedirs(a.out, exist_ok=True)
     rows = []
     print(f"{'voice':<16} {'g':<6} {'reg':<5} {'id':<4} {'dur':>6} {'rms':>6} {'peak':>6} {'clip':>5} {'x rt':>5}")
     for v in voices:
@@ -938,6 +954,16 @@ def speed_arg(s):
     return v
 
 
+def length_arg(s):
+    try:
+        v = float(s)
+    except ValueError:
+        v = math.nan
+    if not 0 < v < 1e9:                             # also false for nan and inf
+        raise argparse.ArgumentTypeError(f"must be the episode length in seconds, got {s!r}")
+    return v
+
+
 def rate_arg(s):
     try:
         v = float(s)
@@ -969,7 +995,7 @@ def build_parser():
     p.add_argument("--pron", help="pronunciation map CSV 'term,doc' (Hán Việt names), applied before normalisation")
     p.add_argument("--numbers", choices=["nam", "bac"], default="nam",
                    help="read numbers the Southern way (ngàn, lẻ; default) or Northern way (nghìn, linh)")
-    p.add_argument("--length", type=float, help="episode length in s (slot of the last line); default from EPISODE.md")
+    p.add_argument("--length", type=length_arg, help="episode length in s (slot of the last line); default from EPISODE.md")
     p.add_argument("--mode", choices=sorted(MODES), default="v3turbo", help="v3turbo = final (default), v3nano = draft")
     p.add_argument("--precision", choices=["int8", "fp32"], default="int8",
                    help="v3turbo CPU backbone: int8 (default, needs a VNNI CPU) or fp32 (slower)")

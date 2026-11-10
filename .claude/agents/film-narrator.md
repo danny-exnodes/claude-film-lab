@@ -31,8 +31,9 @@ Các bước, theo đúng thứ tự:
 3. `render`: giọng, mode, seed **chỉ** lấy từ hợp đồng:
    `python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --voice "<giọng>" --mode <mode> --seed <seed> --strict`
    rồi chạy lại đúng lệnh đó với `--check` thay cho `--strict`. Xong = `--check` thoát mã 0.
-4. `rerender <ids>`: như bước 3, thêm `--only <ids>`, rồi `--check`. Tool từ chối vì dòng khác đang `STALE`: dừng,
-   báo các id đó (không tự thêm `--allow-stale`, trừ khi hợp đồng ghi rõ).
+4. `rerender <ids>`: như bước 3, thêm `--only <ids>` vào lệnh render; lệnh `--check` thì **không** kèm `--only`
+   (nó luôn kiểm cả kịch bản). Tool từ chối vì dòng khác đang `STALE`: dừng, báo các id đó (không tự thêm
+   `--allow-stale`, trừ khi hợp đồng ghi rõ).
 - Chạy Bash với timeout dài (≥ 600000 ms). Mã thoát 3 (chưa cài `vieneu`): cài bằng `pip` đúng theo
   `tools/tts/README.md` §Cài đặt rồi chạy lại; cài không được thì dừng, báo.
 - Mã thoát 1 sau render (`OVER`, `EMPTY`, `CLIPPED`, `NOSLOT`): không tự sửa, báo id kèm số đo. Dòng quá khung là

@@ -18,9 +18,9 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Gốc lab: Drive `ClaudeFilmLab` (ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục `<ProjectName>/`
   (vd. `SonHaiKinh/`): `00_QuanLy · 01_TaiLieuGoc · 02_KinhThu · 03_KichBan · 04_SanXuat · 05_ThanhPham · 99_LuuTru`.
   Cấu trúc, `PROJECT.md`, ánh xạ đường dẫn, quy tắc đặt tên: `docs/CONVENTIONS.md` §11. Mẫu: `templates/project/`.
-- **Kéo** đầu phiên, trước mọi việc: đọc `00_QuanLy/PROJECT.md` trước (ID mọi thư mục), luôn tải `SERIES.md`, `EPISODE.md`, `budget.yaml` và mọi bản `ledger.csv`,
-  file khác kéo theo khâu sắp chạy (film-pipeline mục 0); kinh thư, tập đang làm và
-  `ledger.csv` về `projects/<project>/` và `out/<project>/ep<NN>/` bằng connector Google Drive (không có CLI).
+- **Kéo** đầu phiên, trước mọi việc, bằng connector Google Drive (không có CLI): đọc `00_QuanLy/PROJECT.md` trước (ID mọi
+  thư mục), luôn tải `SERIES.md`, `EPISODE.md`, `budget.yaml` và mọi bản `ledger.csv` về `projects/<project>/` và
+  `out/<project>/ep<NN>/`; file khác kéo theo khâu sắp chạy (film-pipeline mục 0).
 - **Đẩy** file chữ đã đổi sau mỗi khâu và trước khi dừng phiên (container bị thu hồi khi rảnh); cập nhật
   `TienDo_SanXuat`. Bản mới = file mới; bản cũ chuyển vào `99_LuuTru/` (§11.6). Không xoá gì trên Drive.
 

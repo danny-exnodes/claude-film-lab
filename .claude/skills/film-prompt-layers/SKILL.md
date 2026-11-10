@@ -69,6 +69,8 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
   Không tạo shot khác cho tới khi `gates.G2` có ngày trong EPISODE.md.
 - Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua `lambda/` khi đã triển khai; v1.0.0 chưa
   → dùng 2K của model `image`.
+- **Có `--ref` thì dùng `--fast`** (`dola-seedream-5-0-flash`, 2K/2560x1440): lite + `--ref` ở 2K bị proxy cắt (502 ở
+  31 s, có thể vẫn tính phí); flash + `--ref` chạy ~75 ảnh không lần 502 nào (`docs/MODELS.md`). Lite chỉ khi không `--ref`.
 - `--seed` và `--negative` có trong ark.py nhưng **chưa xác minh** model áp dụng: ghi seed vào `prompts.csv` để tham
   khảo, không hứa tái tạo y hệt.
 - `--ref` được ark.py tự nén JPEG q90, cạnh ≤ 2048; file trên đĩa giữ nguyên.
@@ -84,6 +86,10 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
    ```
    Không ghi đè ảnh gốc: ảnh tách đặt ở thư mục riêng (vd. `plates/matte/`) cùng tên file. Cờ tường minh chỉ dùng khi
    đạo diễn ghi trong hợp đồng. Thủy mặc: L2/L3 `luminance` (rembg cắt mất vệt mực loang), L4/P `rembg`.
+   `luminance` mặc định `--paper auto`: ước lượng màu giấy từ viền ảnh (nền Seedream "trắng" thường ngà/gradient như
+   `#F5F1EE`, `#EAE5DF`) và in `paper #…`; `paper_bg` của style chỉ để tham khảo. `WARNING: L2/L3 is only …% transparent`
+   → xem `--preview`, tăng `--low`; chỉ truyền `--paper #RRGGBB` khi chắc màu nền. `rembg` tự xếp hàng qua khóa toàn
+   máy `/tmp/film-lab-rembg.lock` (u2net ~1 GB RAM mỗi tiến trình): dòng `waiting for another rembg run` là bình thường.
 2. Kiểm bằng mắt (Read ảnh `--preview`, ghép trên nền đỏ): viền trắng, quầng sương, lỗ thủng (thân sáng trùng nền),
    mực bị cắt. Lỗi thì báo, không tự tạo lại ảnh ngoài hợp đồng.
 3. Điểm neo: Claude đọc ảnh, đề xuất tọa độ (mắt, đường chân, mặt đá, gốc đuôi), ghi bằng

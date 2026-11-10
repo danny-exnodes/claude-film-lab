@@ -21,7 +21,8 @@ vào `projects/<project>/ep<NN>-<slug>/prompts/<tên-clip>.txt`.
 Bắt buộc mỗi clip:
 `FILM_AGENT=film-animator python3 tools/ark.py video "<prompt>" <out.mp4> --image <khung đầu> --duration <s> --resolution 720p --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml`
 - Chạy Bash với timeout dài (≥ 600000 ms). 1080p chỉ khi hợp đồng ghi rõ đã duyệt.
-- Khung đầu vuông cho ra video vuông: dùng ảnh 16:9 hoặc `--ratio 16:9`. Âm thanh tự sinh: `--no-audio` nếu hợp đồng yêu cầu.
+- Khung đầu vuông cho ra video vuông: tự làm khung đầu 16:9 (vd. 1280x720). Không truyền `--ratio` cùng `--image`
+  (Seedance 2.5 trả HTTP 400). Âm thanh tự sinh: `--no-audio` nếu hợp đồng yêu cầu.
 - Mã thoát 3 (vượt trần): dừng, báo. Lỗi hay cắt kết nối: không thử lại, báo. Không chạy `ark.py image`.
 
 Giới hạn: không hỏi người dùng, không tự qua cổng, không in/ghi log/tìm API key. Trả về tối đa 10 dòng: clip đã tạo,

@@ -24,6 +24,12 @@ Bắt buộc mỗi lần tạo ảnh:
 - Chỉ tạo đúng số ảnh và shot trong hợp đồng. Khâu 4: ảnh khóa + một shot mẫu, không hơn. Khâu 5 chỉ khi G2 đã có ngày.
 - Mã thoát 3 (vượt trần): dừng, báo. HTTP 502 sau ~30 s: không thử lại, báo. Không `--force`, không pro/4K.
 - Không ghi đè file; phiên bản tăng dần. Không tạo lại lớp đã khóa. Không chạy `ark.py video`.
+- Có `--ref` thì dùng `--fast` (flash): lite + `--ref` ở 2K bị cắt 502 ở 31 s (`docs/MODELS.md`).
+- Chạy song song: script phụ, prompt tạm, file trung gian để trong **thư mục scratch riêng đặt theo `FILM_AGENT`**
+  (vd. `<scratchpad>/film-plate-maker-s01-s04/`), không dùng chung file với agent khác (đã có lần ledger ghi sai agent).
+- `matte.py --method rembg` (L4/P) tự chờ khóa toàn máy `/tmp/film-lab-rembg.lock` (u2net ~1 GB RAM; 3 agent cùng
+  chạy từng bị OOM-kill): thấy `waiting for another rembg run` thì cứ chờ, không xoá file khóa, không chạy vòng lặp
+  rembg tự viết ngoài `matte.py`. L2/L3 luminance để `--paper auto` (mặc định); gặp cảnh báo < 10% trong suốt thì báo.
 
 Giới hạn: không hỏi người dùng, không tự qua cổng, không in/ghi log/tìm API key (không đọc biến môi trường chứa khóa,
 không `env`/`printenv`). Trả về tối đa 10 dòng: ảnh đã tạo (số, tên), số ảnh đã tiêu/trần, lỗi, việc chờ người duyệt (neo).

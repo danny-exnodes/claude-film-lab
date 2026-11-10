@@ -1,16 +1,20 @@
 #!/usr/bin/env python3
 """Free schema/timing/naming checks for AI Film Lab episodes and style packs (docs/CONVENTIONS.md).
 
-  python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--media out/<project>/ep<NN>] [--probe] [--out review/check-v1.txt]
+  python3 tools/check_episode.py episode projects/<project>/<episode folder> [--media out/<project>/<id>] [--probe] [--out review/check-v1.txt]
   python3 tools/check_episode.py style styles/<id>
+
+Episode ids (§2, tools/episode_id.py): `ep<NN>` (folder ep<NN>-<slug>, media out/<project>/ep<NN>/, files ep<NN>_...)
+or, for a project split into books, `q<NN>t<NN>` (folder q<NN>-t<NN>-<slug>, media out/<project>/q<NN>t<NN>/,
+files q<NN>t<NN>_..., EPISODE.md `book:`). The folder, `book`/`episode`, media folder and every file prefix must agree.
 
 Prints ERROR / WARN lines and a summary. Exit 1 when there is any ERROR, else 0.
 Relative --out paths are taken relative to the episode directory (so `--out review/check-v1.txt`
-lands in projects/<project>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
+lands in projects/<project>/<episode folder>/review/). Without --media the `media:` path from EPISODE.md
 front matter is used (relative to the repo root).
 
 --probe measures every clip and render mp4 with ffprobe (size, fps, duration, audio) and, for
-renders/ep<NN>_final_v<NN>.mp4, integrated loudness with ffmpeg ebur128 (target -14 +-1 LUFS); the
+renders/<id>_final_v<NN>.mp4, integrated loudness with ffmpeg ebur128 (target -14 +-1 LUFS); the
 numbers go into the report, so `--probe --out review/check-<v>.txt` is what film-reviewer reads.
 
 script.md rules: every narration line starts with a [mm:ss] mark (an optional "- " bullet before it is
@@ -24,6 +28,8 @@ INFO line). A file that cannot be read gives an ERROR line; the report is writte
 import argparse, csv, datetime, io, json, math, os, re, shutil, subprocess, sys, unicodedata
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(LAB, "tools"))
+import episode_id as eid_mod  # noqa: E402
 
 
 def known_motions():
@@ -35,19 +41,21 @@ def known_motions():
         return None
 
 # --- §2 naming -----------------------------------------------------------------
-RE_LAYER_FILE = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
-RE_CLIP_FILE = re.compile(r"^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$")
-RE_RENDER_FILE = re.compile(r"^ep\d{2}_(draft|final)_v\d{2}\.mp4$")
+# <id> = ep<NN> or q<NN>t<NN> (tools/episode_id.py)
+ID = eid_mod.ID
+RE_LAYER_FILE = re.compile(rf"^{ID}_s\d{{2}}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{{2}}\.(png|jpg)$")
+RE_CLIP_FILE = re.compile(rf"^{ID}_s\d{{2}}_[a-z0-9]+_v\d{{2}}\.mp4$")
+RE_RENDER_FILE = re.compile(rf"^{ID}_(draft|final)_v\d{{2}}\.mp4$")
 # Other files under clips/ (film-compose-shot/references/seedance-layer.md):
-#   clips/ep<NN>_s<NN>_start_v<NN>.png          start frame for Seedance (tools/compose/keyframe.py)
+#   clips/<id>_s<NN>_start_v<NN>.png            start frame for Seedance (tools/compose/keyframe.py)
 #   clips/<clip stem>/000001.png ...            keyed RGBA frames (matte.py chroma), read by a `seq` layer
 #   clips/<clip stem>/raw/000001.png ...        raw frames extracted with ffmpeg before keying
-RE_START_FRAME = re.compile(r"^ep\d{2}_s\d{2}_start_v\d{2}\.png$")
-RE_CLIP_STEM = re.compile(r"^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}$")
+RE_START_FRAME = re.compile(rf"^{ID}_s\d{{2}}_start_v\d{{2}}\.png$")
+RE_CLIP_STEM = re.compile(rf"^{ID}_s\d{{2}}_[a-z0-9]+_v\d{{2}}$")
 RE_FRAME = re.compile(r"^\d{6}\.png$")
 RE_LAYER_CODE = re.compile(r"^(L[1-4]|P\d+-[a-z0-9-]+|FX)$")
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
-RE_EP_DIR = re.compile(r"^ep(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
+RE_EP_DIR = eid_mod.RE_DIR
 RE_SHOT = re.compile(r"^s(\d{2})$")
 RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RE_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -55,6 +63,7 @@ MEDIA_RULES = {"plates": RE_LAYER_FILE, "clips": RE_CLIP_FILE, "renders": RE_REN
 
 # --- §5 / §6 schema --------------------------------------------------------------
 EPISODE_KEYS = ["series", "episode", "slug", "style", "length_s", "stage", "gates", "media", "drive"]
+EPISODE_OPTIONAL = ["book"]   # set = project split into books: id q<book>t<episode>
 EPISODE_SECTIONS = ["## Ghi chú người dùng (nguyên văn)", "## Đã khóa (không làm lại)", "## Việc tiếp theo", "## Nhật ký"]
 GATES = ["G1", "G2", "G3", "G4"]
 SHOTS_HEADER = ["shot", "from_s", "to_s", "shot_size", "camera", "action", "layers", "code_motion", "ai_motion", "sound", "reuse_of"]
@@ -203,15 +212,17 @@ def check_front_matter(ep_dir, rep):
         if k not in meta:
             rep.error(W, f"front matter key '{k}' missing")
     for k in meta:
-        if k not in EPISODE_KEYS:
+        if k not in EPISODE_KEYS and k not in EPISODE_OPTIONAL:
             rep.warn(W, f"unknown front matter key '{k}'")
 
     ep_abs = os.path.abspath(ep_dir)   # abspath first: `episode .` must see the real folder name, not '.'
     folder = os.path.basename(ep_abs)
     series_folder = os.path.basename(os.path.dirname(ep_abs))
-    m = RE_EP_DIR.match(folder)
-    if not m:
-        rep.error(W, f"episode folder '{folder}' does not match ep<NN>-<slug>")
+    parsed = eid_mod.parse_dir(folder)
+    if not parsed:
+        rep.error(W, f"episode folder '{folder}' does not match ep<NN>-<slug> or q<NN>-t<NN>-<slug>")
+    dir_id, dir_slug = parsed or (None, None)
+    dir_book, dir_ep = eid_mod.parse_id(dir_id) if dir_id else (None, None)
     series = meta.get("series")
     if "series" in meta:
         if not isinstance(series, str) or not RE_SLUG.match(series):
@@ -219,17 +230,31 @@ def check_front_matter(ep_dir, rep):
         elif series != series_folder:
             rep.error(W, f"series '{series}' != parent folder '{series_folder}'")
     ep = meta.get("episode")
-    if "episode" in meta:
-        if not isinstance(ep, int) or isinstance(ep, bool) or ep < 0 or ep > 99:
-            rep.error(W, f"episode {ep!r} must be an integer 0-99")
-        elif m and int(m.group(1)) != ep:
-            rep.error(W, f"episode {ep} != folder number ep{m.group(1)}")
+    ep_ok = isinstance(ep, int) and not isinstance(ep, bool) and 0 <= ep <= 99
+    if "episode" in meta and not ep_ok:
+        rep.error(W, f"episode {ep!r} must be an integer 0-99")
+    book = meta.get("book")
+    book_ok = "book" in meta and isinstance(book, int) and not isinstance(book, bool) and 0 <= book <= 99
+    book_bad = book is not None and not book_ok
+    if book_bad:
+        rep.error(W, f"book {book!r} must be an integer 0-99 (or absent for ep<NN> numbering)")
+    book = book if book_ok else None
+    meta["_id"] = None
+    if ep_ok and not book_bad:
+        meta["_id"] = eid_mod.make_id(ep, book)
+        if dir_id and meta["_id"] != dir_id:
+            want = f"book {book}, episode {ep}" if book is not None else f"episode {ep}"
+            got = f"q{dir_book:02d}-t{dir_ep:02d}" if dir_book is not None else f"ep{dir_ep:02d}"
+            hint = (" (folder uses books: set 'book:')" if dir_book is not None and book is None else
+                    " (folder has no book: rename it q<NN>-t<NN>-<slug> or drop 'book:')"
+                    if dir_book is None and book is not None else "")
+            rep.error(W, f"{want} != folder number {got}{hint}")
     if "slug" in meta:
         slug = meta.get("slug")
         if not isinstance(slug, str) or not RE_SLUG.match(slug):
             rep.error(W, f"slug {slug!r} is not an ASCII kebab-case slug")
-        elif m and slug != m.group(2):
-            rep.error(W, f"slug '{slug}' != folder slug '{m.group(2)}'")
+        elif dir_slug and slug != dir_slug:
+            rep.error(W, f"slug '{slug}' != folder slug '{dir_slug}'")
     if "style" in meta:
         st = meta.get("style")
         if not isinstance(st, str) or not RE_SLUG.match(st):
@@ -260,15 +285,16 @@ def check_front_matter(ep_dir, rep):
     for k in ("media", "drive"):
         if k in meta and not isinstance(meta.get(k), str):
             rep.error(W, f"{k} must be a string path")
-    if isinstance(series, str) and isinstance(ep, int) and not isinstance(ep, bool):
-        exp_media = f"out/{series}/ep{ep:02d}"
+    if isinstance(series, str) and meta["_id"]:
+        eid = meta["_id"]
+        exp_media = f"out/{series}/{eid}"
         if isinstance(meta.get("media"), str) and meta["media"].rstrip("/") != exp_media:
             rep.warn(W, f"media '{meta['media']}' differs from the convention '{exp_media}'")
         slug = meta.get("slug") if isinstance(meta.get("slug"), str) else "<slug>"
-        exp_drive = f"ClaudeFilmLab/<ProjectName>/03_KichBan/ep{ep:02d}-{slug}"
+        exp_drive = f"ClaudeFilmLab/<ProjectName>/03_KichBan/{eid_mod.dir_name(eid, slug)}"
         drive = meta.get("drive")
         if isinstance(drive, str) and not re.fullmatch(
-                rf"ClaudeFilmLab/[A-Za-z0-9]+/03_KichBan/ep{ep:02d}-{re.escape(slug)}", drive.rstrip("/")):
+                rf"ClaudeFilmLab/[A-Za-z0-9]+/03_KichBan/{re.escape(eid_mod.dir_name(eid, slug))}", drive.rstrip("/")):
             rep.warn(W, f"drive '{drive}' differs from the convention '{exp_drive}' (docs/CONVENTIONS.md §11)")
 
     headings = {nfc(l.rstrip()) for l in body.splitlines() if l.startswith("## ")}
@@ -585,7 +611,7 @@ def check_prompts(ep_dir, meta, shots, rep):
     rows = read_csv(path, PROMPTS_HEADER, rep, "prompts.csv")
     if rows is None:
         return None
-    ep = meta.get("episode") if meta else None
+    eid = meta.get("_id") if meta else None
     files = []
     seen = set()
     for n, r in rows:
@@ -598,12 +624,12 @@ def check_prompts(ep_dir, meta, shots, rep):
         m = RE_LAYER_FILE.match(f)
         clip = RE_CLIP_FILE.match(f)
         if not m and not clip:
-            rep.error(W, f"file '{f}' does not match ep<NN>_s<NN>_<layer>_<subject>_v<NN>.<png|jpg> "
-                         f"(layer) or ep<NN>_s<NN>_<model>_v<NN>.mp4 (clip)")
+            rep.error(W, f"file '{f}' does not match <id>_s<NN>_<layer>_<subject>_v<NN>.<png|jpg> "
+                         f"(layer) or <id>_s<NN>_<model>_v<NN>.mp4 (clip); <id> = ep<NN> or q<NN>t<NN>")
         else:
             parts = f.split("_")
-            if isinstance(ep, int) and parts[0] != f"ep{ep:02d}":
-                rep.error(W, f"file '{f}' is not for episode ep{ep:02d}")
+            if eid and parts[0] != eid:
+                rep.error(W, f"file '{f}' is not for episode {eid}")
             if parts[1] != r["shot"]:
                 rep.error(W, f"file '{f}' is for {parts[1]} but shot column is '{r['shot']}'")
             # A Seedance clip row names the layer it replaces/feeds (seedance-layer.md: layer = L4);
@@ -632,7 +658,7 @@ def check_prompts(ep_dir, meta, shots, rep):
     return files
 
 
-def check_media_name(rel, name, sub, rx, ep, rep):
+def check_media_name(rel, name, sub, rx, eid, rep):
     """Name check for one file under plates/, clips/ or renders/ (rel: path inside the media folder)."""
     parts = rel.split(os.sep)[1:]            # path below plates/ | clips/ | renders/
     where = "media/" + rel.replace(os.sep, "/")
@@ -654,15 +680,18 @@ def check_media_name(rel, name, sub, rx, ep, rep):
         extra = f" or {RE_START_FRAME.pattern}" if sub == "clips" else ""
         rep.error(where, f"name does not match the {sub} convention ({rx.pattern}{extra})")
         return
-    if isinstance(ep, int) and not check_ep.startswith(f"ep{ep:02d}_"):
-        rep.error(where, f"file is not for episode ep{ep:02d}")
+    if eid and not check_ep.startswith(f"{eid}_"):
+        rep.error(where, f"file is not for episode {eid}")
 
 
 def check_media(media, meta, prompt_rows, rep):
     if not media or not os.path.isdir(media):
         rep.warn("media", f"media folder {media or '(none)'} not found: plates/clips/renders not checked")
         return False
-    ep = meta.get("episode") if meta else None
+    eid = meta.get("_id") if meta else None
+    base = os.path.basename(os.path.normpath(os.path.abspath(media)))
+    if eid and base != eid:
+        rep.error("media", f"media folder '{base}' does not match episode id '{eid}' (out/<project>/{eid})")
     for sub, rx in MEDIA_RULES.items():
         d = os.path.join(media, sub)
         if not os.path.isdir(d):
@@ -670,7 +699,7 @@ def check_media(media, meta, prompt_rows, rep):
         for root, dirs, names in os.walk(d):
             dirs.sort()
             for name in sorted(names):
-                check_media_name(os.path.relpath(os.path.join(root, name), media), name, sub, rx, ep, rep)
+                check_media_name(os.path.relpath(os.path.join(root, name), media), name, sub, rx, eid, rep)
     check_listed_files(media, meta, prompt_rows, rep)
     led = os.path.join(media, "ledger.csv")
     if os.path.isfile(led):
@@ -1074,9 +1103,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
     sp = p.add_subparsers(dest="cmd", required=True)
-    e = sp.add_parser("episode", help="check an episode folder projects/<project>/ep<NN>-<slug>")
+    e = sp.add_parser("episode", help="check an episode folder projects/<project>/<ep<NN>|q<NN>-t<NN>>-<slug>")
     e.add_argument("episode")
-    e.add_argument("--media", default=None, help="media folder out/<project>/ep<NN> (default: EPISODE.md media:)")
+    e.add_argument("--media", default=None, help="media folder out/<project>/<id> (default: EPISODE.md media:)")
     e.add_argument("--probe", action="store_true",
                    help="measure clips/renders with ffprobe and final renders' loudness with ffmpeg ebur128")
     e.add_argument("--out", default=None, help="also write the report here (relative = inside the episode folder)")

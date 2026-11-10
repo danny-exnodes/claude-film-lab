@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """Zip one shot's media for a single Drive upload (docs/CONVENTIONS.md §9).
 
-  python3 tools/bundle.py out/<project>/ep<NN> --shot s03 [--episode-dir projects/<project>/ep<NN>-<slug>]
+  python3 tools/bundle.py out/<project>/<id> --shot s03 [--episode-dir projects/<project>/<episode folder>]
+
+<id> is ep<NN> (episode folder ep<NN>-<slug>) or, for a project split into books, q<NN>t<NN> (episode folder
+q<NN>-t<NN>-<slug>); docs/CONVENTIONS.md §2, tools/episode_id.py.
 
 The zip holds every file under plates/ and clips/ whose name contains `_s03_`, the prompts.csv rows for
 that shot (header kept) and the anchors.json entries for that shot's files, if those files exist. It is
-written to out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
+written to out/<project>/<id>/bundles/<id>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
 Without --episode-dir the episode text folder is looked up in the project working copy
-projects/<project>/ep<NN>-*/ (git-ignored, pulled from Drive), then in the legacy series/<project>/ep<NN>-*/.
-The zip goes to Drive ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/ (docs/CONVENTIONS.md §11).
+projects/<project>/<ep<NN>|q<NN>-t<NN>>-*/ (git-ignored, pulled from Drive), then in the legacy series/<project>/.
+The zip goes to Drive ClaudeFilmLab/<ProjectName>/04_SanXuat/<episode folder>/<YYYY-MM-DD>/ (docs/CONVENTIONS.md §11).
 Prints the path, size and the Drive connector file reference `sha256:<hex>:<absolute path>`.
 """
 import argparse, csv, datetime, glob, hashlib, io, json, os, re, shutil, sys, zipfile
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(LAB, "tools"))
+import episode_id  # noqa: E402
 STORED = {".png", ".jpg", ".jpeg", ".mp4", ".webp", ".zip"}   # already compressed
 
 
@@ -21,12 +26,15 @@ EPISODE_ROOTS = ("projects", "series")   # project working copy first; series/ i
 
 
 def find_series_dir(media):
-    """Episode text folder for out/<project>/ep<NN>: projects/<project>/ep<NN>-*/ (or legacy series/...)."""
+    """Episode text folder for out/<project>/<id>: projects/<project>/<ep<NN>|q<NN>-t<NN>>-*/ (or legacy series/...)."""
     ep = os.path.basename(os.path.normpath(media))
     project = os.path.basename(os.path.dirname(os.path.abspath(media)))
+    if episode_id.parse_id(ep) is None:
+        return None
     hits = []
     for root in EPISODE_ROOTS:
-        hits = sorted(d for d in glob.glob(os.path.join(LAB, root, project, ep + "-*")) if os.path.isdir(d))
+        hits = sorted(d for d in glob.glob(os.path.join(LAB, root, project, episode_id.dir_prefix(ep) + "-*"))
+                      if os.path.isdir(d) and (episode_id.parse_dir(os.path.basename(d)) or ("",))[0] == ep)
         if hits:
             break
     if len(hits) > 1:
@@ -128,8 +136,8 @@ def bundle(media, shot, series_dir=None, today=None, with_film=False):
     if not os.path.isdir(media):
         raise SystemExit(f"{media}: media folder not found")
     ep = os.path.basename(os.path.normpath(media))
-    if not re.fullmatch(r"ep\d{2}", ep):
-        raise SystemExit(f"{media}: expected out/<project>/ep<NN>")
+    if episode_id.parse_id(ep) is None:
+        raise SystemExit(f"{media}: expected out/<project>/ep<NN> or out/<project>/q<NN>t<NN>")
     series_dir = series_dir or find_series_dir(media)
     files = shot_media(media, shot)
     if not files:
@@ -163,10 +171,10 @@ def bundle(media, shot, series_dir=None, today=None, with_film=False):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
-    p.add_argument("media", help="out/<project>/ep<NN>")
+    p.add_argument("media", help="out/<project>/<id> (ep<NN> or q<NN>t<NN>)")
     p.add_argument("--shot", required=True, help="shot id, e.g. s03")
     p.add_argument("--episode-dir", "--series-dir", dest="series_dir", default=None,
-                   help="projects/<project>/ep<NN>-<slug> (prompts.csv, anchors.json); default: looked up")
+                   help="projects/<project>/<episode folder> (prompts.csv, anchors.json); default: looked up")
     p.add_argument("--with-film", action="store_true",
                    help="also include the cinecode film sources under <media>/film (html, md, json...; no media)")
     a = p.parse_args(argv)

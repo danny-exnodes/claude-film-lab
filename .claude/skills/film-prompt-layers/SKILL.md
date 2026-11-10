@@ -9,6 +9,8 @@ description: >-
 
 # film-prompt-layers – prompt và lớp tranh
 
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
+
 Ai dùng: `film-art-director` (khâu 3: viết thiết kế và prompt, **không tạo ảnh**), `film-plate-maker` (khâu 4–5: tạo ảnh,
 tách nền, neo). Hợp đồng file: `docs/CONVENTIONS.md` §2, §3, §6, §7. Model và giới hạn: `docs/MODELS.md`.
 
@@ -67,6 +69,8 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
   Không tạo shot khác cho tới khi `gates.G2` có ngày trong EPISODE.md.
 - Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua Lambda (đã triển khai), ở phiên chính, luôn bằng
   `ark.py lambda-job prepare` → Invoke → `finish` để vào ledger (`lambda/README.md`); agent tạo lớp dùng 2K của model `image`.
+- **Có `--ref` thì dùng `--fast`** (`dola-seedream-5-0-flash`, 2K/2560x1440): lite + `--ref` ở 2K bị proxy cắt (502 ở
+  31 s, có thể vẫn tính phí); flash + `--ref` chạy ~75 ảnh không lần 502 nào (`docs/MODELS.md`). Lite chỉ khi không `--ref`.
 - `--seed` và `--negative` có trong ark.py nhưng **chưa xác minh** model áp dụng: ghi seed vào `prompts.csv` để tham
   khảo, không hứa tái tạo y hệt.
 - `--ref` được ark.py tự nén JPEG q90, cạnh ≤ 2048; file trên đĩa giữ nguyên.
@@ -83,6 +87,10 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
    Bỏ OUT thì ảnh tách ghi vào `plates/matte/<cùng tên>.png` – đây là quy tắc (CONVENTIONS §3); matte.py từ chối ghi đè
    ảnh gốc và từ chối OUT đã có (`--overwrite` chỉ để thay một bản tách). Cờ tường minh chỉ dùng khi
    đạo diễn ghi trong hợp đồng. Thủy mặc: L2/L3 `luminance` (rembg cắt mất vệt mực loang), L4/P `rembg`.
+   `luminance` mặc định `--paper auto`: ước lượng màu giấy từ viền ảnh (nền Seedream "trắng" thường ngà/gradient như
+   `#F5F1EE`, `#EAE5DF`) và in `paper #…`; `paper_bg` của style chỉ để tham khảo. `WARNING: L2/L3 is only …% transparent`
+   → xem `--preview`, tăng `--low`; chỉ truyền `--paper #RRGGBB` khi chắc màu nền. `rembg` tự xếp hàng qua khóa toàn
+   máy `/tmp/film-lab-rembg.lock` (u2net ~1 GB RAM mỗi tiến trình): dòng `waiting for another rembg run` là bình thường.
 2. Kiểm bằng mắt (Read ảnh `--preview`, ghép trên nền đỏ): viền trắng, quầng sương, lỗ thủng (thân sáng trùng nền),
    mực bị cắt. Lỗi thì báo, không tự tạo lại ảnh ngoài hợp đồng.
 3. Điểm neo: Claude đọc ảnh, đề xuất tọa độ (mắt, đường chân, mặt đá, gốc đuôi), ghi bằng

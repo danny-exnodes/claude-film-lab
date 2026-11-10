@@ -9,7 +9,7 @@ Bài học về prompt và lớp tranh, theo style. Mỗi mục: ngày · bài h
   Lớp do plate-maker tạo vẫn viết cho 2K; ảnh cần pro/4K thì ghi rõ trong prompt pack để đạo diễn chạy.
 - Seedream không xuất nền trong suốt, trả JPEG (ark.py đổi sang PNG khi tên file `.png`): lớp cần alpha phải vẽ trên nền
   phẳng đúng mã màu của `matte` rồi tách.
-- Ảnh đầu vào vuông + `ratio=adaptive` → video vuông. Khung đầu cho Seedance nên 16:9.
+- Ảnh đầu vào vuông → video vuông. Khung đầu cho Seedance phải 16:9 (vd. 1280x720); `--ratio` cùng `--image` bị Seedance 2.5 từ chối (HTTP 400).
 - `rembg` cắt mất vệt mực loang và gradient nhạt: lớp mực (L2/L3 thủy mặc) dùng `luminance`, chỉ L4/P dùng `rembg`.
 
 ## Prompt

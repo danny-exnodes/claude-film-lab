@@ -1,5 +1,7 @@
 # Ghép prompt, ví dụ và lỗi hay gặp
 
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
+
 ## 1. Thứ tự ghép
 
 ```
@@ -44,6 +46,7 @@ Chủ thể là slug không dấu (`bac-thi`, `nui-co`). Bản sau tách alpha g
 | Quầng sương, viền trắng quanh nhân vật | `no mist or halo around the outline`; L4 dùng nền phẳng đúng mã màu |
 | Bóng đổ, mặt đất dưới chân | `no ground, no cast shadow` |
 | Chữ, triện, chữ ký | negative viết thành câu trong prompt |
-| Video ra vuông | ảnh đầu vào vuông + `ratio=adaptive` → dùng ảnh 16:9 hoặc `--ratio 16:9` |
+| Video ra vuông | ảnh đầu vào vuông → tự làm khung đầu 16:9 (vd. 1280x720); không `--ratio` (Seedance 2.5 từ chối khi có `--image`) |
+| L2/L3 luminance gần 0% trong suốt | nền "trắng" thật ra ngà/gradient → để `matte.py` dùng `--paper auto` (mặc định), tăng `--low` nếu còn loang |
 | rembg cắt mất vệt mực loang | lớp mực (L2/L3 thủy mặc) dùng `luminance`, không `rembg` |
 | 502 sau ~30 s | không thử lại; giảm size, `--fast`; pro/4K chỉ ở phiên chính qua `ark.py lambda-job prepare` → Invoke → `finish` |

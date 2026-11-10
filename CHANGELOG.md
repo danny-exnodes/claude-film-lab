@@ -98,6 +98,18 @@ Mười gói việc, mỗi gói có test viết trước và một lượt revie
   nền màu key, vị trí/chiều cao với pivot `center`, `bottom`, `top` và điểm neo). Fixture `tests/fixtures/cinecode/` (MIT).
 - `docs/RELEASING.md` (#14): bước phát hành – Claude sửa CHANGELOG, chạy test + doctor, mở PR và soạn nội dung release;
   tag và GitHub Release do người dùng tạo tay (phiên cloud bị 403 khi push tag). Thêm dòng trong `CLAUDE.md`, `README.md`.
+- `matte.py --paper auto` (mặc định khi không truyền `--paper #RRGGBB`, kể cả khi dùng `--style`): ước lượng màu
+  giấy từ dải viền ảnh (trung vị từng kênh), in `paper #…`; nền ngà/gradient của Seedream (`#F5F1EE`, `#EAE5DF`) không
+  còn cho lớp ~0% trong suốt. Cảnh báo khi L2/L3 < 10% trong suốt. Test với nền ngà và gradient tổng hợp.
+- `matte.py` rembg giữ khóa toàn máy `/tmp/film-lab-rembg.lock` (fcntl): nhiều plate-maker song song xếp hàng thay vì
+  bị OOM-kill (u2net ~1 GB RAM mỗi tiến trình).
+- `docs/MODELS.md`: Seedance 2.5 `duration` 4–30 s (API kiểm, 2026-11-10); lite 2K + `--ref` bị proxy cắt 502 ở 31 s,
+  flash 2K/2560x1440 + `--ref` ~75 ảnh không lần 502 → lớp tranh sản xuất dùng `--fast`.
+- `film-plate-maker`, `film-pipeline`: mỗi agent song song dùng thư mục scratch riêng đặt theo `FILM_AGENT`.
+- Đánh số tập theo quyển: mã tập `q<NN>t<NN>` (thư mục `q01-t01-<slug>`, media `out/<project>/q01t01/`, file
+  `q01t01_s03_...`, `book:` trong `EPISODE.md`, hiển thị "Quyển 1 · Tập 1") song song với `ep<NN>`
+  (`tools/episode_id.py`; CONVENTIONS §2/§5/§11, `check_episode.py`, `bundle.py`, `drive_sync.py`, `layers/`, mẫu, skill);
+  `tools/rename_episode.py` đổi mã một tập đang làm (vd. `ep01` → `q01t01`, chạy thử mặc định, `--apply`).
 - `tools/tts/vieneu_tts.py` (issue #8): lồng tiếng Việt local trên CPU bằng VieNeu-TTS v3 Turbo (`vieneu` 3.8.3,
   Apache-2.0, giọng mẫu dùng thương mại được): đọc `script.md` (quy tắc của `check_episode.py`) hoặc `vo-lines.json`,
   ghi `<id>.wav` 48 kHz + `tts-log.json` (model, phiên bản, giấy phép, watermark), so độ dài với khung `[mm:ss]`,
@@ -120,6 +132,9 @@ Mười gói việc, mỗi gói có test viết trước và một lượt revie
 - `docs/RUNBOOK.md`: 11 sự cố mới từ đợt kiểm thử khởi động máy sạch 2026-11-10 (kéo Drive bằng base64 tốn ngữ cảnh,
   CSV của Sheet dùng CRLF, connector AWS `needs_reconnect`, thiếu/hai bản ledger, lỗi `lambda-job`, cinecode đổi
   template, push tag 403).
+- `ark.py video --image` không còn gửi `ratio` (trước: `ratio=adaptive`): Seedance 2.5 image-to-video từ chối `ratio`
+  (HTTP 400). `--ratio` cùng `--image` chỉ gửi khi người dùng truyền, kèm cảnh báo. Tài liệu bỏ lời khuyên
+  `--ratio 16:9`: tự làm khung đầu 16:9 (vd. 1280x720).
 - **Repo = lõi** (công cụ, skill, agent, style pack, mẫu, quy trình, cài đặt). Dữ liệu từng dự án (kinh thư, nhân vật,
   bối cảnh, nghiên cứu, kịch bản, shot list, `EPISODE.md`, ngân sách, prompt, tiến độ, tài liệu gốc, media) nằm trên
   Drive `ClaudeFilmLab/<ProjectName>/` (gốc lab `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`) với cây chuẩn

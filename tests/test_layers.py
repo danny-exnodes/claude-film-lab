@@ -64,6 +64,43 @@ class TestMatteLuminance(unittest.TestCase):
         self.assertLessEqual(np.abs(comp - (26, 23, 20)).max(), 2.0)
 
 
+class TestMattePaperAuto(unittest.TestCase):
+    """Seedream 'white' paper is often ivory or a soft gradient: --paper auto estimates it from the border."""
+
+    def ink(self, a):
+        a[18:30, 18:30] = (5, 5, 4)                    # ink block well inside the border
+        return a
+
+    def test_ivory(self):
+        a = self.ink(np.full((48, 48, 3), (0xF5, 0xF1, 0xEE), np.uint8))
+        self.assertEqual(matte.rgb_hex(matte.estimate_paper(a.astype(np.float32))), "#F5F1EE")
+        white = np.asarray(matte.run(rgb_image(a), "luminance", paper="#FFFFFF", low=8, high=245))
+        self.assertLess(np.mean(white[..., 3] == 0), 0.1)                 # the old failure: ~0% transparent
+        info = {}
+        out = np.asarray(matte.run(rgb_image(a), "luminance", paper="auto", low=8, high=245, info=info))
+        self.assertEqual(info["paper"], "#F5F1EE")
+        self.assertEqual(np.mean(out[..., 3] == 0), 1 - 144 / 48 ** 2)    # all paper gone
+        self.assertEqual(out[24, 24, 3], 255)
+
+    def test_gradient(self):
+        top, bottom = np.array([0xF5, 0xF1, 0xEE], float), np.array([0xEA, 0xE5, 0xDF], float)
+        t = np.linspace(0, 1, 60)[:, None, None]
+        a = self.ink(np.round(top * (1 - t) + bottom * t).repeat(60, axis=1).astype(np.uint8))
+        a[0:2, 0:60] = (40, 40, 40)                      # a little ink touching the border
+        info = {}
+        out = np.asarray(matte.run(rgb_image(a), "luminance", paper="auto", low=8, high=245, info=info))
+        est = matte.hex_rgb(info["paper"])
+        self.assertTrue(np.all(est <= top) and np.all(est >= bottom), info)   # median: a tone inside the gradient
+        self.assertGreater(np.mean(out[..., 3] == 0), 0.9)
+        self.assertEqual(out[24, 24, 3], 255)
+
+    def test_explicit_colour_still_used(self):
+        a = np.full((10, 10, 3), (200, 200, 200), np.uint8)
+        info = {}
+        matte.run(rgb_image(a), "luminance", paper="#FFFFFF", info=info)
+        self.assertEqual(info["paper"], "#FFFFFF")
+
+
 class TestMatteChroma(unittest.TestCase):
     def setUp(self):
         a = np.zeros((40, 40, 3), np.uint8); a[:] = (255, 0, 255)   # magenta key
@@ -105,6 +142,32 @@ class TestMatteCli(TmpDirCase, unittest.TestCase):
         with Image.open(prev) as im:
             self.assertEqual(im.getpixel((0, 0)), (255, 0, 0))
             self.assertEqual(im.getpixel((10, 10)), (0, 0, 0))
+
+    def test_style_paper_is_auto_and_low_transparency_warning(self):
+        src = self.tmp / "q01t01_s02_L2_nui_v01.png"
+        a = np.full((40, 40, 3), (0xEA, 0xE5, 0xDF), np.uint8); a[15:25, 15:25] = 20
+        rgb_image(a).save(src)
+        out = self.tmp / "o.png"
+        code, so, err = run_main(matte.main, [str(src), str(out), "--style", str(STYLE_FIX)])
+        self.assertEqual(code, 0, err)
+        self.assertIn("paper #EAE5DF (auto, from the image border; style paper_bg #FFFFFF)", so)
+        self.assertNotIn("WARNING", err)
+        code, so, err = run_main(matte.main, [str(src), str(out), "--style", str(STYLE_FIX), "--paper", "#FFFFFF",
+                                              "--overwrite"])   # the first matte is already at OUT
+        self.assertEqual(code, 0, err)
+        self.assertIn("paper #FFFFFF (explicit)", so)
+        self.assertIn("WARNING: L2 is only", err)
+        self.assertIn("--paper auto", err)
+
+    def test_rembg_lock_queues(self):
+        lock = str(self.tmp / "rembg.lock")
+        with matte.rembg_lock(lock):
+            with open(lock) as f:
+                import fcntl
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)   # a second run would have to wait
+        with open(lock) as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)            # released afterwards
 
     def test_part_layer_maps_to_p(self):
         self.assertEqual(matte.style_key("P1-duoi"), "P")

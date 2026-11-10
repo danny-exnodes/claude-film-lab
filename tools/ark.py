@@ -6,8 +6,8 @@
                        [--seed N] [--negative TEXT ...] [--guidance F] [--force] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video "prompt" out.mp4 [--image first.png] [--model dreamina-seedance-2-5-260628]
-                       [--ratio adaptive|16:9] [--duration 5] [--resolution 480p|720p|1080p (default 720p)]
-                       [--no-audio] [--overwrite]
+                       [--ratio 16:9 (text-only; with --image the image decides)] [--duration 5]
+                       [--resolution 480p|720p|1080p (default 720p)] [--no-audio] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video --resume-task TASK_ID [out.mp4] --ledger L.csv
   python3 ark.py lambda-job prepare "prompt" out.png [--model dola-seedream-5-0-pro-260628] [--size 2K|4K] [--ref a.png ...]
@@ -616,16 +616,23 @@ def video(a):
     content = [{"type": "text", "text": a.prompt}]
     if a.image:
         content.append({"type": "image_url", "image_url": {"url": data_uri(a.image)}, "role": "first_frame"})
-    ratio = a.ratio or ("adaptive" if a.image else "16:9")
+    # Seedance 2.5 image-to-video rejects 'ratio' (HTTP 400): the first frame decides the aspect.
+    # So with --image no ratio is sent unless the user asks for one explicitly.
+    ratio = a.ratio if a.image else (a.ratio or "16:9")
+    if a.image and a.ratio:
+        print(f"WARNING: --ratio {a.ratio} with --image: Seedance 2.5 image-to-video may reject 'ratio' (HTTP 400). "
+              "Make the start frame 16:9 (e.g. 1280x720) yourself instead.", file=sys.stderr)
     req = {"kind": "video", "model": a.model, "size": a.resolution, "seconds": a.duration, "count": 1, "out": a.out}
     make_out_dir(a.out)
     body = {"model": a.model, "content": content, "duration": a.duration, "resolution": a.resolution,
-            "ratio": ratio, "watermark": False}
+            "watermark": False}
+    if ratio:
+        body["ratio"] = ratio
     if a.no_audio:
         body["generate_audio"] = False
     rid = new_req()
     reserve(a, req, rid, budget=budget)
-    print("model", a.model, "| ratio", ratio, "| audio", "off" if a.no_audio else "model default")
+    print("model", a.model, "| ratio", ratio or "not sent (start frame decides)", "| audio", "off" if a.no_audio else "model default")
     try:
         task = api("POST", "/contents/generations/tasks", body)["id"]
     except BaseException as e:
@@ -929,7 +936,8 @@ v.add_argument("prompt", nargs="?", help="text prompt (omit with --resume-task)"
 v.add_argument("out", nargs="?", help="output .mp4 (with --resume-task: optional, default the out in the ledger)")
 v.add_argument("--image")
 v.add_argument("--model", default=VIDEO_DEFAULT)
-v.add_argument("--ratio", default=None, help="default: adaptive with --image, else 16:9")
+v.add_argument("--ratio", default=None, help="default 16:9 without --image; with --image not sent (the start frame decides the "
+                                                  "aspect; Seedance 2.5 rejects ratio there)")
 v.add_argument("--duration", type=positive_int, default=5, help="seconds, >= 1 (default 5)")
 v.add_argument("--resolution", default="720p", choices=VIDEO_RESOLUTIONS, help="default 720p")
 v.add_argument("--no-audio", action="store_true", help="send generate_audio=false")
@@ -985,7 +993,7 @@ def check_cost_args(a):
         return
     if a.budget and not a.ledger:
         usage_error("--budget without --ledger: the budget cannot count earlier requests. "
-                    "Pass --ledger out/<project>/ep<NN>/ledger.csv (or FILM_LEDGER)")
+                    "Pass --ledger out/<project>/<ep<NN>|q<NN>t<NN>>/ledger.csv (or FILM_LEDGER)")
     if not (a.budget and a.ledger):
         usage_error(f"refusing to call the paid API without a budget: pass --budget B.yaml --ledger L.csv "
                     f"(or FILM_BUDGET/FILM_LEDGER), or --no-budget for an ad-hoc test (docs/CONVENTIONS.md §7)")

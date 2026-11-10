@@ -1,5 +1,7 @@
 # Clip Seedance thành một lớp
 
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
+
 Dùng khi shot cần cử động mà code không làm được trên ảnh phẳng (quay đầu, đứng dậy, vỗ cánh, bước đi). Mỗi clip
 **tính phí**: chỉ tạo khi shot cần (cột `ai_motion` của `shots.csv` không trống) và trong ngân sách của tập.
 
@@ -19,6 +21,7 @@ python3 tools/compose/keyframe.py out/<p>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the
   màu `matte_seq.py` tự dò ra (`--key auto`). Khung ra 16:9 nên clip ra 16:9 (ảnh vuông cho clip vuông, ví dụ 960×960 ở 720p).
 - Kiểm tra miễn phí trước khi giao clip: `python3 tools/compose/keyframe.py --check <khung đầu> --key "<màu key>"`
   (thoát 1 nếu không phải 1920x1080, có alpha, viền không phải màu key, hoặc khung không có nhân vật).
+- Tỉ lệ clip do khung đầu quyết định: Seedance 2.5 image-to-video **từ chối `ratio`** (HTTP 400), nên không truyền `--ratio`.
 - Phương án khác khi shot không cần parallax: chạy Seedance trên **cảnh đã ghép** (một khung `make.py stills` full size),
   clip thành lớp phủ toàn khung (`seq`, depth 1.0, cover: true: cả khung zoom và rung như một bức ảnh; ở depth 0 chỉ còn rung và nghiêng).
 
@@ -31,12 +34,13 @@ FILM_AGENT=<tên agent hoặc để trống> python3 tools/ark.py video \
   "<style_block>. <một chuyển động duy nhất, ví dụ: the beast slowly turns its head toward the camera>. Static camera, \
 flat <key colour> background stays perfectly uniform, no new objects, same ink-wash style." \
   out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
-  --image out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v01.png --duration 5 --resolution 720p --ratio 16:9 --no-audio \
+  --image out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v01.png --duration 5 --resolution 720p --no-audio \
   --ledger out/<p>/ep<NN>/ledger.csv --budget projects/<p>/ep<NN>-<slug>/budget.yaml
 ```
 - Model mặc định `dreamina-seedance-2-5-260628` (`docs/MODELS.md`). Chạy Bash `run_in_background` (hoặc timeout dài).
 - Prompt: **một** chuyển động, giữ phong cách, **máy quay tĩnh**, nền key đồng nhất.
 - `--no-audio` khi âm thanh do code làm (gần như luôn luôn trong bộ ghép này).
+- `--duration` API nhận 4–30 s; trên ~8 s chưa thử thực tế (`docs/MODELS.md`).
 - Thử ở 720p; bản cuối 1080p chỉ khi người dùng duyệt chuyển động (thời gian 1080p chưa đo).
 - Bị proxy cắt (502) hay lỗi: ledger ghi `cut-502` / `failed`, **không tự thử lại** (có thể vẫn bị tính phí).
   Dòng `failed` có `task_id`: lấy clip về bằng `python3 tools/ark.py video --resume-task <id> --ledger <ledger>` (miễn phí).

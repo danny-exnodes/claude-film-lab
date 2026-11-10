@@ -9,7 +9,8 @@ description: >-
 
 # film-script – kịch bản tập phim 2.5D
 
-Đầu ra nằm trong `projects/<project>/ep<NN>-<slug>/`: `research.md` (nếu chưa có), `script.md`, `shots.csv`.
+Đầu ra nằm trong `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `projects/<project>/q<NN>-t<NN>-<slug>/`, vd.
+`q01-t01-nam-son-kinh/`; CONVENTIONS §2): `research.md` (nếu chưa có), `script.md`, `shots.csv`.
 Đây là bản làm việc (git bỏ qua) của thư mục `03_KichBan/ep<NN>-<slug>/` trên Google Drive: mọi file của tập, kể cả
 `research.md` và tài liệu gốc, thuộc về dự án trên Drive, không bao giờ vào repo; đạo diễn đẩy lên Drive sau khâu.
 Hợp đồng file: `docs/CONVENTIONS.md` §4–§6, §11. Phương pháp viết chung (đi rộng rồi thu hẹp, một cú lật, viết kết trước,
@@ -70,7 +71,7 @@ Danh sách lỗi văn máy và cách sửa: `references/writing-tells.md`. Tóm 
 
 `script.md`:
 ```
-# <Tên tập> · <tên dự án> ep<NN>
+# <Tên tập> · <tên dự án> ep<NN>          (chia quyển: # <Tên tập> · <tên dự án> Quyển 1 · Tập 1)
 
 > Độ dài: <n> s · Style: <id> · Giọng: <theo STYLE.md>
 > Luận đề: [mm:ss] · Câu hỏi treo: [mm:ss] · Lật: [mm:ss] · Giải: [mm:ss]

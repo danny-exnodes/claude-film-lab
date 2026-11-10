@@ -438,6 +438,28 @@ class TestBudget(ArkCase):
         self.assertEqual(f.calls, [])
         self.assertEqual(self.rows()[0]["status"], "refused-budget")
 
+    def test_video_ratio(self):
+        """Seedance 2.5 image-to-video rejects 'ratio' (HTTP 400): with --image it is not sent unless asked."""
+        self.write_budget("images: 40\nvideo_seconds: 60\n")
+        img = str(self.tmp / "start.png")
+        Image.new("RGB", (16, 9), (1, 2, 3)).save(img)
+        out = str(self.tmp / "v.mp4")
+        f = self.fake(polls=[SUCCEEDED])
+        code, so, err = self.run_ark("video", "x", out, "--image", img, *self.cost)
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("ratio", f.generation_calls()[-1][2])
+        self.assertIn("ratio not sent", so)
+        self.assertNotIn("WARNING", err)
+        f = self.fake(polls=[SUCCEEDED])
+        code, so, err = self.run_ark("video", "x", out, "--image", img, "--ratio", "16:9", *self.cost)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(f.generation_calls()[-1][2]["ratio"], "16:9")
+        self.assertIn("WARNING: --ratio 16:9 with --image", err)
+        f = self.fake(polls=[SUCCEEDED])
+        code, so, err = self.run_ark("video", "x", out, *self.cost)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(f.generation_calls()[-1][2]["ratio"], "16:9")
+
     def test_video_seconds(self):
         self.write_budget("images: 40\nvideo_seconds: 10\n")
         self.seed_ledger({"kind": "video", "model": ark.VIDEO_DEFAULT, "seconds": 5, "count": 1, "status": "ok"},

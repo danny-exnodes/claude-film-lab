@@ -25,9 +25,11 @@ Trước **mỗi** lệnh tính phí (miễn phí, không ghi gì):
 - Thiếu file khung đầu hoặc lệnh thoát khác 0: **dừng, không gọi `ark.py video`**, báo nguyên văn dòng FAIL. Dòng WARN: ghi vào báo cáo.
 
 Bắt buộc mỗi clip:
-`FILM_AGENT=film-animator python3 tools/ark.py video "<prompt>" <out.mp4> --image <khung đầu> --ratio 16:9 --no-audio --resolution 720p --duration <s> --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml`
+`FILM_AGENT=film-animator python3 tools/ark.py video "<prompt>" <out.mp4> --image <khung đầu> --no-audio --resolution 720p --duration <s> --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml`
 - Prompt luôn có ba vế cố định: **một** chuyển động duy nhất (từ `ai_motion`); `Static camera`;
   `flat <màu key> background stays perfectly uniform`.
+- Khung đầu vuông cho ra video vuông: khung đầu luôn là khung 16:9 của `keyframe.py`. Không truyền `--ratio` cùng `--image`
+  (Seedance 2.5 trả HTTP 400).
 - Chạy Bash với timeout dài (≥ 600000 ms). 1080p chỉ khi hợp đồng ghi rõ đã duyệt. Bỏ `--no-audio` chỉ khi hợp đồng yêu cầu âm thanh tự sinh.
 - Mã thoát 3 (vượt trần): dừng, báo. Lỗi hay cắt kết nối: không gọi lại `ark.py video` mới, báo. Không chạy `ark.py image`.
 - Dòng `failed` trong ledger **có `task_id`** (clip đã tạo và tính phí nhưng chưa tải về): lấy lại bằng

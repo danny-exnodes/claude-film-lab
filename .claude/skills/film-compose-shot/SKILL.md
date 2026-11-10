@@ -5,10 +5,12 @@ description: >-
   độ sâu, máy quay tiến về chủ thể, rung nhẹ, sương cuộn, tàn lửa, quầng sáng, đuôi/tóc/vạt áo đung đưa, mắt nhắm mở,
   thở; clip Seedance đã tách nền cho cử động lớn; âm thanh; render stills → draft → final; gói và lưu Drive. Dùng khi
   người dùng nói "dựng shot", "ghép lớp", "ghép tranh", "parallax", "làm sống tranh", "cho con thú cử động",
-  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<project>/ep<NN>/plates/.
+  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<project>/ep<NN>/plates/ hoặc out/<project>/q<NN>t<NN>/plates/.
 ---
 
 # film-compose-shot
+
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
 
 Biến các lớp tranh đã duyệt (L1 nền, L2 tầng giữa, L3 tiền cảnh, L4 nhân vật, P bộ phận) thành shot chuyển động,
 rồi thành bản dựng của cả tập, bằng **cinecode Quick mode** + bộ mã dùng chung `tools/compose/`.
@@ -112,7 +114,7 @@ Trước khi chuyển sang clip Seedance trong cùng shot, đưa rig về nghỉ
 
 Chỉ khi shot cần cử động code không làm được; mỗi clip tính phí: theo `references/seedance-layer.md`. Tóm tắt:
 khung đầu = nhân vật trên nền key phẳng đúng vị trí trên sân khấu 16:9 (`tools/compose/keyframe.py`, miễn phí) →
-`ark.py video` model `dreamina-seedance-2-5-260628`, 720p 5 s (~2,5 phút, chạy nền), `--ratio 16:9`, `--no-audio`
+`ark.py video` model `dreamina-seedance-2-5-260628`, 720p 5 s (~2,5 phút, chạy nền), không `--ratio` (khung đầu 16:9 quyết định tỉ lệ), `--no-audio`
 khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách nền cả clip bằng một lệnh
 `python3 tools/layers/matte_seq.py <clip>.mp4 --start-frame <khung đầu> --strict` (chroma + khử loang màu, in số đo
 nhấp nháy và dòng `PLATES`; `--method rembg` chỉ để dự phòng: viền nhấp nháy) → chuỗi PNG

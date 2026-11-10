@@ -32,8 +32,8 @@ Tiếng Anh cho prompt (model hiểu tốt hơn); cụm viết HOA là đặc đ
 ## 4. Kiểm tên file
 
 Regex lớp (CONVENTIONS §2): `^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$`.
-Chủ thể là slug không dấu (`bac-thi`, `nui-co`). Bản sau tách alpha giữ cùng tên đuôi `.png` ở thư mục tách riêng hoặc
-tăng phiên bản, theo cách `matte.py` ghi ra (xem `--help`), không ghi đè ảnh gốc.
+Chủ thể là slug không dấu (`bac-thi`, `nui-co`). Bản sau tách alpha giữ cùng tên, đuôi `.png`, trong
+`plates/matte/` (OUT mặc định của `matte.py`), không ghi đè ảnh gốc.
 
 ## 5. Lỗi hay gặp → cách sửa
 

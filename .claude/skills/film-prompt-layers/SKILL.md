@@ -78,9 +78,10 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
 
 1. Tách alpha theo style (method, ngưỡng low/high, màu nền lấy từ `matte.per_layer`, `P1-x` dùng khóa `P`):
    ```
-   python3 tools/layers/matte.py <ảnh gốc> <ảnh RGBA>.png --style styles/<id> --layer <mã> --preview <xem-thử>.png
+   python3 tools/layers/matte.py <ảnh gốc> --style styles/<id> --layer <mã> --preview <xem-thử>.png
    ```
-   Không ghi đè ảnh gốc: ảnh tách đặt ở thư mục riêng (vd. `plates/matte/`) cùng tên file. Cờ tường minh chỉ dùng khi
+   Bỏ OUT thì ảnh tách ghi vào `plates/matte/<cùng tên>.png` – đây là quy tắc (CONVENTIONS §3); matte.py từ chối ghi đè
+   ảnh gốc và từ chối OUT đã có (`--overwrite` chỉ để thay một bản tách). Cờ tường minh chỉ dùng khi
    đạo diễn ghi trong hợp đồng. Thủy mặc: L2/L3 `luminance` (rembg cắt mất vệt mực loang), L4/P `rembg`.
 2. Kiểm bằng mắt (Read ảnh `--preview`, ghép trên nền đỏ): viền trắng, quầng sương, lỗ thủng (thân sáng trùng nền),
    mực bị cắt. Lỗi thì báo, không tự tạo lại ảnh ngoài hợp đồng.

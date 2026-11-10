@@ -104,6 +104,9 @@ motion: [mist-bands, embers, sun-glow, strip-warp]   # id trong sổ đăng ký 
 sound: {scale: "D minor pentatonic", instruments: [...], notes: "..."}
 type: {latin: "Cormorant Garamond", cjk: "Noto Serif CJK TC"}
 ```
+Tách alpha (`matte`): ảnh tạo ra giữ nguyên ở `plates/<tên>`, bản RGBA đã tách là `plates/matte/<cùng tên>.png` (OUT mặc
+định của `tools/layers/matte.py`, không bao giờ ghi đè ảnh gốc); cột `file` của `prompts.csv` và khóa trong `anchors.json`
+vẫn là tên gốc, không kèm `matte/`.
 Prompt mẫu trong `styles/<id>/prompts/*.txt` dùng chỗ trống `{style_block}`, `{subject}`, `{constraints}`, `{light}`.
 Thêm trường phái mới = chép `styles/_template/`, không sửa skill.
 

@@ -6,10 +6,12 @@
 
 JSON shape: {"<layer file name>": {"<point name>": [x, y], ...}, ...}. FILE/IMAGE are matched by base name.
 Transparent layers are drawn over a grey checkerboard so the crosshairs and edges are visible.
-`set` holds an exclusive fcntl.flock on the sidecar `<ANCHORS_JSON>.lock` for the whole read-modify-write
-(up to 3 plate-makers run in parallel, CONVENTIONS §10), then replaces the JSON atomically.
+`set` holds an exclusive fcntl.flock on a hidden sidecar next to the JSON (`.anchors.json.lock`: a dotfile,
+so Drive sync does not offer it for upload) for the whole read-modify-write (up to 3 plate-makers run in
+parallel, CONVENTIONS §10), then replaces the JSON atomically.
+Point names are ASCII letters, digits, `_` and `-`; X and Y must be finite numbers (the file stays strict JSON).
 """
-import argparse, contextlib, fcntl, json, os, re, sys, tempfile
+import argparse, contextlib, fcntl, json, math, os, re, sys, tempfile
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -19,8 +21,11 @@ RE_LAYER_FILE = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9
 def load(path):
     if not os.path.exists(path):
         return {}
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise SystemExit(f"{path}: not valid JSON ({e})")
     if not isinstance(data, dict):
         raise SystemExit(f"{path}: expected an object {{file: {{point: [x, y]}}}}")
     return data
@@ -31,17 +36,24 @@ def save(path, data):
     d = os.path.dirname(os.path.abspath(path))
     os.makedirs(d, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".anchors-", suffix=".json")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False)   # NaN is not JSON
+            f.write("\n")
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
 
 
 @contextlib.contextmanager
 def locked(path):
-    """Exclusive lock on <path>.lock (sidecar: the JSON itself is replaced, so it cannot carry the lock)."""
-    lock = os.path.abspath(path) + ".lock"
-    os.makedirs(os.path.dirname(lock), exist_ok=True)
+    """Exclusive lock on the sidecar `.<basename>.lock` in the same folder (the JSON itself is replaced, so
+    it cannot carry the lock; a dotfile, because drive_sync uploads every other file of the episode folder)."""
+    d, base = os.path.split(os.path.abspath(path))
+    lock = os.path.join(d, "." + base + ".lock")
+    os.makedirs(d, exist_ok=True)
     with open(lock, "a") as fh:
         fcntl.flock(fh, fcntl.LOCK_EX)
         try:
@@ -51,14 +63,29 @@ def locked(path):
 
 
 def num(s):
+    """Pixel coordinate; ValueError for anything that is not a finite number."""
     x = float(s)
+    if not math.isfinite(x):
+        raise ValueError(f"not a finite number: {s!r}")
     return int(x) if x.is_integer() else round(x, 2)
+
+
+RE_POINT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$", re.ASCII)
+RESERVED_NAMES = ("size", "_size", "points", "boxes", "version")   # keys with a meaning of their own
+
+
+def check_name(name):
+    if not RE_POINT_NAME.match(name):
+        raise ValueError(f"point name {name!r} must be ASCII letters, digits, _ or - and start with a letter or digit")
+    if name in RESERVED_NAMES:
+        raise ValueError(f"point name {name!r} is reserved ({', '.join(RESERVED_NAMES)})")
 
 
 def set_point(path, file, name, x, y):
     key = os.path.basename(file)
     if not RE_LAYER_FILE.match(key):
         print(f"warning: {key} does not follow the layer naming convention (docs/CONVENTIONS.md §2)", file=sys.stderr)
+    check_name(name)
     point = [num(x), num(y)]          # validate before taking the lock
     with locked(path):
         data = load(path)
@@ -126,9 +153,14 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.cmd == "set":
         try:
-            old, new = set_point(a.anchors, a.file, a.name, a.x, a.y)
+            x, y = num(a.x), num(a.y)
         except ValueError:
-            p.error("X and Y must be numbers (pixels)")
+            p.error("X and Y must be finite numbers (pixels)")
+        try:
+            check_name(a.name)
+        except ValueError as e:
+            p.error(str(e))
+        old, new = set_point(a.anchors, a.file, a.name, x, y)
         print(f"{'updated' if old else 'added'} {os.path.basename(a.file)} {a.name} = {new}" + (f" (was {old})" if old else ""))
     else:
         n = mark(a.image, a.anchors, a.out)

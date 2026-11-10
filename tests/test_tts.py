@@ -1,18 +1,21 @@
 """tools/tts/vieneu_tts.py without the model: script parsing, Vietnamese normalisation, pronunciation map, log format.
 The VieNeu engine is replaced by a fake that returns a sine tone, so nothing is downloaded or synthesised."""
-import json, os, sys, unittest
+import json, os, shutil, sys, unittest
 from unittest import mock
 
 import numpy as np
 
-from helpers import EPISODE_FIX, TmpDirCase, load, run_main
+import re
+
+from helpers import EPISODE_FIX, REPO, TmpDirCase, load, run_main
 
 tts = load("tts/vieneu_tts.py", "film_vieneu_tts")
 SCRIPT = EPISODE_FIX / "script.md"
 
 
 class FakeEngine:
-    """Stands in for VieneuEngine: 0.1 s of tone per word (or `seconds` per line when set)."""
+    """Stands in for VieneuEngine: 0.2 s + 0.1 s of tone per word (or `seconds` per line when set). The floor keeps
+    one-word lines ("Hết.") above the 0.2 s EMPTY threshold."""
     mode, precision, version, repo, revision, rate, watermark = "v3turbo", "int8", "9.9.9", "fake/repo", "abc123", 24000, True
 
     def __init__(self, seconds=None):
@@ -34,7 +37,7 @@ class FakeEngine:
 
     def synth(self, text, voice, seed=None, speed=1.0):
         self.calls.append((text, voice, seed))
-        dur = self.seconds if self.seconds is not None else 0.1 * len(text.split())
+        dur = self.seconds if self.seconds is not None else 0.2 + 0.1 * len(text.split())
         t = np.arange(int(dur * self.rate)) / self.rate
         return (0.5 * np.sin(2 * np.pi * 220 * t)).astype(np.float32), self.rate
 
@@ -132,7 +135,8 @@ class TestPron(TmpDirCase, unittest.TestCase):
 
 class TestCli(TmpDirCase, unittest.TestCase):
     LOG_KEYS = {"id", "text", "spoken", "file", "duration_s", "voice", "model", "version", "licence", "watermark",
-                "sample_rate", "slot_s", "fit", "seed"}
+                "sample_rate", "slot_s", "fit", "seed", "text_sha", "status", "rms_dbfs", "peak_dbfs", "clipped",
+                "lead_silence_s", "tail_silence_s"}
 
     def run_tool(self, argv, engine=None):
         eng = engine or FakeEngine()
@@ -163,6 +167,7 @@ class TestCli(TmpDirCase, unittest.TestCase):
         log = {e["id"]: e for e in json.loads((out / "tts-log.json").read_text(encoding="utf-8"))}
         self.assertTrue(log["VO1"]["fit"].startswith("OVER"))         # 6.5 s in a 5 s slot
         self.assertTrue(log["VO3"]["fit"].startswith("ok"))           # 8 s slot
+        self.assertEqual((log["VO1"]["status"], log["VO3"]["status"]), ("OVER", "ok"))
         self.assertIn("OVER slot: VO1, VO4, VO5", so)
 
     def test_only_rerenders_and_keeps_other_entries(self):
@@ -172,7 +177,7 @@ class TestCli(TmpDirCase, unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(eng.calls), 2)
         log = json.loads((out / "tts-log.json").read_text(encoding="utf-8"))
-        self.assertEqual(sorted(e["id"] for e in log), ["VO1", "VO2", "VO3", "VO4", "VO5"])
+        self.assertEqual([e["id"] for e in log], ["VO1", "VO2", "VO3", "VO4", "VO5"])     # script order, not sorted
 
     def test_vo_lines_json(self):
         lines = self.tmp / "vo-lines.json"
@@ -232,6 +237,509 @@ class TestAudio(TmpDirCase, unittest.TestCase):
         self.assertEqual(tts.voice_meta("Nam · Nam · Phong cách kể chuyện"), ("male", "nam", "Phong cách kể chuyện"))
         self.assertEqual(tts.voice_meta("Nữ · Bắc · Phong cách tin tức")[:2], ("female", "bac"))
         self.assertEqual(tts.slug("Đức Trí"), "duc-tri")
+
+
+def write_script(folder, texts, step=5):
+    """script.md with one mark every `step` seconds; returns its path."""
+    folder.mkdir(parents=True, exist_ok=True)
+    p = folder / "script.md"
+    marks = [f"[{i * step // 60:02d}:{i * step % 60:02d}] {t}\n" for i, t in enumerate(texts)]
+    p.write_text("# Lời bình\n" + "".join(marks), encoding="utf-8")
+    return p
+
+
+class CliCase(TmpDirCase):
+    def run_tool(self, argv, engine=None):
+        eng = engine or FakeEngine()
+        made = []
+        code, out, err = run_main(lambda a: tts.main(a, make_engine=lambda _: made.append(1) or eng), argv)
+        return code, out, err, eng, made
+
+    def read_log(self, out):
+        return json.loads((out / "tts-log.json").read_text(encoding="utf-8"))
+
+    def write_log(self, out, log):
+        (out / "tts-log.json").write_text(json.dumps(log, ensure_ascii=False), encoding="utf-8")
+
+    def files(self):
+        return sorted(str(p.relative_to(self.tmp)) for p in self.tmp.rglob("*") if p.is_file())
+
+
+class TestScriptProblems(CliCase, unittest.TestCase):
+    CASES = {  # name -> (script body, extra argv, line number of the problem)
+        "no mark": ("[00:00] Câu một.\nCâu hai không mốc.\n[00:05] Câu ba.\n", [], 2),
+        "malformed mark": ("[00:00] Câu một.\n[0:05] Câu hai.\n[00:09] Câu ba.\n", [], 2),
+        "seconds over 59": ("[00:00] Câu một.\n\n[00:75] Câu hai.\n", [], 3),
+        "empty text": ("[00:00] Câu một.\n[00:05]\n[00:09] Câu ba.\n", [], 2),
+        "not after previous": ("[00:00] Câu một.\n[00:10] Câu hai.\n[00:05] Câu ba.\n", [], 3),
+        "same as previous": ("[00:00] Câu một.\n[00:10] Câu hai.\n[00:10] Câu ba.\n", [], 3),
+        "length before last mark": ("[00:00] Câu một.\n[00:10] Câu hai.\n", ["--length", "10"], 2),
+    }
+
+    def test_each_problem_exits_2_with_line_number(self):
+        for name, (body, extra, n) in self.CASES.items():
+            with self.subTest(name):
+                p = self.tmp / "ep" / "script.md"
+                p.parent.mkdir(exist_ok=True)
+                p.write_text(body, encoding="utf-8")
+                for mode in (["--dry-run"], ["--out", str(self.tmp / "vo")]):
+                    code, _, err, _, made = self.run_tool(["--script", str(p), *extra, *mode])
+                    self.assertEqual(code, tts.EXIT_INPUT, (mode, err))
+                    self.assertIn(f"script.md:{n}: ", err)
+                    self.assertEqual(len(err.strip().splitlines()), 1, err)
+                    self.assertEqual(made, [])
+                self.assertFalse((self.tmp / "vo").exists())
+
+    def test_no_flag_bypasses(self):
+        p = self.tmp / "script.md"
+        p.write_text("[00:00] Câu một.\nCâu hai không mốc.\n[00:05] Câu ba.\n", encoding="utf-8")
+        for extra in (["--only", "VO1"], ["--allow-stale"], ["--check"]):
+            code, _, err, _, made = self.run_tool(["--script", str(p), "--out", str(self.tmp / "vo"), *extra])
+            self.assertEqual((code, made), (tts.EXIT_INPUT, []), extra)
+
+    def test_function_reports_every_problem(self):
+        text = "[00:00] Một.\n[0:05] Hai.\nBa.\n[00:75] Bốn.\n[00:10] Năm.\n[00:08] Sáu.\n[00:20]\n"
+        got = tts.script_problems(text, 9)
+        self.assertEqual([n for n, _ in got], [2, 3, 4, 6, 7, 7])
+        self.assertTrue(all(isinstance(r, str) and r for _, r in got))
+
+    def test_fixture_has_no_problems(self):
+        text = SCRIPT.read_text(encoding="utf-8")
+        self.assertEqual(tts.script_problems(text, 30.0), [])
+        self.assertEqual(tts.script_problems(text, None), [])
+        self.assertEqual(len(tts.parse_script(text)), 5)
+
+    def test_no_narration_is_an_input_error(self):
+        p = self.tmp / "script.md"
+        p.write_text("# Chỉ có tiêu đề\n> ghi chú\n", encoding="utf-8")
+        code, _, err, _, _ = self.run_tool(["--script", str(p), "--dry-run"])
+        self.assertEqual(code, tts.EXIT_INPUT, err)
+
+
+class TestLinesInput(CliCase, unittest.TestCase):
+    def lines_file(self, data):
+        p = self.tmp / "vo-lines.json"
+        p.write_text(data if isinstance(data, str) else json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return p
+
+    def refused(self, data, needle=None):
+        p = self.lines_file(data)
+        out = self.tmp / "d" / "x" / "vo"
+        before = self.files()
+        code, _, err, _, made = self.run_tool(["--lines", str(p), "--out", str(out)])
+        self.assertEqual(code, tts.EXIT_INPUT, err)
+        self.assertEqual(made, [])
+        self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.files(), before)          # nothing written, inside or outside --out
+        if needle:
+            self.assertIn(needle, err)
+
+    def test_duplicate_id(self):
+        self.refused({"lines": [{"id": "VO1", "text": "Một."}, {"id": "VO1", "text": "Hai."}]}, "VO1")
+
+    def test_path_escaping_id(self):
+        self.refused({"lines": [{"id": "VO1", "text": "Một."}, {"id": "../../escape", "text": "Hai."}]}, "escape")
+        for bad in ("a/b", ".hidden", "", "x" * 33, "VO 1", 7):
+            self.refused({"lines": [{"id": bad, "text": "Một."}]})
+
+    def test_wrong_shapes(self):
+        for data in ({"vo": []}, {"lines": {"id": "VO1"}}, {"lines": ["Một."]}, [{"id": "VO1", "text": "Một."}],
+                     "{broken", '"just a string"'):
+            self.refused(data)
+
+    def test_non_numeric_start_and_slot(self):
+        self.refused({"lines": [{"id": "VO1", "text": "Một.", "start_s": "abc"}]}, "start_s")
+        self.refused({"lines": [{"id": "VO1", "text": "Một.", "slot_s": [1]}]}, "slot_s")
+        self.refused({"lines": [{"id": "VO1", "text": "Một.", "slot_s": True}]}, "slot_s")
+
+    def test_empty_text_and_empty_list(self):
+        self.refused({"lines": [{"id": "VO1", "text": "  "}]}, "text")
+        self.refused({"lines": [{"id": "VO1"}]}, "text")
+        self.refused({"lines": []})
+
+    def test_missing_files(self):
+        for flag in ("--lines", "--script"):
+            code, _, err, _, made = self.run_tool([flag, str(self.tmp / "nope"), "--out", str(self.tmp / "vo")])
+            self.assertEqual((code, made), (tts.EXIT_INPUT, []), err)
+            self.assertEqual(len(err.strip().splitlines()), 1, err)
+        self.assertEqual(self.files(), [])
+
+    def test_valid_lines_keep_start_and_slot(self):
+        p = self.lines_file({"lines": [{"id": "a_1", "text": "Một.", "start_s": 0, "slot_s": 2.5}, {"text": "Hai."}]})
+        out = self.tmp / "vo"
+        code, _, err, _, _ = self.run_tool(["--lines", str(p), "--out", str(out)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual([(e["id"], e["slot_s"]) for e in self.read_log(out)], [("a_1", 2.5), ("VO2", None)])
+
+
+class TestLogSafety(CliCase, unittest.TestCase):
+    def test_corrupt_log_is_renamed_before_the_engine_is_created(self):
+        for i, bad in enumerate(("{broken", '{"VO1": {}}', '["VO1"]')):
+            with self.subTest(bad):
+                out = self.tmp / f"vo{i}"
+                out.mkdir()
+                (out / "tts-log.json").write_text(bad, encoding="utf-8")
+                seen = []
+
+                def make(_):
+                    seen.append(sorted(p.name for p in out.iterdir()))
+                    return FakeEngine()
+                code, so, err = run_main(lambda a: tts.main(a, make_engine=make),
+                                         ["--script", str(SCRIPT), "--out", str(out)])
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len(seen[0]), 1)
+                self.assertTrue(seen[0][0].startswith("tts-log.json.bad-"), seen)
+                kept = next(out.glob("tts-log.json.bad-*"))
+                self.assertEqual(kept.read_text(encoding="utf-8"), bad)
+                self.assertIn(kept.name, so + err)
+                self.assertEqual([e["id"] for e in self.read_log(out)], ["VO1", "VO2", "VO3", "VO4", "VO5"])
+
+    def test_log_is_written_after_every_line(self):
+        class Dies(FakeEngine):
+            def synth(self, text, voice, seed=None, speed=1.0):
+                if len(self.calls) == 2:
+                    raise RuntimeError("model crashed")
+                return super().synth(text, voice, seed, speed)
+        out = self.tmp / "vo"
+        with self.assertRaises(RuntimeError):
+            self.run_tool(["--script", str(SCRIPT), "--out", str(out)], Dies())
+        self.assertEqual([e["id"] for e in self.read_log(out)], ["VO1", "VO2"])
+
+
+class TestStale(CliCase, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        self.base = ["--script", str(self.ep / "script.md"), "--length", "20", "--out", str(self.out)]
+        write_script(self.ep, ["Một.", "Hai.", "Ba."])
+        self.assertEqual(self.run_tool(self.base)[0], 0)
+
+    def test_only_refused_when_another_line_is_stale(self):
+        write_script(self.ep, ["Một.", "Chèn mới.", "Hai sửa."])
+        code, so, err, _, made = self.run_tool(self.base + ["--only", "VO2"])
+        self.assertEqual((code, made), (tts.EXIT_INPUT, []), err)
+        self.assertIn("STALE VO3: text changed since render", so + err)
+        self.assertIn("--allow-stale", err)
+        self.assertEqual({e["id"]: e["text"] for e in self.read_log(self.out)}["VO2"], "Hai.")   # untouched
+
+    def test_allow_stale_renders_and_still_reports(self):
+        write_script(self.ep, ["Một.", "Chèn mới.", "Hai sửa."])
+        code, so, err, eng, _ = self.run_tool(self.base + ["--only", "VO2", "--allow-stale"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(eng.calls), 1)
+        self.assertIn("STALE VO3: text changed since render", so + err)
+        self.assertEqual([(e["id"], e["text"]) for e in self.read_log(self.out)],
+                         [("VO1", "Một."), ("VO2", "Chèn mới."), ("VO3", "Ba.")])
+
+    def test_only_the_stale_line_itself_is_fine(self):
+        write_script(self.ep, ["Một.", "Hai.", "Ba sửa."])
+        code, so, err, _, _ = self.run_tool(self.base + ["--only", "VO3"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.read_log(self.out)[2]["text"], "Ba sửa.")
+
+    def test_full_render_moves_orphans_and_keeps_script_order(self):
+        write_script(self.ep, ["Một."])
+        code, so, err, _, _ = self.run_tool(self.base)
+        self.assertEqual(code, 0, err)
+        self.assertIn("ORPHAN VO2: not in script", so + err)
+        self.assertEqual([e["id"] for e in self.read_log(self.out)], ["VO1"])
+        self.assertEqual(sorted(p.name for p in self.out.glob("*.wav")), ["VO1.wav"])
+        self.assertEqual(sorted(p.name for p in (self.out / "_stale").iterdir()), ["VO2.wav", "VO3.wav"])
+
+    def test_only_keeps_orphans_and_lists_them_last(self):
+        write_script(self.ep, ["Một.", "Hai."])
+        code, so, err, _, _ = self.run_tool(self.base + ["--only", "VO1"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("ORPHAN VO3: not in script", so + err)
+        self.assertEqual([e["id"] for e in self.read_log(self.out)], ["VO1", "VO2", "VO3"])
+        self.assertTrue((self.out / "VO3.wav").is_file())
+
+    def test_orphan_with_an_unsafe_id_is_dropped_and_no_file_is_touched(self):
+        victim = self.tmp / "escape.wav"
+        victim.write_bytes(b"keep")
+        self.write_log(self.out, self.read_log(self.out) + [{"id": "../escape", "text": "x", "file": str(victim)}])
+        self.assertEqual(self.run_tool(self.base)[0], 0)
+        self.assertEqual(victim.read_bytes(), b"keep")
+        self.assertEqual([e["id"] for e in self.read_log(self.out)], ["VO1", "VO2", "VO3"])
+
+    def test_old_entry_without_text_sha_is_compared_by_text(self):
+        log = self.read_log(self.out)
+        self.assertTrue(all(len(e.pop("text_sha")) == 12 for e in log))
+        self.write_log(self.out, log)
+        code, so, err, _, _ = self.run_tool(self.base + ["--only", "VO1"])
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("STALE", so + err)
+        log = self.read_log(self.out)
+        log[2]["text"] = "Ba cũ."
+        self.assertNotIn("text_sha", log[2])
+        self.write_log(self.out, log)
+        code, so, err, _, _ = self.run_tool(self.base + ["--only", "VO1"])
+        self.assertEqual(code, tts.EXIT_INPUT)
+        self.assertIn("STALE VO3", so + err)
+
+    def test_dry_run_reports_stale_without_changing_anything(self):
+        write_script(self.ep, ["Một.", "Hai sửa."])
+        before = {p.name: p.read_bytes() for p in self.out.iterdir()}
+        code, so, err, _, made = self.run_tool(self.base + ["--dry-run"])
+        self.assertEqual((code, made), (0, []), err)
+        self.assertIn("STALE VO2", so + err)
+        self.assertIn("ORPHAN VO3", so + err)
+        self.assertEqual({p.name: p.read_bytes() for p in self.out.iterdir()}, before)
+
+
+class TestCheck(CliCase, unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        self.src = ["--script", str(self.ep / "script.md"), "--length", "20", "--out", str(self.out)]
+        self.base = self.src + ["--voice", "Nam Một"]
+        write_script(self.ep, ["Một.", "Hai.", "Ba."])
+        self.assertEqual(self.run_tool(self.base)[0], 0)
+
+    def check(self, *extra, base=None):
+        code, so, err, _, made = self.run_tool((base or self.base) + ["--check", *extra])
+        self.assertEqual(made, [])                       # never loads a model
+        return code, so + err
+
+    def test_passes_after_a_render(self):
+        code, text = self.check()
+        self.assertEqual(code, 0, text)
+        code, text = self.check(base=self.src)           # no --voice: one voice across the log is enough
+        self.assertEqual(code, 0, text)
+
+    def test_fails_after_a_text_edit(self):
+        write_script(self.ep, ["Một.", "Hai sửa.", "Ba."])
+        code, text = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("VO2", text)
+        self.assertNotIn("VO1", text)
+
+    def test_fails_on_missing_wav_and_unrendered_line(self):
+        (self.out / "VO3.wav").unlink()
+        code, text = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("VO3", text)
+        write_script(self.ep, ["Một.", "Hai.", "Ba.", "Bốn."])
+        code, text = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("VO4", text)
+
+    def test_fails_on_other_voice_mode_or_seed(self):
+        for base, extra in ((self.src, ["--voice", "Bắc Một"]), (self.base, ["--seed", "7"]),
+                            (self.base, ["--mode", "v3nano"])):
+            code, text = self.check(*extra, base=base)
+            self.assertEqual(code, 1, extra)
+            self.assertIn(extra[0].lstrip("-"), text)
+
+    def test_fails_on_mixed_voices_when_no_voice_is_given(self):
+        self.assertEqual(self.run_tool(self.src + ["--voice", "Bắc Một", "--only", "VO2"])[0], 0)
+        code, text = self.check(base=self.src)
+        self.assertEqual(code, 1)
+        self.assertIn("voice", text)
+
+    def test_fails_on_zero_duration(self):
+        log = self.read_log(self.out)
+        log[0]["duration_s"] = 0
+        self.write_log(self.out, log)
+        code, text = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("VO1", text)
+
+    def test_orphan_fails_the_check(self):
+        write_script(self.ep, ["Một.", "Hai."])
+        code, text = self.check()
+        self.assertEqual(code, 1)
+        self.assertIn("ORPHAN VO3", text)
+
+    def test_no_render_yet_and_bad_usage(self):
+        code, text = self.check(base=["--script", str(self.ep / "script.md"), "--length", "20", "--out",
+                                      str(self.tmp / "empty")])
+        self.assertEqual(code, 1)
+        self.assertFalse((self.tmp / "empty").exists())
+        for argv in (["--check", "--script", str(self.ep / "script.md")],
+                     ["--check", "--text", "Một.", "--out", str(self.out)],
+                     self.base + ["--check", "--only", "VO1"], self.base + ["--check", "--dry-run"]):
+            code, _, err, _, made = self.run_tool(argv)
+            self.assertEqual((code, made), (tts.EXIT_INPUT, []), argv)
+
+    def test_works_with_lines_json(self):
+        lines = self.tmp / "vo-lines.json"
+        lines.write_text(json.dumps({"lines": [{"id": "A", "text": "Một."}, {"id": "B", "text": "Hai."}]}), "utf-8")
+        out = self.tmp / "vo2"
+        self.assertEqual(self.run_tool(["--lines", str(lines), "--out", str(out)])[0], 0)
+        self.assertEqual(self.run_tool(["--lines", str(lines), "--out", str(out), "--check"])[0], 0)
+
+
+class TestStrict(CliCase, unittest.TestCase):
+    def test_empty_take_fails_without_strict(self):
+        out = self.tmp / "vo"
+        code, so, err, _, _ = self.run_tool(["--text", "Xin chào.", "--out", str(out)], FakeEngine(seconds=0))
+        self.assertEqual(code, 1)
+        self.assertIn("EMPTY", so + err)
+        self.assertEqual(self.read_log(out)[0]["status"], "EMPTY")
+
+    def test_near_silent_take_is_empty(self):
+        class Quiet(FakeEngine):
+            def synth(self, text, voice, seed=None, speed=1.0):
+                wav, rate = super().synth(text, voice, seed, speed)
+                return wav * 0.001, rate
+        out = self.tmp / "vo"
+        code, _, _, _, _ = self.run_tool(["--text", "Xin chào các bạn.", "--out", str(out)], Quiet(seconds=1))
+        self.assertEqual(code, 1)
+        self.assertEqual(self.read_log(out)[0]["status"], "EMPTY")
+
+    def test_noslot_only_fails_a_strict_script_render(self):
+        script = write_script(self.tmp / "ep", ["Một hai ba.", "Bốn năm sáu."])       # no EPISODE.md, no --length
+        out = self.tmp / "vo"
+        code, so, err, _, _ = self.run_tool(["--script", str(script), "--out", str(out)])
+        self.assertEqual(code, 0, err)
+        self.assertEqual([e["status"] for e in self.read_log(out)], ["ok", "NOSLOT"])
+        code, so, err, _, _ = self.run_tool(["--script", str(script), "--out", str(out), "--strict"])
+        self.assertEqual(code, 1)
+        self.assertIn("NOSLOT", so + err)
+        self.assertIn("--length", so + err)
+        self.assertIn("length_s", so + err)
+        code, _, _, _, _ = self.run_tool(["--script", str(script), "--out", str(out), "--strict", "--length", "10"])
+        self.assertEqual(code, 0)
+        code, _, _, _, _ = self.run_tool(["--text", "Một hai ba.", "--out", str(out), "--strict"])
+        self.assertEqual(code, 0)                         # --text has no slots by design
+
+    def test_clipped_fails_strict(self):
+        class Loud(FakeEngine):
+            def synth(self, text, voice, seed=None, speed=1.0):
+                wav, rate = super().synth(text, voice, seed, speed)
+                return np.where(wav >= 0, 1.0, -1.0).astype(np.float32), rate
+        out = self.tmp / "vo"
+        code, _, _, _, _ = self.run_tool(["--text", "Một hai ba.", "--out", str(out)], Loud(seconds=1))
+        self.assertEqual(code, 0)
+        e = self.read_log(out)[0]
+        self.assertEqual(e["status"], "CLIPPED")
+        self.assertGreater(e["clipped"], 0)
+        code, so, err, _, _ = self.run_tool(["--text", "Một hai ba.", "--out", str(out), "--strict"], Loud(seconds=1))
+        self.assertEqual(code, 1)
+        self.assertIn("CLIPPED", so + err)
+
+    def test_dry_run_estimate(self):
+        script = write_script(self.tmp / "ep", ["một hai ba bốn năm sáu bảy tám chín mười mười một.",   # 12 syl
+                                                "một hai ba bốn, năm sáu bảy tám – chín.",              # 9 syl
+                                                "Hết."], step=2)
+        argv = ["--script", str(script), "--length", "6", "--dry-run"]
+        code, so, err, _, made = self.run_tool(argv)
+        self.assertEqual((code, made), (0, []), err)
+        rows = {ln.split()[0]: ln for ln in so.splitlines() if re.match(r"VO\d\s", ln)}
+        self.assertIn("3.00", rows["VO1"])
+        self.assertIn("OVER? (est.)", rows["VO1"])
+        self.assertIn("2.25", rows["VO2"])                # the dash is not a syllable
+        self.assertIn("OVER? (est.)", rows["VO2"])
+        self.assertNotIn("OVER?", rows["VO3"])
+        self.assertEqual(self.run_tool(argv + ["--strict"])[0], 1)
+        self.assertEqual(self.run_tool(argv + ["--strict", "--rate", "8"])[0], 0)
+        self.assertEqual(self.run_tool(argv + ["--strict", "--only", "VO2"])[0], 0)    # +12.5 %: flagged only
+        self.assertEqual(self.run_tool(argv + ["--strict", "--only", "VO1"])[0], 1)    # +50 %
+        self.assertEqual(self.run_tool(argv + ["--rate", "0"])[0], 2)
+
+    def test_dry_run_strict_noslot(self):
+        script = write_script(self.tmp / "ep", ["Một.", "Hai."])
+        self.assertEqual(self.run_tool(["--script", str(script), "--dry-run"])[0], 0)
+        code, so, err, _, _ = self.run_tool(["--script", str(script), "--dry-run", "--strict"])
+        self.assertEqual(code, 1)
+        self.assertIn("NOSLOT", so + err)
+
+    def test_syllables(self):
+        self.assertEqual(tts.syllables("Nó có đuôi dài, tiếng kêu – như tên gọi... 12 !"), 10)
+
+
+class TestResidue(CliCase, unittest.TestCase):
+    def test_half_converted_and_han_tokens(self):
+        self.assertEqual(tts.residue(tts.normalize_vi("Cách 3.5 km.")), ["ba.5"])
+        self.assertEqual(tts.residue(tts.normalize_vi("Khoảng 1e6 con.")), ["mộte6"])
+        self.assertEqual(tts.residue(tts.normalize_vi("Sơn Hải Kinh (山海經), quyển 《南山經》.")), ["山海經", "《南山經》"])
+        self.assertEqual(tts.residue("giá 5$ & a+b = c^2, 30° và và/hoặc"),
+                         ["5$", "&", "a+b", "=", "c^2", "30°", "và/hoặc"])
+        self.assertEqual(tts.residue("ba.5 rồi lại ba.5"), ["ba.5"])
+
+    def test_clean_sentence_has_none(self):
+        for s in ("Năm 1998, có 3.000 người: cao 3 m, 12,5% dân số, 36°C.", "Thế kỷ IV TCN – \"Bắc Thị\" (thú lạ)!",
+                  *[ln["text"] for ln in tts.parse_script(SCRIPT.read_text(encoding="utf-8"))]):
+            self.assertEqual(tts.residue(tts.normalize_vi(s)), [], s)
+
+    def test_warn_and_strict(self):
+        argv = ["--text", "Cách 3.5 km.", "--text", "Câu sạch."]
+        code, so, err, _, made = self.run_tool(argv + ["--dry-run"])
+        self.assertEqual((code, made), (0, []))
+        self.assertIn("WARN T1: unread token 'ba.5': add it to pronunciation.csv or rewrite the line", so + err)
+        self.assertNotIn("WARN T2", so + err)
+        self.assertEqual(self.run_tool(argv + ["--dry-run", "--strict"])[0], 1)
+        out = self.tmp / "vo"
+        code, so, err, _, made = self.run_tool(argv + ["--out", str(out), "--strict"])
+        self.assertEqual((code, made), (1, []))            # before the model loads
+        self.assertFalse(out.exists())
+        code, so, err, _, made = self.run_tool(argv + ["--out", str(out)])
+        self.assertEqual((code, made), (0, [1]))
+        self.assertIn("WARN T1", so + err)
+
+    def test_pron_map_clears_the_warning(self):
+        pron = self.tmp / "pron.csv"
+        pron.write_text("term,doc\n山海經,Sơn Hải Kinh\n", encoding="utf-8")
+        code, so, err, _, _ = self.run_tool(["--text", "Sách 山海經.", "--pron", str(pron), "--dry-run", "--strict"])
+        self.assertEqual(code, 0, so + err)
+
+
+class TestSpeed(CliCase, unittest.TestCase):
+    def test_out_of_range_rejected_by_argparse(self):
+        for bad in ("1.5", "0.3", "0", "-1", "abc", "nan"):
+            code, _, err, _, made = self.run_tool(["--text", "Một hai.", "--out", str(self.tmp / "vo"), "--speed", bad])
+            self.assertEqual((code, made), (2, []), bad)
+            self.assertIn("0.9", err)
+        self.assertFalse((self.tmp / "vo").exists())
+
+    def test_ffmpeg_checked_before_the_engine(self):
+        argv = ["--text", "Một hai.", "--out", str(self.tmp / "vo"), "--speed", "1.05"]
+        with mock.patch.object(tts.shutil, "which", return_value=None):
+            code, _, err, _, made = self.run_tool(argv)
+            self.assertEqual((code, made), (tts.EXIT_INPUT, []))
+            self.assertIn("ffmpeg", err)
+            self.assertEqual(self.run_tool(argv + ["--mode", "v3nano"])[4], [1])     # native speed: no ffmpeg needed
+            code, _, _, _, made = self.run_tool(["--text", "Một hai.", "--dry-run", "--speed", "1.05"])
+            self.assertEqual((code, made), (0, []))
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not installed")
+    def test_speed_in_range_renders_through_ffmpeg(self):
+        out = self.tmp / "vo"
+        code, _, err, _, _ = self.run_tool(["--text", "Một hai.", "--out", str(out), "--speed", "1.1"],
+                                           FakeEngine(seconds=1))
+        self.assertEqual(code, 0, err)
+        e = self.read_log(out)[0]
+        self.assertAlmostEqual(e["duration_s"], 1 / 1.1, delta=0.03)
+        self.assertEqual(e["speed"], 1.1)
+
+    def test_help_and_readme_agree(self):
+        helptext = tts.build_parser().format_help()
+        self.assertIn("0.9-1.1", helptext)
+        self.assertNotIn("0.8-1.2", helptext)
+        self.assertIn("0,9–1,1", (REPO / "tools" / "tts" / "README.md").read_text(encoding="utf-8"))
+
+
+class TestNarratorAgent(unittest.TestCase):
+    AGENTS = REPO / ".claude" / "agents"
+
+    def front(self, name):
+        head = (self.AGENTS / f"{name}.md").read_text(encoding="utf-8").split("---\n")[1]
+        return {ln.split(":")[0]: ln.split(":", 1)[1].strip() for ln in head.splitlines() if ln and ln[0] != " "}
+
+    def test_front_matter_matches_animator(self):
+        nar, ani = self.front("film-narrator"), self.front("film-animator")
+        self.assertEqual(set(nar), set(ani))
+        self.assertEqual((nar["name"], nar["tools"], nar["model"], nar["background"], nar["maxTurns"]),
+                         ("film-narrator", "Bash, Read, Write, Glob, Grep", "sonnet", "true", "30"))
+
+    def test_flags_named_in_the_agent_exist(self):
+        text = (self.AGENTS / "film-narrator.md").read_text(encoding="utf-8")
+        flags = set(re.findall(r"(?<![\w-])--[a-z][a-z-]+", text))
+        known = {o for a in tts.build_parser()._actions for o in a.option_strings}
+        self.assertIn("--check", flags)
+        self.assertEqual(flags - known, set())
 
 
 if __name__ == "__main__":

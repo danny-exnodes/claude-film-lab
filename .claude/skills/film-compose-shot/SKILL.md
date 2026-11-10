@@ -129,6 +129,10 @@ khi âm thanh do code làm, `--ledger`/`--budget` và `FILM_AGENT` → tách n�
 - **Nhạc luôn do người dùng chọn** (câu hỏi của cinecode: bản thu giấy phép mở ★ · nhạc của họ · code · không), ghi
   vào dòng `Music:` của `STATE.md` kèm `(user)`. Không tự viết `score()` khi họ chưa chọn code.
 - Âm thanh được đo, không nghe: mỗi lần giao bản nháp nhờ người dùng nghe, nêu các giây quan trọng.
+- Lời bình chỉ lấy từ các bản đọc của `tools/tts/vieneu_tts.py` trong `<media>/vo/` (do `film-narrator` render,
+  `--check` đã đạt). **Không bao giờ** dùng `tools/tts.py` hay `keys.py` của cinecode: đường đó đi tìm khóa Gemini,
+  trái quy tắc khóa của lab. Chưa có bản đọc thì giao bản nháp không lời bình và **báo rõ** cho đạo diễn, không tìm
+  cách khác để có giọng.
 
 ## 6. Render và giao
 

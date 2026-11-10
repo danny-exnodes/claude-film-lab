@@ -254,6 +254,32 @@ class TestInlineNoHalfWrites(FilmCase):
         r = self.assert_fails_untouched("--init", "--anchors", bad)
         self.assertIn("object", r.stderr)
 
+    def test_text_that_cannot_be_written_as_utf8_does_not_empty_the_film(self):
+        """write_text opens (truncates) the file before it encodes: a lone surrogate used to leave film.html empty."""
+        bad = self.tmp / "sur.json"
+        bad.write_text('{"a\\ud800.png": {"eye": [1, 2]}}', encoding="utf-8")
+        r = self.assert_fails_untouched("--init", "--anchors", bad)
+        self.assertIn("UTF-8", r.stderr)
+        self.assertEqual(run(INLINE, self.film, "--init").returncode, 0)
+        before = self.both()
+        self.assertGreater(len(before[0]), 1000)
+        r = run(INLINE, self.film, "--anchors", bad)             # the refresh form: a film with scenes in it
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertRegex(r.stderr, r"^FAILED: ")
+        self.assertEqual(self.both(), before)
+
+    def test_unreadable_state_md(self):
+        (self.tmp / "STATE.md").write_bytes(b"**Format:** <length, aspect, size, fps> \xff\n")
+        self.assert_fails_untouched("--init")
+
+    def test_anchors_path_that_would_close_the_marker_comment(self):
+        for name in ("a --!> b.json", "a --> b.json", "a sha=b.json"):
+            with self.subTest(name=name):
+                odd = self.tmp / name
+                odd.write_text('{"a.png": {"eye": [1, 2]}}', encoding="utf-8")
+                r = self.assert_fails_untouched("--init", "--anchors", odd)
+                self.assertIn("--anchors", r.stderr)
+
     def test_bad_size_argument(self):
         for size in ("1920", "1920x", "x1080", "0x1080", "1920x1080x2", "wide"):
             with self.subTest(size=size):

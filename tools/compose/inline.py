@@ -126,7 +126,7 @@ def main():
     w, h = size[1], size[2]
     given = None
     if a.anchors:
-        if "-->" in a.anchors or "\n" in a.anchors or " sha=" in a.anchors:
+        if any(x in a.anchors for x in ("-->", "--!>", "\n", "\r", " sha=")):
             fail(f"--anchors {a.anchors!r}: this path cannot be recorded in film.html; rename the file")
         given = read_anchors(a.anchors)
     film = Path(a.film).resolve()
@@ -151,7 +151,10 @@ def main():
             notes.append("look: 'plates' added and made the default")
         state = film.parent / "STATE.md"
         if state.exists():
-            s = state.read_text(encoding="utf-8")
+            try:
+                s = state.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError) as e:
+                fail(f"{state}: cannot be read ({getattr(e, 'strerror', None) or e})")
             if "<length, aspect, size, fps>" in s:
                 m = re.search(r"const DURATION = ([\d.]+)", html)
                 state_edit = (state, s.replace("<length, aspect, size, fps>",
@@ -234,6 +237,11 @@ def main():
             sys.exit("FAILED: the FILM section uses unseeded time or randomness (use COMPOSE.rng/noise, rng(), t):\n  "
                      + "\n  ".join(bad))
 
+    try:                                        # write_text truncates the file before it encodes: check first
+        html.encode("utf-8")
+    except UnicodeEncodeError as e:
+        fail(f"film.html would not be valid UTF-8 ({e.reason}: {e.object[max(0, e.start - 30):e.start + 1]!a}); "
+             "a lone surrogate in an anchors.json key or in the --anchors path? Nothing was written")
     film.write_text(html, encoding="utf-8")
     if state_edit:                              # after film.html: a failed run must not leave STATE.md ahead of it
         state_edit[0].write_text(state_edit[1], encoding="utf-8")

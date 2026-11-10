@@ -80,8 +80,9 @@ class FakeArk(http.server.BaseHTTPRequestHandler):
         kind = self.path.split("/")[1].split("_")[1]
         if kind == "task":
             return self.answer(200, {"id": TASK_ID})
-        code, name = (404, "ModelNotOpen") if kind == "notopen" else (400, "InvalidParameter")
-        self.answer(code, {"error": {"code": name, "message": "fake"}})
+        code, name = (404, "ModelNotOpen") if kind.startswith("notopen") else (400, "InvalidParameter")
+        # "notopenmix": a ModelNotOpen answer whose message happens to mention InvalidParameter
+        self.answer(code, {"error": {"code": name, "message": "fake InvalidParameter" if kind == "notopenmix" else "fake"}})
 
 
 # Stand-in for tools/ark.py that fails the way ark.py does when the host is unreachable: today with an
@@ -128,6 +129,7 @@ class TestDoctor(unittest.TestCase):
         (cls.td / "fakelab" / "tools" / "ark.py").write_text(FAKE_ARK)
         jobs = {
             "notopen": (["ok_notopen"], fast),
+            "notopenmix": (["ok_notopenmix"], fast),
             "task": (["ok_task"], fast),
             "invalid": (["ok_invalid"], fast),
             "empty": (["empty_invalid", "--quick"], {}),
@@ -173,6 +175,10 @@ class TestDoctor(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         self.assertIn("check(s) failed", out)
         self.assertNotIn("all checks passed", out)
+
+    def test_model_not_open_wins_over_an_invalid_parameter_mention(self):
+        self.assertRegex(self.line("notopenmix", "video-model"), r"FAIL .*%s not activated" % ark.VIDEO_DEFAULT)
+        self.assertNotIn("all checks passed", self.r["notopenmix"][1])
 
     def test_accepted_task_fails_with_its_id(self):
         rc, out, _ = self.r["task"]

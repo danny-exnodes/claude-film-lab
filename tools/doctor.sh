@@ -125,8 +125,8 @@ try:
     code = 4
 except SystemExit as e:
     s = " ".join(str(e).split())
-    if "InvalidParameter" in s: print(f"{m} activated"); code = 0
-    elif "ModelNotOpen" in s: print(f"{m} not activated in Ark Console"); code = 1
+    if "ModelNotOpen" in s: print(f"{m} not activated in Ark Console"); code = 1   # first: its text may name parameters
+    elif "InvalidParameter" in s: print(f"{m} activated"); code = 0
     elif s.startswith("network error"): print("Ark host unreachable: " + s[len("network error"):].lstrip(": ")[:100]); code = 1
     else: print(f"{m}: {s[:100]}"); code = 1
 except OSError as e:   # URLError, timeouts, refused connections

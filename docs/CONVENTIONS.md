@@ -168,10 +168,24 @@ models:                  # (tuỳ chọn) trần riêng theo model, đơn vị �
 ```
 `ledger.csv` (đặt ở `out/<series>/ep<NN>/ledger.csv`), header:
 `ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note`
-- `kind` ∈ `image, video`; `status` ∈ `ok, failed, cut-502, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
-- Mỗi lần gọi API tạo ảnh/video (kể cả lỗi) ghi đúng một dòng; ghi bằng khoá file (`fcntl.flock`) vì agent chạy song song.
-- Trước khi gọi API: cộng ledger (`status` ∈ ok, failed, cut-502 – mọi lần có thể đã bị tính phí) + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget`, thoát mã 3.
+- `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
+- Ngân sách không phải tuỳ chọn: `ark.py image|video` từ chối (thoát mã 2, không gọi API, không ghi ledger) nếu thiếu
+  budget **hoặc** ledger (cờ `--budget/--ledger` hoặc env `FILM_BUDGET/FILM_LEDGER`); `--budget` không có ledger là lỗi.
+  Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính, agent không dùng.
+- Mỗi request ghi dòng bằng khoá file (`fcntl.flock`, agent chạy song song):
+  - trước lệnh POST tạo ảnh/video: một dòng `pending`, `note` = `req=<uuid4 hex>`;
+  - video: có task id là ghi ngay dòng `pending` thứ hai có `task_id` (cùng `req=`) và in task id ra – còn lại cả khi bị SIGKILL;
+  - khi xong: một dòng cuối `ok`, `failed` hoặc `cut-502` cùng `req=` (`note` = `req=<id>; <chi tiết>`).
+  SIGTERM/SIGINT → dòng `failed` (`interrupted by SIGTERM`, video có `task_id`); SIGKILL → chỉ còn `pending`, vẫn tính là đã tính phí.
+- Cách đếm: gom các dòng theo `req=` (dòng không có `req=` nhưng có `task_id` thì gom theo `task_id`); mỗi request tính
+  **một lần** theo dòng cuối (`ok/failed/cut-502`) mới nhất, chưa có dòng cuối thì theo dòng `pending` (coi như đã tính phí).
+  Dòng không có cả `req=` lẫn `task_id` (ledger cũ) mỗi dòng tính một lần như trước. `refused-budget` không tính.
+- Trước khi gọi API: tổng đã dùng + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget` (không có `pending`), thoát mã 3.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
+- Thư mục chứa file đầu ra được tạo trước khi kiểm ngân sách và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
+  tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
+- `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
+  poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.
 - Giới hạn đã biết: khoá chỉ bao quanh lúc đọc/ghi ledger, không giữ trong lúc gọi API, nên N agent chạy song song có thể
   vượt trần tối đa N−1 request. Chấp nhận ở v1 (tối đa 3 agent tạo ảnh song song, §10); đặt trần có dư tương ứng.
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5

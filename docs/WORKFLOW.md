@@ -73,7 +73,7 @@ Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` 
 - `budget.yaml` trong thư mục tập: `images`, `video_seconds`, `models` (trần riêng theo model).
 - Mọi lần tạo ảnh/video:
   `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<series>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
-  `ark.py` cộng ledger (ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
+  `ark.py` bắt buộc có `--budget` và `--ledger` (thiếu → thoát mã 2), cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Khóa không giữ trong lúc gọi API, nên N agent song
   song có thể vượt trần tối đa N−1 ảnh (CONVENTIONS §7): đặt trần có dư tương ứng.

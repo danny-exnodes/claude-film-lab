@@ -1,5 +1,5 @@
 # Trần chi phí của tập – docs/CONVENTIONS.md §7. Chép vào series/<series>/ep<NN>-<slug>/budget.yaml.
-# tools/ark.py --budget đọc file này; cộng ledger (ok, failed, cut-502) + yêu cầu hiện tại, vượt trần nào thì từ chối.
+# tools/ark.py --budget đọc file này; cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu hiện tại, vượt trần nào thì từ chối.
 # Mặc định dưới đây cho một tập thử 60 s (≈ 8-10 shot, 4 lớp mỗi shot, phần lớn chuyển động bằng code).
 # Agent không tự nâng trần: hỏi người dùng ở phiên chính.
 

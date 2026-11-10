@@ -5,7 +5,8 @@ Bài học về prompt và lớp tranh, theo style. Mỗi mục: ngày · bài h
 ## Model và giới hạn (2026-11-10, từ docs/MODELS.md, docs/RUNBOOK.md)
 - `seedream-5-0-260128` và `dreamina-seedance-2-0-*` → `ModelNotOpen` (chưa kích hoạt). Dùng ID trong `style.yaml` → `models`.
 - Proxy cắt request đồng bộ > ~30 s (502). 2K của `seedream-5-0-lite-260128` ~25 s là sát ngưỡng; pro và 4K luôn bị cắt
-  → chỉ qua Lambda (v1.0.0 chưa triển khai). Viết prompt cho 2K.
+  → chỉ qua Lambda (đã triển khai 2026-11-10), ở phiên chính: `ark.py lambda-job prepare` → Invoke → `finish`.
+  Lớp do plate-maker tạo vẫn viết cho 2K; ảnh cần pro/4K thì ghi rõ trong prompt pack để đạo diễn chạy.
 - Seedream không xuất nền trong suốt, trả JPEG (ark.py đổi sang PNG khi tên file `.png`): lớp cần alpha phải vẽ trên nền
   phẳng đúng mã màu của `matte` rồi tách.
 - Ảnh đầu vào vuông + `ratio=adaptive` → video vuông. Khung đầu cho Seedance nên 16:9.

@@ -49,7 +49,7 @@ Nền phẳng lấy màu từ `matte.paper_bg` (luminance) hoặc `matte.key_bg`
    (`NINE TAILS`, `FOUR EARS`, `EYES ON ITS BACK`, `NO EYES ON THE FACE`).
 2. Prompt khóa nhân vật (front, toàn thân) → ảnh khóa duyệt ở G2 → các góc khác dùng ảnh khóa làm `--ref`.
 3. Biến thể trạng thái (mắt nhắm, cúi đầu): đổi đúng một chi tiết, ảnh khóa làm `--ref`. Seedream Pro chỉ qua Lambda
-   (`ark.py lambda-job`, do đạo diễn chạy ở phiên chính; chưa triển khai → dùng model `image` 2K).
+   (đã triển khai; `ark.py lambda-job prepare` → Invoke → `finish`, do đạo diễn chạy ở phiên chính, agent không gọi).
 4. Lỗi hay gặp, ghi thành ràng buộc: tự thêm mắt trên mặt, sai số đuôi/tai, quầng sương quanh viền, bóng đổ dưới chân.
 5. Mỗi prompt lưu thành file `projects/<project>/ep<NN>-<slug>/prompts/<tên-file-ảnh-không-đuôi>.txt` và một dòng
    `prompts.csv` (cột `file` ghi tên ảnh sẽ tạo, `usage` và `approved` để trống).
@@ -65,8 +65,8 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
 ```
 - **G2 trước hàng loạt:** khâu 4 chỉ tạo ảnh khóa nhân vật và đủ lớp của **một** shot mẫu (2K, hoặc `--fast` để nháp).
   Không tạo shot khác cho tới khi `gates.G2` có ngày trong EPISODE.md.
-- Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua `lambda/` khi đã triển khai, luôn bằng
-  `ark.py lambda-job prepare/finish` để vào ledger (`lambda/README.md`); chưa triển khai → dùng 2K của model `image`.
+- Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua Lambda (đã triển khai), ở phiên chính, luôn bằng
+  `ark.py lambda-job prepare` → Invoke → `finish` để vào ledger (`lambda/README.md`); agent tạo lớp dùng 2K của model `image`.
 - `--seed` và `--negative` có trong ark.py nhưng **chưa xác minh** model áp dụng: ghi seed vào `prompts.csv` để tham
   khảo, không hứa tái tạo y hệt.
 - `--ref` được ark.py tự nén JPEG q90, cạnh ≤ 2048; file trên đĩa giữ nguyên.

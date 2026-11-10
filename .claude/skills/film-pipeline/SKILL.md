@@ -150,7 +150,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   → ghi dòng `bắt đầu tạo ảnh/video – phiên <tên phiên>` và đẩy EPISODE.md ngay; xong khâu thì ghi `xong tạo ảnh/video`,
   gộp ledger với bản trên Drive (`ark.py ledger-merge`, §11.6 mục đẩy) rồi đẩy. Phiên khác (TTS, hạ tầng, thử nghiệm)
   không gọi `ark.py image|video|lambda-job` với ledger của tập đó. Từ khâu 4 bật `ledger_required: true` trong `budget.yaml`.
-- Ảnh pro/4K (khi Lambda đã triển khai): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
+- Ảnh pro/4K (Lambda đã triển khai 2026-11-10): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
   (`lambda/README.md`); không Invoke bằng payload tự viết.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
   Chỉ **một** `film-compositor` mỗi tập.
@@ -161,7 +161,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
   Reviewer tự ghi `review/qc-<v>.md` và MEMORY.md của nó (có Write/Edit trong `tools`; `memory: project` không tự cấp).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,
-  `--fast`, Lambda khi đã triển khai).
+  `--fast`; pro/4K qua Lambda ở phiên chính).
 
 ## 5. Ghi chú của người dùng
 
@@ -196,7 +196,7 @@ Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau kh�
 ## 8. Không làm
 
 - Không in, ghi log, đọc hay tìm API key; không yêu cầu người dùng dán khóa.
-- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ qua Lambda bằng `ark.py lambda-job` (chưa triển khai → dùng 2K).
+- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ ở phiên chính qua `ark.py lambda-job prepare` → Invoke → `finish`.
 - Không đặt file trạng thái tên `STATE.md` (tên đó của cinecode).
 - Không làm lại mục đã khóa; không qua cổng thay người dùng.
 - Không commit dữ liệu dự án vào repo; không xoá hay `trash_file` trên Drive (chuyển vào `99_LuuTru/`).

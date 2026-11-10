@@ -267,7 +267,7 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 | `key_bg #FF00FF` + rembg cho mọi lớp | `matte.per_layer`: thủy mặc dùng `luminance` cho L2/L3 (giữ vệt mực loang), `rembg` cho L4/P |
 | Ngân sách ghi bằng prompt | `ark.py --budget/--ledger` chặn trong công cụ |
 | `cost_note` | `usage` JSON nguyên văn (API không trả tiền) |
-| Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); S3 khi Lambda sẵn sàng. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
+| Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); ảnh pro/4K từ Lambda tải từ S3 về `out/` rồi vào gói như mọi ảnh. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
 | Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-<v>.txt` |
 | Song song plate-maker | Tối đa 3 agent song song; ledger dùng khoá file |
 | Kiểm tra kịch bản bằng mắt | `tools/check_episode.py` kiểm schema, thời lượng, nhịp, tên file |

@@ -46,4 +46,4 @@ tăng phiên bản, theo cách `matte.py` ghi ra (xem `--help`), không ghi đè
 | Chữ, triện, chữ ký | negative viết thành câu trong prompt |
 | Video ra vuông | ảnh đầu vào vuông + `ratio=adaptive` → dùng ảnh 16:9 hoặc `--ratio 16:9` |
 | rembg cắt mất vệt mực loang | lớp mực (L2/L3 thủy mặc) dùng `luminance`, không `rembg` |
-| 502 sau ~30 s | không thử lại; giảm size, `--fast`; pro/4K chờ Lambda |
+| 502 sau ~30 s | không thử lại; giảm size, `--fast`; pro/4K chỉ ở phiên chính qua `ark.py lambda-job prepare` → Invoke → `finish` |

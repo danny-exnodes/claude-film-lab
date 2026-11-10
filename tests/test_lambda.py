@@ -305,35 +305,72 @@ class TestLedgerMerge(ArkCase):
         self.assertEqual(self.run_ark("ledger-merge", str(self.tmp / "nope.csv"), "-o", self.ledger)[0], 2)
 
 
+class FakeAwsError(Exception):
+    """Shaped like botocore's ClientError (the tests run without boto3/botocore)."""
+
+    def __init__(self, code):
+        super().__init__(f"An error occurred ({code}) when calling the operation")
+        self.response = {"Error": {"Code": code}}
+
+
+class ParamValidationError(Exception):
+    """Stands in for botocore.exceptions.ParamValidationError: the worker matches it by class name."""
+
+
 class FakeS3:
     def __init__(self):
         self.objects = {}
+        self.puts = []                 # every key written, in order
+        self.conditional = True        # False: this "botocore" does not know IfNoneMatch
+        self.get_error = None          # error code raised by every get_object
 
-    def put_object(self, Bucket, Key, Body, ContentType=None):
+    def put_object(self, Bucket, Key, Body, ContentType=None, IfNoneMatch=None):
+        if IfNoneMatch is not None:
+            if not self.conditional:
+                raise ParamValidationError('Unknown parameter in input: "IfNoneMatch"')
+            if Key in self.objects:
+                raise FakeAwsError("PreconditionFailed")
+        self.puts.append(Key)
         self.objects[Key] = Body
 
     def get_object(self, Bucket, Key):
+        if self.get_error:
+            raise FakeAwsError(self.get_error)
         if Key not in self.objects:
-            raise KeyError(Key)                              # stands in for NoSuchKey / AccessDenied
+            raise FakeAwsError("NoSuchKey")
         return {"Body": io.BytesIO(self.objects[Key])}
 
 
+FAKE_KEY = "FAKEKEY-0123456789-abcdefghij"            # obviously fake; shaped like a usable key
+JOB = "0123456789abcdef0123456789abcdef"              # the format of ark.py new_req()
+WORKER = REPO / "lambda" / "ark_image_worker.py"
+BAD_SECRET = "secret s is empty, a placeholder or malformed: enter it again in the console"
+
+
 class TestWorker(unittest.TestCase):
-    """lambda/ark_image_worker.py with boto3 stubbed: the same job_id never generates twice."""
+    """lambda/ark_image_worker.py with boto3 stubbed: no key in any output, a fresh key per job, the same job_id
+    never generates twice, and every status says whether anything was sent."""
 
     def setUp(self):
         self.s3 = FakeS3()
-        sm = types.SimpleNamespace(get_secret_value=lambda SecretId: {"SecretString": "not-a-real-key\n"})
+        self.secret = FAKE_KEY + "\n"
+        self.secret_reads = 0
+
+        def get_secret_value(SecretId):
+            self.secret_reads += 1
+            return {"SecretString": self.secret}
+        sm = types.SimpleNamespace(get_secret_value=get_secret_value)
         boto3 = types.ModuleType("boto3")
         boto3.client = lambda name: self.s3 if name == "s3" else sm
         env = mock.patch.dict(os.environ, {"BUCKET": "b", "SECRET_ID": "s", "ARK_BASE": "http://127.0.0.1:9/x"})
         mods = mock.patch.dict(sys.modules, {"boto3": boto3})
         env.start(); mods.start()
         self.addCleanup(env.stop); self.addCleanup(mods.stop)
-        spec = importlib.util.spec_from_file_location("film_worker", REPO / "lambda" / "ark_image_worker.py")
+        spec = importlib.util.spec_from_file_location("film_worker", WORKER)
         self.w = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.w)
-        self.posts = []
+        self.posts, self.auth, self.timeouts, self.seen_running = [], [], [], []
+        self.fail = None                                     # exception raised by urlopen instead of answering
         buf = io.BytesIO()
         Image.new("RGB", (4, 4)).save(buf, "JPEG")
         import base64
@@ -346,25 +383,213 @@ class TestWorker(unittest.TestCase):
 
         def urlopen(req, timeout=None):
             self.posts.append(json.loads(req.data))
+            self.auth.append(req.get_header("Authorization"))
+            self.timeouts.append(timeout)
+            self.seen_running.append(json.loads(self.s3.objects[f"jobs/{JOB}.json"]))
+            if self.fail is not None:
+                raise self.fail
             return Resp(body)
         p = mock.patch.object(self.w.urllib.request, "urlopen", urlopen)
         p.start(); self.addCleanup(p.stop)
-        self.ctx = types.SimpleNamespace(aws_request_id="rid", get_remaining_time_in_millis=lambda: 300000)
+        self.remaining_ms = 300000
+        self.ctx = types.SimpleNamespace(aws_request_id="rid",
+                                         get_remaining_time_in_millis=lambda: self.remaining_ms)
+        self.ev = {"job_id": JOB, "prompt": "p", "size": "2K"}
+        import hashlib
+        self.sha = hashlib.sha256(WORKER.read_bytes()).hexdigest()
 
+    def status(self):
+        return json.loads(self.s3.objects[f"jobs/{JOB}.json"])
+
+    def assert_no_secret(self, *needles, exc=None):
+        for needle in needles:
+            for key, body in self.s3.objects.items():
+                self.assertNotIn(needle.encode(), body, key)
+            if exc is not None:
+                self.assertNotIn(needle, str(exc))
+                self.assertNotIn(needle, repr(exc))
+        if exc is not None:                                  # nothing chained for CloudWatch to print
+            self.assertIsNone(exc.__cause__)
+            self.assertTrue(exc.__suppress_context__ or exc.__context__ is None)
+
+    # --- the two scenarios that already held -------------------------------------------------------------
     def test_run_then_duplicate_is_skipped(self):
-        ev = {"job_id": "abc", "prompt": "p", "size": "2K"}
-        r = self.w.handler(ev, self.ctx)
-        self.assertEqual(r["keys"], ["images/abc.jpg"])
-        st = json.loads(self.s3.objects["jobs/abc.json"])
+        r = self.w.handler(self.ev, self.ctx)
+        self.assertEqual(r["keys"], [f"images/{JOB}.jpg"])
+        st = self.status()
         self.assertEqual((st["status"], st["usage"]), ("succeeded", {"generated_images": 1}))
-        again = self.w.handler(ev, self.ctx)
-        self.assertEqual(again["skipped"], "duplicate")
+        self.assertIs(st["sent"], True)
+        again = self.w.handler(self.ev, self.ctx)
+        self.assertEqual((again["skipped"], again["status"]), ("duplicate", "succeeded"))
         self.assertEqual(len(self.posts), 1)                 # one generation, one bill
 
     def test_running_job_is_not_restarted(self):
-        self.s3.objects["jobs/abc.json"] = json.dumps({"job_id": "abc", "status": "running"}).encode()
-        self.assertEqual(self.w.handler({"job_id": "abc", "prompt": "p"}, self.ctx)["status"], "running")
+        self.s3.objects[f"jobs/{JOB}.json"] = json.dumps({"job_id": JOB, "status": "running"}).encode()
+        self.assertEqual(self.w.handler(self.ev, self.ctx)["status"], "running")
         self.assertEqual(self.posts, [])
+        self.assertEqual(self.s3.puts, [])
+
+    # --- key hygiene ---------------------------------------------------------------------------------------
+    def test_multiline_secret_fails_before_sending_and_is_nowhere(self):
+        self.secret = "FAKEKEY-first-half-0123\nFAKEKEY-second-half-4567\n"
+        with self.assertRaises(RuntimeError) as cm:
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.posts, [])
+        st = self.status()
+        self.assertEqual((st["status"], st["sent"], st["error"]), ("failed", False, BAD_SECRET))
+        self.assertEqual(str(cm.exception), BAD_SECRET)
+        self.assert_no_secret("FAKEKEY", exc=cm.exception)
+
+    def test_placeholder_short_and_spaced_secrets_are_refused(self):
+        for bad in ("REPLACE_WITH_ARK_API_KEY", "", "short", "FAKEKEY with spaces 0123456789",
+                    "FAKEKEY-khóa-0123456789abc"):
+            self.s3.objects.clear()
+            self.secret = bad
+            with self.assertRaises(RuntimeError):
+                self.w.handler(self.ev, self.ctx)
+            st = self.status()
+            self.assertEqual((st["status"], st["sent"], st["error"]), ("failed", False, BAD_SECRET), bad)
+        self.assertEqual(self.posts, [])
+
+    def test_key_echoed_in_http_error_body_is_redacted(self):
+        body = ('{"error": {"message": "invalid key %s"}}' % FAKE_KEY).encode() + b"\xff"
+        self.fail = self.w.urllib.error.HTTPError("http://x", 401, "Unauthorized", {}, io.BytesIO(body))
+        with self.assertRaises(RuntimeError) as cm:
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(len(self.posts), 1)
+        st = self.status()
+        self.assertEqual((st["status"], st["sent"]), ("failed", True))
+        self.assertTrue(st["error"].startswith('HTTP 401: {"error": {"message": "invalid key <redacted>"}}'),
+                        st["error"])
+        self.assertEqual(str(cm.exception), st["error"])
+        self.assert_no_secret(FAKE_KEY, exc=cm.exception)
+
+    def test_bearer_text_is_cut_even_when_it_is_not_the_exact_key(self):
+        self.fail = ValueError("Invalid header value b'Bearer FAKEKEY-other-half\\nFAKEKEY-rest'")
+        with self.assertRaises(RuntimeError) as cm:
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.status()["error"], "Invalid header value b'Bearer <redacted>")
+        self.assert_no_secret("FAKEKEY", exc=cm.exception)
+
+    def test_secret_is_read_again_for_every_job(self):
+        self.secret = "REPLACE_WITH_ARK_API_KEY"
+        with self.assertRaises(RuntimeError):
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.posts, [])
+        self.s3.objects.clear()
+        self.secret = FAKE_KEY                               # the user enters the key; same warm instance
+        self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.auth, ["Bearer " + FAKE_KEY])
+        self.assertEqual(self.secret_reads, 2)
+
+    # --- sent flag, references, prompt ---------------------------------------------------------------------
+    def test_missing_reference_is_unsent_with_a_clear_message(self):
+        for code in ("NoSuchKey", "AccessDenied"):
+            self.s3.objects.clear()
+            self.s3.get_error = code
+            with self.assertRaises(RuntimeError):
+                self.w.handler({**self.ev, "ref_keys": [f"refs/{JOB}-1.jpg"]}, self.ctx)
+            st = self.status()
+            self.assertEqual((st["status"], st["sent"]), ("failed", False))
+            self.assertEqual(st["error"], f"ref not in bucket: refs/{JOB}-1.jpg: upload it, then prepare a new job")
+        self.assertEqual(self.posts, [])
+
+    def test_reference_is_sent_as_a_data_uri(self):
+        self.s3.objects[f"refs/{JOB}-1.jpg"] = b"\xff\xd8\xff" + b"0" * 8
+        self.w.handler({**self.ev, "ref_keys": [f"refs/{JOB}-1.jpg"]}, self.ctx)
+        self.assertTrue(self.posts[0]["image"].startswith("data:image/jpeg;base64,"))
+
+    def test_missing_prompt_is_unsent(self):
+        with self.assertRaises(RuntimeError):
+            self.w.handler({"job_id": JOB}, self.ctx)
+        st = self.status()
+        self.assertEqual((st["status"], st["sent"]), ("failed", False))
+        self.assertIn("prompt", st["error"])
+        self.assertEqual((self.posts, self.secret_reads), ([], 0))
+
+    # --- deadline --------------------------------------------------------------------------------------------
+    def test_running_status_has_deadline_and_timeout_fits_the_time_left(self):
+        self.remaining_ms = 25000
+        self.w.handler(self.ev, self.ctx)
+        running = self.seen_running[0]
+        self.assertEqual((running["status"], running["sent"]), ("running", True))
+        self.assertAlmostEqual(running["deadline"], running["started"] + 25, delta=1)
+        self.assertEqual(self.timeouts, [5])
+        self.assertLessEqual(self.timeouts[0], 25)
+
+    def test_timeout_never_drops_below_one_second(self):
+        self.remaining_ms = 8000
+        self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.timeouts, [1])
+
+    def test_long_limit_leaves_twenty_seconds(self):
+        self.remaining_ms = 900000
+        self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.timeouts, [880])
+
+    # --- duplicate guard -------------------------------------------------------------------------------------
+    def test_event_without_a_prepared_job_id_is_refused(self):
+        for ev in ({"prompt": "p"}, {"job_id": "abc", "prompt": "p"}, {"job_id": JOB.upper(), "prompt": "p"},
+                   {"job_id": JOB + "\n", "prompt": "p"}, {"job_id": 5, "prompt": "p"}, None):
+            r = self.w.handler(ev, self.ctx)
+            self.assertEqual(r, {"error": "no job_id: use ark.py lambda-job prepare"})
+        self.assertEqual((self.s3.puts, self.posts, self.secret_reads), ([], [], 0))
+
+    def test_second_delivery_never_posts_again(self):
+        self.w.handler(self.ev, self.ctx)
+        self.s3.get_error = "SlowDown"                       # the read of the old status fails: still a duplicate
+        again = self.w.handler(self.ev, self.ctx)
+        self.assertEqual((again["job_id"], again["skipped"]), (JOB, "duplicate"))
+        self.assertEqual(len(self.posts), 1)
+
+    def test_existing_status_only_treats_missing_as_missing(self):
+        self.assertIsNone(self.w.existing_status(JOB))
+        self.s3.get_error = "AccessDenied"
+        self.assertIsNone(self.w.existing_status(JOB))
+        self.s3.get_error = "SlowDown"
+        with self.assertRaises(FakeAwsError):
+            self.w.existing_status(JOB)
+
+    def test_read_error_in_the_fallback_raises_and_posts_nothing(self):
+        self.s3.conditional = False
+        self.s3.get_error = "InternalError"
+        with self.assertRaises(FakeAwsError):
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual((self.posts, self.s3.puts), ([], []))
+
+    def test_fallback_without_conditional_writes_runs_the_job_once(self):
+        self.s3.conditional = False
+        self.assertEqual(self.w.handler(self.ev, self.ctx)["keys"], [f"images/{JOB}.jpg"])
+        self.assertEqual(self.w.handler(self.ev, self.ctx)["skipped"], "duplicate")
+        self.assertEqual(len(self.posts), 1)
+
+    def test_other_claim_errors_are_not_swallowed(self):
+        real_put = self.s3.put_object
+
+        def put(**kw):
+            if kw.get("IfNoneMatch"):
+                raise FakeAwsError("ServiceUnavailable")
+            return real_put(**kw)
+        self.s3.put_object = put
+        with self.assertRaises(FakeAwsError):
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.posts, [])
+
+    # --- worker identity -------------------------------------------------------------------------------------
+    def test_every_status_carries_the_worker_hash(self):
+        self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.seen_running[0]["worker_sha256"], self.sha)
+        self.assertEqual(self.status()["worker_sha256"], self.sha)
+        self.s3.objects.clear()
+        self.secret = "REPLACE_WITH_ARK_API_KEY"
+        with self.assertRaises(RuntimeError):
+            self.w.handler(self.ev, self.ctx)
+        self.assertEqual(self.status()["worker_sha256"], self.sha)
+
+    def test_worker_does_not_import_botocore(self):
+        src = WORKER.read_text()
+        self.assertNotIn("import botocore", src)
+        self.assertNotIn("from botocore", src)
 
 
 if __name__ == "__main__":

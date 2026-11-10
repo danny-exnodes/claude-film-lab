@@ -18,7 +18,7 @@ python3 tools/compose/keyframe.py out/<p>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the
   còn lại trong `#00FF00`/`#FF00FF` khi `keyframe.py` báo `WARN KEY NEAR SUBJECT`) cũng là màu ghi trong prompt và là
   màu `matte_seq.py` tự dò ra (`--key auto`). Khung ra 16:9 nên clip ra 16:9 (ảnh vuông cho clip vuông, ví dụ 960×960 ở 720p).
 - Kiểm tra miễn phí trước khi giao clip: `python3 tools/compose/keyframe.py --check <khung đầu> --key "<màu key>"`
-  (thoát 1 nếu không phải 1920x1080, có alpha, hoặc viền không phải màu key).
+  (thoát 1 nếu không phải 1920x1080, có alpha, viền không phải màu key, hoặc khung không có nhân vật).
 - Phương án khác khi shot không cần parallax: chạy Seedance trên **cảnh đã ghép** (một khung `make.py stills` full size),
   clip thành lớp phủ toàn khung (`seq`, depth 1.0, cover: true: cả khung zoom và rung như một bức ảnh; ở depth 0 chỉ còn rung và nghiêng).
 

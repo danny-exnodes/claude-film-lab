@@ -45,6 +45,7 @@ SOLID = 128               # alpha >= SOLID counts as subject
 KEY_REFS = ("#00FF00", "#FF00FF")
 PAPER = (0xEF, 0xE6, 0xD3)
 STRIP_TILE_W = 640
+STILL_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp")
 
 # WARN thresholds. Calibrated on synthetic frames through libx264 only: re-check every one of them on the first
 # real Seedance clip (its H.264 edges are softer) before trusting a silent run.
@@ -95,12 +96,16 @@ def ring_pixels(rgb):
 
 
 def rembg_model_file(model):
-    """The model file when it is already on disk, else None (rembg would download it: no surprise download)."""
-    home = Path(os.path.expanduser("~"))
-    places = [home / ".rembg" / "models" / model, home / ".u2net"]
-    env = os.environ.get("U2NET_HOME")
+    """The model file when it is already on disk, else None (rembg would download it: no surprise download).
+    Only the places rembg itself reads: $U2NET_HOME alone when it is set, else $REMBG_HOME (default ~/.rembg, or
+    $XDG_DATA_HOME/rembg) and the old flat ~/.u2net (or $XDG_DATA_HOME/.u2net)."""
+    env, xdg = os.environ.get("U2NET_HOME"), os.environ.get("XDG_DATA_HOME")
     if env:
-        places = [Path(env) / "models" / model, Path(env)] + places
+        root = flat = Path(env).expanduser()
+    else:
+        root = Path(os.environ.get("REMBG_HOME") or (os.path.join(xdg, "rembg") if xdg else "~/.rembg")).expanduser()
+        flat = Path(xdg or "~").expanduser() / ".u2net"
+    places = [root / "models" / model, flat]
     for d in places:
         if (d / f"{model}.onnx").is_file():
             return d / f"{model}.onnx"
@@ -134,8 +139,8 @@ def decode(clip, raw):
     for name in frame_names(raw):
         (raw / name).unlink()
     try:
-        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip), str(raw / "%06d.png")],
-                           capture_output=True, text=True)
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(clip.resolve()), "%06d.png"],
+                           cwd=raw, capture_output=True, text=True)
     except FileNotFoundError:
         return "ffmpeg is not installed"
     if r.returncode != 0:
@@ -215,6 +220,8 @@ def main(argv=None):
     is_clip = src.is_file()
     if not is_clip and not src.is_dir():
         return usage(f"IN {src} is neither a clip nor a folder of frames")
+    if is_clip and src.suffix.lower() in STILL_SUFFIXES:
+        return usage(f"IN {src} is a still image, not a clip (.mp4) or a folder of frames")
     if is_clip:
         out = Path(a.out_dir) if a.out_dir else src.parent / src.stem
         raw = out / "raw"
@@ -229,8 +236,12 @@ def main(argv=None):
     stale = frame_names(out)
     if stale and not a.overwrite:
         return usage(f"OUT_DIR {out} already holds {len(stale)} keyed frames: pass --overwrite or another folder")
-    if a.start_frame and not Path(a.start_frame).is_file():
-        return usage(f"--start-frame {a.start_frame} not found")
+    start_rgb = None
+    if a.start_frame:
+        try:
+            start_rgb = load_rgb(a.start_frame)
+        except OSError as e:
+            return usage(f"--start-frame {a.start_frame} cannot be read ({e})")
     if a.method == "rembg" and not rembg_model_file(a.rembg_model):
         return usage(f"rembg model {a.rembg_model}.onnx is not on disk (looked in ~/.rembg/models/{a.rembg_model}/, "
                      f"$U2NET_HOME and ~/.u2net/): not downloading it here. Install it first "
@@ -255,7 +266,10 @@ def main(argv=None):
     fps_out = fps / a.every
 
     # ---- key colour and background flatness from the border ring of the first, middle and last frame
-    ring = np.concatenate([ring_pixels(load_rgb(raw / names[i])) for i in sorted({0, n // 2, n - 1})])
+    try:
+        ring = np.concatenate([ring_pixels(load_rgb(raw / names[i])) for i in sorted({0, n // 2, n - 1})])
+    except OSError as e:
+        return fail(f"cannot read a frame in {raw} ({e})")
     bg_flat = float(ring.std(axis=0).max())
     key_source = "given"
     if key is None:
@@ -274,7 +288,10 @@ def main(argv=None):
     flick_sum = flick_px = 0.0
     areas, edge_frames, size = [], 0, None
     for i, name in enumerate(names, 1):
-        rgb = load_rgb(raw / name)
+        try:
+            rgb = load_rgb(raw / name)
+        except OSError as e:
+            return fail(f"cannot read {raw / name} ({e}); the frames before it are already in {out}")
         if size is None:
             size = (rgb.shape[1], rgb.shape[0])
             always_bg = np.ones(rgb.shape[:2], bool)
@@ -303,8 +320,8 @@ def main(argv=None):
     area = np.asarray(areas, np.float64)
     med = float(np.median(area))
     iou = None
-    if a.start_frame:
-        _, sa = keyer(load_rgb(a.start_frame))
+    if start_rgb is not None:
+        _, sa = keyer(start_rgb)
         sm = np.asarray(Image.fromarray(((sa >= SOLID) * 255).astype(np.uint8), "L").resize(size, Image.NEAREST)) > 0
         with Image.open(out / "000001.png") as im:
             first = np.asarray(im)[..., 3] >= SOLID

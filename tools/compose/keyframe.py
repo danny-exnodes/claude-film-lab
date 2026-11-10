@@ -20,7 +20,8 @@ Before every paid clip, check the frame that is about to be sent (free, never wr
 
 Exit 1 unless the image is 1920x1080, has no alpha channel and at least 98% of its 16 px border ring is the key
 colour; the message names the test that failed. On success it prints the bounding box of the figure, with a WARN
-(exit 0) when the box touches a frame edge or when there is no figure at all.
+(exit 0) when the box touches a frame edge. A frame with no figure at all (every pixel is the key colour) is
+exit 1 too: there is nothing to animate.
 """
 import argparse
 import json
@@ -77,10 +78,10 @@ def check(path, key):
                     f"{KEY_TOL:g} of {to_hex(key)}, need {RING_MIN * 100:.0f}% (wrong --key, a background that is "
                     f"not flat, or a figure cut by the frame)")
     ys, xs = np.nonzero(~near)
-    print(f"keyframe --check ok {path}: {STAGE[0]}x{STAGE[1]} RGB, border {share * 100:.1f}% key {to_hex(key)}")
     if not len(xs):
-        print("WARN NO FIGURE: every pixel is the key colour")
-        return 0
+        return fail(f"no figure: every pixel is within {KEY_TOL:g} of the key colour {to_hex(key)} (plate placed "
+                    f"off the stage, an empty plate, or a plate of the key colour)")
+    print(f"keyframe --check ok {path}: {STAGE[0]}x{STAGE[1]} RGB, border {share * 100:.1f}% key {to_hex(key)}")
     x0, y0, x1, y1 = int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
     print(f"figure bbox {x0},{y0}-{x1},{y1} ({x1 - x0}x{y1 - y0})")
     sides = [n for n, hit in (("left", x0 == 0), ("top", y0 == 0), ("right", x1 == STAGE[0]),
@@ -112,6 +113,8 @@ def main():
         sys.exit(check(a.check, key))
     if not a.plate or not a.out:
         ap.error("the following arguments are required: plate, out (or --check START.png)")
+    if Path(a.out).resolve() == Path(a.plate).resolve():
+        ap.error(f"OUT is the plate itself ({a.plate}): the start frame would replace it")
 
     plate = Image.open(a.plate).convert("RGBA")
     w, h = plate.size

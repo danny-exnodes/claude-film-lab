@@ -171,6 +171,9 @@ class TestChromaFolder(SeqCase):
         self.assertNotEqual(im.getpixel((2, 2)), (0xEF, 0xE6, 0xD3))            # top row: checkerboard
         r, g, b = im.getpixel((100, H + 90))                                    # the subject, first frame
         self.assertLess(max(r, g, b), 60)
+        dark = lambda tile, x: max(im.getpixel((tile * W + x, H + 90))) < 60    # subject centre: 100, 136, 160
+        self.assertEqual([dark(0, 75), dark(1, 75), dark(1, 160), dark(2, 185), dark(1, 185)],
+                         [True, False, True, True, False])
 
     def test_cropped_and_empty(self):
         rng = np.random.default_rng(3)
@@ -268,6 +271,26 @@ class TestRefusals(SeqCase):
         self.assertEqual(code, 2)
         self.assertEqual(np.asarray(Image.open(self.raw / "000001.png")).shape, (H, W, 3))   # raw frames untouched
 
+    def test_a_still_image_is_not_a_clip(self):
+        code, _, err = self.run_seq(self.raw / "000001.png")
+        self.assertEqual(code, 2)
+        self.assertIn("not a clip", err)
+        self.assertEqual(sorted(p.name for p in self.raw.iterdir()), ["000001.png", "000002.png", "000003.png"])
+
+    def test_unreadable_start_frame_is_refused_before_anything_is_written(self):
+        bad = self.tmp / "start.png"
+        bad.write_bytes(b"not a png")
+        code, _, err = self.run_seq(self.raw, self.tmp / "keyed", "--start-frame", bad)
+        self.assertEqual(code, 2)
+        self.assertIn("--start-frame", err)
+        self.assertFalse((self.tmp / "keyed").exists())
+
+    def test_unreadable_frame_is_named(self):
+        (self.raw / "000002.png").write_bytes(b"")
+        code, _, err = self.run_seq(self.raw, self.tmp / "keyed")
+        self.assertEqual(code, 1)
+        self.assertIn("000002.png", err)
+
     def test_out_dir_with_frames_needs_overwrite(self):
         out = self.tmp / "keyed"
         self.assertEqual(self.run_seq(self.raw, out)[0], 0)
@@ -344,6 +367,13 @@ class TestClip(SeqCase):
         self.assertEqual(len(keyed(out)), 3)
         self.assertEqual(len(keyed(out / "raw")), 6)
 
+    def test_percent_and_space_in_the_path(self):
+        clip = self.make_clip(self.tmp / "100% done" / "c %d.mp4")
+        code, text, err = self.run_seq(clip)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(keyed(self.tmp / "100% done" / "c %d" / "raw")), 6)
+        self.assertEqual(len(keyed(self.tmp / "100% done" / "c %d")), 6)
+
     def test_explicit_out_dir(self):
         clip = self.make_clip(self.tmp / "c.mp4")
         code, text, err = self.run_seq(clip, self.tmp / "frames")
@@ -381,10 +411,12 @@ class TestRembg(SeqCase):
             return out
 
         fake.new_session, fake.remove = new_session, remove
-        env = mock.patch.dict(os.environ, {"HOME": str(self.home), "U2NET_HOME": str(self.home / "u2")})
+        env = mock.patch.dict(os.environ, {"HOME": str(self.home)})
         mods = mock.patch.dict(sys.modules, {"rembg": fake})
         env.start(); mods.start()
         self.addCleanup(mods.stop); self.addCleanup(env.stop)
+        for name in ("U2NET_HOME", "REMBG_HOME", "XDG_DATA_HOME"):               # restored by env.stop
+            os.environ.pop(name, None)
 
     def cache(self, rel):
         p = self.home / rel
@@ -414,8 +446,30 @@ class TestRembg(SeqCase):
         code, _, err = self.run_seq(self.raw, self.tmp / "k1", "--method", "rembg", "--rembg-model", "isnet-anime")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.calls["sessions"], ["isnet-anime"])
+        os.environ["U2NET_HOME"] = str(self.home / "u2")
         self.cache("u2/models/silueta/silueta.onnx")
         code, _, err = self.run_seq(self.raw, self.tmp / "k2", "--method", "rembg", "--rembg-model", "silueta")
+        self.assertEqual(code, 0, err)
+        self.cache("u2/u2netp.onnx")                                             # the old flat layout
+        code, _, err = self.run_seq(self.raw, self.tmp / "k3", "--method", "rembg", "--rembg-model", "u2netp")
+        self.assertEqual(code, 0, err)
+
+    def test_a_copy_rembg_would_not_read_is_not_a_cache(self):
+        # rembg reads only $U2NET_HOME when it is set (and $REMBG_HOME instead of ~/.rembg): a copy elsewhere
+        # would not stop the download
+        self.cache(".u2net/u2net.onnx")
+        self.cache(".rembg/models/u2net/u2net.onnx")
+        os.environ["U2NET_HOME"] = str(self.home / "u2")
+        code, _, err = self.run_seq(self.raw, self.tmp / "k1", "--method", "rembg")
+        self.assertEqual(code, 2)
+        del os.environ["U2NET_HOME"]
+        (self.home / ".u2net" / "u2net.onnx").unlink()
+        os.environ["REMBG_HOME"] = str(self.home / "rh")
+        code, _, err = self.run_seq(self.raw, self.tmp / "k2", "--method", "rembg")
+        self.assertEqual(code, 2)
+        self.assertEqual(self.calls, {"sessions": [], "remove": []})
+        self.cache("rh/models/u2net/u2net.onnx")
+        code, _, err = self.run_seq(self.raw, self.tmp / "k3", "--method", "rembg")
         self.assertEqual(code, 0, err)
 
     def test_start_frame_goes_through_the_same_session(self):

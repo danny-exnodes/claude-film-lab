@@ -93,6 +93,13 @@ class TestCheck(KeyframeCase):
         self.assertIn("WARN", r.stdout)
         self.assertIn("edge", r.stdout)
 
+    def test_fails_on_a_frame_with_no_figure(self):
+        blank = self.tmp / "blank.png"
+        Image.new("RGB", (1920, 1080), GREEN).save(blank)
+        r = run("--check", blank)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no figure", r.stderr)
+
     def test_missing_file_and_usage(self):
         r = run("--check", self.tmp / "nope.png")
         self.assertEqual(r.returncode, 1)
@@ -104,6 +111,12 @@ class TestCheck(KeyframeCase):
 
 
 class TestGenerateWarnings(KeyframeCase):
+    def test_out_must_not_be_the_plate(self):
+        before = self.plate.read_bytes()
+        r = run(self.plate, self.tmp / "sub" / ".." / "plate.png")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.plate.read_bytes(), before)
+
     def test_clean_frame_has_no_warning(self):
         r = self.make("--x", 960, "--y", 540, "--h", 400)
         self.assertEqual(r.stderr, "")

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Free schema/timing/naming checks for AI Film Lab episodes and style packs (docs/CONVENTIONS.md).
 
-  python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> [--media out/<series>/ep<NN>] [--out review/check-v1.txt]
+  python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> [--media out/<series>/ep<NN>] [--probe] [--out review/check-v1.txt]
   python3 tools/check_episode.py style styles/<id>
 
 Prints ERROR / WARN lines and a summary. Exit 1 when there is any ERROR, else 0.
@@ -9,11 +9,15 @@ Relative --out paths are taken relative to the episode directory (so `--out revi
 lands in series/<series>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
 front matter is used (relative to the repo root).
 
+--probe measures every clip and render mp4 with ffprobe (size, fps, duration, audio) and, for
+renders/ep<NN>_final_v<NN>.mp4, integrated loudness with ffmpeg ebur128 (target -14 +-1 LUFS); the
+numbers go into the report, so `--probe --out review/check-<v>.txt` is what film-reviewer reads.
+
 script.md rules: every narration line starts with a [mm:ss] mark (an optional "- " bullet before it is
 allowed). Lines that are not narration: blank lines, headings (#), blockquotes (>), HTML comments,
 fenced code blocks, a YAML front matter block and horizontal rules.
 """
-import argparse, csv, io, json, os, re, sys, unicodedata
+import argparse, csv, io, json, os, re, shutil, subprocess, sys, unicodedata
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -30,6 +34,13 @@ def known_motions():
 RE_LAYER_FILE = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
 RE_CLIP_FILE = re.compile(r"^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$")
 RE_RENDER_FILE = re.compile(r"^ep\d{2}_(draft|final)_v\d{2}\.mp4$")
+# Other files under clips/ (film-compose-shot/references/seedance-layer.md):
+#   clips/ep<NN>_s<NN>_start_v<NN>.png          start frame for Seedance (tools/compose/keyframe.py)
+#   clips/<clip stem>/000001.png ...            keyed RGBA frames (matte.py chroma), read by a `seq` layer
+#   clips/<clip stem>/raw/000001.png ...        raw frames extracted with ffmpeg before keying
+RE_START_FRAME = re.compile(r"^ep\d{2}_s\d{2}_start_v\d{2}\.png$")
+RE_CLIP_STEM = re.compile(r"^ep\d{2}_s\d{2}_[a-z0-9]+_v\d{2}$")
+RE_FRAME = re.compile(r"^\d{6}\.png$")
 RE_LAYER_CODE = re.compile(r"^(L[1-4]|P\d+-[a-z0-9-]+|FX)$")
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RE_EP_DIR = re.compile(r"^ep(\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)$")
@@ -49,6 +60,12 @@ SHOT_SIZES = {"extreme-wide", "wide", "medium", "close", "extreme-close", "inser
 CAMERAS = {"static", "push-in", "pull-out", "pan-left", "pan-right", "tilt-up", "tilt-down", "drift", "handheld"}
 SHOT_MIN_S, SHOT_MAX_S = 3, 13
 LINE_GAP_S = 3
+# --probe (docs/WORKFLOW.md stages 8-10): 16:9 frames, final master at -14 LUFS integrated.
+LUFS_TARGET, LUFS_TOL = -14.0, 1.0
+LENGTH_TOL_S = 1.0
+# A prompts.csv row is written at stage 3, before its image/clip exists. Its file must exist in media
+# only once it was generated (non-empty usage), approved, or the episode is at/after this stage.
+FILES_REQUIRED_FROM_STAGE = 7
 APPROVED = {"yes", "no", ""}
 STAGE_MAX = 11
 # Stage (docs/WORKFLOW.md) from which a file must exist; before it, a missing file is only a WARN.
@@ -168,8 +185,9 @@ def check_front_matter(ep_dir, rep):
         if k not in EPISODE_KEYS:
             rep.warn(W, f"unknown front matter key '{k}'")
 
-    folder = os.path.basename(os.path.normpath(ep_dir))
-    series_folder = os.path.basename(os.path.dirname(os.path.normpath(os.path.abspath(ep_dir))))
+    ep_abs = os.path.abspath(ep_dir)   # abspath first: `episode .` must see the real folder name, not '.'
+    folder = os.path.basename(ep_abs)
+    series_folder = os.path.basename(os.path.dirname(ep_abs))
     m = RE_EP_DIR.match(folder)
     if not m:
         rep.error(W, f"episode folder '{folder}' does not match ep<NN>-<slug>")
@@ -416,20 +434,24 @@ def check_prompts(ep_dir, meta, shots, rep):
     for n, r in rows:
         W = f"prompts.csv:{n}"
         f = r["file"]
-        files.append(f)
+        files.append(r)
         if f in seen:
             rep.error(W, f"duplicate file {f}")
         seen.add(f)
         m = RE_LAYER_FILE.match(f)
-        if not m:
-            rep.error(W, f"file '{f}' does not match ep<NN>_s<NN>_<layer>_<subject>_v<NN>.<png|jpg>")
+        clip = RE_CLIP_FILE.match(f)
+        if not m and not clip:
+            rep.error(W, f"file '{f}' does not match ep<NN>_s<NN>_<layer>_<subject>_v<NN>.<png|jpg> "
+                         f"(layer) or ep<NN>_s<NN>_<model>_v<NN>.mp4 (clip)")
         else:
             parts = f.split("_")
             if isinstance(ep, int) and parts[0] != f"ep{ep:02d}":
                 rep.error(W, f"file '{f}' is not for episode ep{ep:02d}")
             if parts[1] != r["shot"]:
                 rep.error(W, f"file '{f}' is for {parts[1]} but shot column is '{r['shot']}'")
-            if m.group(1) != r["layer"]:
+            # A Seedance clip row names the layer it replaces/feeds (seedance-layer.md: layer = L4);
+            # the clip name carries no layer code, so only the column itself is validated below.
+            if m and m.group(1) != r["layer"]:
                 rep.error(W, f"file '{f}' has layer {m.group(1)} but layer column is '{r['layer']}'")
         if not RE_SHOT.match(r["shot"]):
             rep.error(W, f"shot '{r['shot']}' must be s<NN>")

@@ -10,6 +10,15 @@ Repo này chứa mã, quy trình và tài liệu cho các phiên Claude Code clo
 - Tạo ảnh/video là có tính phí: không gen thử ngoài yêu cầu; kiểm tra miễn phí trước (`tools/doctor.sh`).
 - Request bị proxy cắt (502 sau ~30 s) **có thể vẫn bị tính phí** → không tự thử lại.
 
+## Làm phim
+- Mọi việc làm tập phim đi qua skill `film-pipeline` (phiên chính là đạo diễn): đọc `EPISODE.md` của tập trước,
+  không dựa vào lịch sử chat; giao việc cho agent trong `.claude/agents/`; cổng duyệt G1–G4 chỉ do người dùng qua.
+- Hợp đồng chung (cấu trúc, đặt tên, schema): `docs/CONVENTIONS.md`. Quy trình: `docs/WORKFLOW.md`.
+- Trạng thái tập là `EPISODE.md`, **không bao giờ** `STATE.md` (tên đó thuộc cinecode).
+- Mọi lệnh tạo ảnh/video cho một tập phải có `--budget <tập>/budget.yaml --ledger out/<series>/ep<NN>/ledger.csv`
+  và `FILM_AGENT=<tên agent>` khi chạy trong agent.
+- Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập>` không còn ERROR.
+
 ## Khởi động phiên
 Hook `.claude/hooks/session-start.sh` tự chạy: cài font CJK + `rembg`, trỏ `/opt/byteplus/ark.py` vào
 `tools/ark.py`, in báo cáo `doctor --quick`. Nếu báo cáo có FAIL → xử lý theo `docs/RUNBOOK.md` trước khi làm việc.
@@ -18,9 +27,10 @@ Kiểm tra đầy đủ (vẫn miễn phí): `tools/doctor.sh`.
 ## Công cụ
 ```
 python3 tools/ark.py ping
-python3 tools/ark.py image "<prompt>" out/<dự án>/<shot>.png --size 2K          # seedream-5-0-lite, ~25 s
-python3 tools/ark.py image "<prompt>" out/<dự án>/<shot>.png --fast             # dola-seedream-5-0-flash, ~11 s
-python3 tools/ark.py video "<prompt>" out/<dự án>/<shot>.mp4 --image <khung đầu>.png --duration 5 --resolution 720p [--no-audio]
+python3 tools/ark.py image "<prompt>" <file>.png --size 2K [--fast] [--ref a.png] --budget B --ledger L   # lite ~25 s · flash ~11 s
+python3 tools/ark.py video "<prompt>" <file>.mp4 --image <khung đầu>.png --duration 5 --resolution 720p [--no-audio] --budget B --ledger L
+python3 tools/layers/matte.py IN.png OUT.png --style styles/<id> --layer L2 --preview check.png
+python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug>
 ```
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
@@ -28,9 +38,11 @@ python3 tools/ark.py video "<prompt>" out/<dự án>/<shot>.mp4 --image <khung �
   hoặc `run_in_background`.
 
 ## Quy ước file
-- File gen ra để trong `out/<dự án>/` (git bỏ qua). Không commit ảnh/video.
-- Sau khi người dùng duyệt shot: lưu lên Google Drive `AI Film Lab/<dự án>/<YYYY-MM-DD>/` bằng connector
-  Google Drive (`create_file` với tham chiếu file `sha256:<hash>:<đường dẫn>`; người dùng duyệt từng lần tải).
+- Media gen ra để trong `out/<series>/ep<NN>/{plates,clips,renders}/` (git bỏ qua), đặt tên theo
+  `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
+- Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<series>/ep<NN> --shot s<NN>` rồi tải zip lên Google Drive
+  `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với tham chiếu file
+  `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải lên riêng.
 - Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình phải commit + push trước khi kết thúc.
 
 ## Khi cải tiến repo

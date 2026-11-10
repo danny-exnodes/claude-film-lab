@@ -1,0 +1,129 @@
+#!/usr/bin/env python3
+"""Zip one shot's media for a single Drive upload (docs/CONVENTIONS.md §9).
+
+  python3 tools/bundle.py out/<series>/ep<NN> --shot s03 [--series-dir series/<series>/ep<NN>-<slug>]
+
+The zip holds every file under plates/ and clips/ whose name contains `_s03_`, the prompts.csv rows for
+that shot (header kept) and the anchors.json entries for that shot's files, if those files exist. It is
+written to out/<series>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
+Without --series-dir the episode text folder is looked up as series/<series>/ep<NN>-*/ in the repo.
+Prints the path, size and the Drive connector file reference `sha256:<hex>:<absolute path>`.
+"""
+import argparse, csv, datetime, glob, hashlib, io, json, os, re, sys, zipfile
+
+LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STORED = {".png", ".jpg", ".jpeg", ".mp4", ".webp", ".zip"}   # already compressed
+
+
+def find_series_dir(media):
+    ep = os.path.basename(os.path.normpath(media))
+    series = os.path.basename(os.path.dirname(os.path.abspath(media)))
+    hits = sorted(d for d in glob.glob(os.path.join(LAB, "series", series, ep + "-*")) if os.path.isdir(d))
+    if len(hits) > 1:
+        print(f"warning: several episode folders match, using {hits[0]}", file=sys.stderr)
+    return hits[0] if hits else None
+
+
+def shot_media(media, shot):
+    tag = f"_{shot}_"
+    found = []
+    for sub in ("plates", "clips"):
+        root_dir = os.path.join(media, sub)
+        for root, _dirs, names in os.walk(root_dir):
+            for n in sorted(names):
+                if tag in n:
+                    full = os.path.join(root, n)
+                    found.append((full, os.path.relpath(full, media)))
+    return sorted(found, key=lambda x: x[1])
+
+
+def prompts_rows(series_dir, shot):
+    path = os.path.join(series_dir, "prompts.csv") if series_dir else None
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        return None
+    header = rows[0]
+    if "shot" not in header:
+        print(f"warning: {path} has no 'shot' column; prompts not bundled", file=sys.stderr)
+        return None
+    i = header.index("shot")
+    keep = [r for r in rows[1:] if len(r) > i and r[i].strip() == shot]
+    buf = io.StringIO()
+    w = csv.writer(buf, lineterminator="\r\n")   # RFC 4180
+    w.writerow(header)
+    w.writerows(keep)
+    return buf.getvalue(), len(keep)
+
+
+def anchors_for(series_dir, shot):
+    path = os.path.join(series_dir, "anchors.json") if series_dir else None
+    if not path or not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    sub = {k: v for k, v in data.items() if f"_{shot}_" in k}
+    return json.dumps(sub, ensure_ascii=False, indent=2, sort_keys=True) + "\n", len(sub)
+
+
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def bundle(media, shot, series_dir=None, today=None):
+    if not re.fullmatch(r"s\d{2}", shot):
+        raise SystemExit(f"--shot must be s<NN> (got {shot!r})")
+    if not os.path.isdir(media):
+        raise SystemExit(f"{media}: media folder not found")
+    ep = os.path.basename(os.path.normpath(media))
+    if not re.fullmatch(r"ep\d{2}", ep):
+        raise SystemExit(f"{media}: expected out/<series>/ep<NN>")
+    series_dir = series_dir or find_series_dir(media)
+    files = shot_media(media, shot)
+    if not files:
+        raise SystemExit(f"no files containing _{shot}_ under {media}/plates or {media}/clips")
+    day = (today or datetime.datetime.now(datetime.timezone.utc).date()).strftime("%Y%m%d")
+    out = os.path.join(os.path.abspath(media), "bundles", f"{ep}_{shot}_{day}.zip")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    tmp = out + ".part"
+    notes = []
+    with zipfile.ZipFile(tmp, "w") as z:
+        for full, arc in files:
+            comp = zipfile.ZIP_STORED if os.path.splitext(full)[1].lower() in STORED else zipfile.ZIP_DEFLATED
+            z.write(full, arc, compress_type=comp)
+        pr = prompts_rows(series_dir, shot)
+        if pr:
+            z.writestr("prompts.csv", pr[0], compress_type=zipfile.ZIP_DEFLATED)
+            notes.append(f"prompts.csv ({pr[1]} row(s))")
+        an = anchors_for(series_dir, shot)
+        if an:
+            z.writestr("anchors.json", an[0], compress_type=zipfile.ZIP_DEFLATED)
+            notes.append(f"anchors.json ({an[1]} file(s))")
+    os.replace(tmp, out)
+    return out, files, notes, series_dir
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
+    p.add_argument("media", help="out/<series>/ep<NN>")
+    p.add_argument("--shot", required=True, help="shot id, e.g. s03")
+    p.add_argument("--series-dir", default=None, help="series/<series>/ep<NN>-<slug> (prompts.csv, anchors.json)")
+    a = p.parse_args(argv)
+    out, files, notes, sdir = bundle(a.media, a.shot, a.series_dir)
+    size = os.path.getsize(out)
+    print(f"bundle {out}")
+    print(f"files  {len(files)} media" + (", " + ", ".join(notes) if notes else "")
+          + ("" if sdir else " (no series dir found: prompts.csv/anchors.json not included)"))
+    print(f"size   {size} bytes ({size / 1e6:.2f} MB)")
+    print(f"drive  sha256:{sha256(out)}:{out}")
+
+
+if __name__ == "__main__":
+    main()

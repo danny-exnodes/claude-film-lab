@@ -16,6 +16,7 @@ v=$(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}'); [ -n "$v" ] && ok
 v=$(google-chrome --version 2>/dev/null); [ -n "$v" ] && ok chrome "$v" || bad chrome "google-chrome not found"
 n=$(fc-list 2>/dev/null | grep -ci "Noto Serif CJK"); [ "$n" -gt 0 ] && ok font-cjk "Noto Serif CJK x$n" || bad font-cjk "missing: apt-get install -y fonts-noto-cjk"
 v=$(python3 -c "import importlib.metadata as m, importlib.util as u; assert u.find_spec('rembg'); print(m.version('rembg'))" 2>/dev/null) && ok rembg "$v" || bad rembg "missing: python3 -m pip install -r requirements.txt"
+v=$(python3 -c "import yaml; print(yaml.__version__)" 2>/dev/null) && ok pyyaml "$v" || bad pyyaml "missing: python3 -m pip install -r requirements.txt"
 { [ -f /root/.rembg/models/u2net/u2net.onnx ] || [ -f ~/.u2net/u2net.onnx ]; } && ok rembg-model "u2net cached" || warn rembg-model "u2net not cached (downloads on first use)"
 [ -f /root/.claude/skills/cinecode/SKILL.md ] && ok skill-cinecode "present" || bad skill-cinecode "/root/.claude/skills/cinecode/SKILL.md missing"
 if [ "$(readlink -f /opt/byteplus/ark.py 2>/dev/null)" = "$LAB/tools/ark.py" ]; then ok ark.py "/opt/byteplus/ark.py -> repo"; else bad ark.py "/opt/byteplus/ark.py is not the repo version (run .claude/hooks/session-start.sh)"; fi

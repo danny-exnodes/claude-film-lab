@@ -1,0 +1,4 @@
+file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link
+ep01_s01_L1_nui-co_v01.png,s01,L1,seedream-5-0-lite-260128,2K,prompts/s01_L1.txt,,42,"{""generated_images"":1}",yes,
+ep01_s02_L4_bac-thi_v02.png,s02,L4,seedream-5-0-lite-260128,2K,prompts/s02_L4.txt,ep01_s01_L1_nui-co_v01.png,,,no,
+ep01_s02_P1-duoi_bac-thi_v01.png,s02,P1-duoi,seedream-5-0-lite-260128,2K,prompts/s02_L4.txt,,,,,

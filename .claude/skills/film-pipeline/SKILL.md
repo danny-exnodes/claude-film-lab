@@ -91,7 +91,7 @@ Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở kh�
 | 6 | Clip AI | `film-animator` (chạy nền) | `out/.../clips/` (720p trước) | – |
 | 7 | Dựng shot, âm thanh | `film-compositor` (một agent mỗi tập) | film.html theo shot, `review/sound-audit.md` | – |
 | 8 | Dựng cả tập | `film-compositor` | `renders/ep<NN>_draft_v<NN>.mp4` 960×540 | **G3** duyệt bản nháp (tối đa 2 vòng sửa) |
-| 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
+| 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc sản phẩm, ghi qc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
 | 10 | Bản cuối | `film-compositor` | `renders/ep<NN>_final_v<NN>.mp4` 1920×1080, -14 LUFS | **G4** duyệt bản cuối |
 | 11 | Xuất bản | `film-publisher` | `publish.md` | người dùng tự đăng |
 
@@ -149,6 +149,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 - `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-<v>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
   bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-<v>.txt` (`--probe`:
   ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
+  Reviewer tự ghi `review/qc-<v>.md` và MEMORY.md của nó (có Write/Edit trong `tools`; `memory: project` không tự cấp).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,
   `--fast`, Lambda khi đã triển khai).
 

@@ -42,7 +42,7 @@ flowchart TD
 | 6 | Clip AI | `film-animator` (nền) | `out/.../clips/` | – |
 | 7 | Dựng shot, âm thanh | `film-compositor` | film.html theo shot, `review/sound-audit.md` | – |
 | 8 | Dựng cả tập | `film-compositor` | bản nháp 960×540 | **G3** (tối đa 2 vòng sửa) |
-| 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
+| 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc sản phẩm, ghi qc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
 | 10 | Bản cuối | `film-compositor` | 1920×1080, -14 LUFS, lưu Drive | **G4** |
 | 11 | Xuất bản | `film-publisher` | `publish.md` | người dùng tự đăng |
 
@@ -60,13 +60,14 @@ Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, khôn
 | `film-plate-maker` | Tạo, tách lớp tranh | `film-prompt-layers` | Bash, Read, Write, Edit, Glob, Grep | sonnet | `FILM_AGENT`, `--ledger/--budget` |
 | `film-animator` | Clip Seedance | – | Bash, Read, Write, Glob | sonnet | `background: true`, `--ledger/--budget` |
 | `film-compositor` | Dựng, âm thanh, render | `film-compose-shot`, `cinecode` | Bash, Read, Write, Edit, Glob, Grep | opus | một agent mỗi tập; không gọi ark.py |
-| `film-reviewer` | Kiểm tra độc lập | – | Read, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode |
+| `film-reviewer` | Kiểm tra độc lập | – | Read, Write, Edit, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode; chỉ ghi `review/qc-*.md` và MEMORY.md |
 | `film-publisher` | Xuất bản YouTube | – | Read, Write, Edit, Glob, Grep | sonnet | `publish.md`, không tự đăng |
 
 Gọi agent: Claude tự giao theo `description`, hoặc gọi tên trong câu ("giao film-writer viết khâu 2"). Mỗi lần giao có
 hợp đồng: đường dẫn tập, khâu, file đầu vào, file đầu ra, trần chi phí, tiêu chí xong. Agent trả về tối đa 10 dòng.
-Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` có `memory: project` nên được bật Read/Write/Edit
-để ghi bộ nhớ; nó chỉ ghi `review/qc-<v>.md` và `.claude/agent-memory/film-reviewer/`.
+Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `memory: project` **không** tự cấp công cụ ghi:
+agent nào cần ghi bộ nhớ hoặc báo cáo phải khai báo `Write`/`Edit` trong `tools`. `film-reviewer` có Write/Edit (không
+Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-memory/film-reviewer/MEMORY.md`.
 
 ## 4. Ngân sách và ledger
 

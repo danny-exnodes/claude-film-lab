@@ -63,11 +63,13 @@ matte:                            # cách tách alpha theo lớp (tools/layers/m
   key_bg: "#FF00FF"               # nền phẳng khi method=chroma
   paper_bg: "#FFFFFF"             # nền phẳng khi method=luminance
   per_layer:                      # method: none | luminance | chroma | rembg ; low/high: ngưỡng cleanup 0-255
+                                  # bg (tuỳ chọn): màu nền phẳng mà prompt của lớp yêu cầu (mặc định: key_bg với chroma,
+                                  # paper_bg với luminance; rembg nên dùng nền phẳng sáng, ghi rõ ở đây)
     L1: {method: none}
     L2: {method: luminance, low: 8, high: 245}
     L3: {method: luminance, low: 8, high: 245}
-    L4: {method: rembg, low: 60, high: 200}
-    P:  {method: rembg, low: 60, high: 200}
+    L4: {method: rembg, low: 60, high: 200, bg: "#FFFFFF"}
+    P:  {method: rembg, low: 60, high: 200, bg: "#FFFFFF"}
 layers:                           # quy cách tạo ảnh
   L1: {size: 2K, opaque: true, note: "..."}
   L2: {size: 2K, note: "..."}
@@ -105,7 +107,7 @@ Thư mục tập `series/<series>/ep<NN>-<slug>/`:
 | `EPISODE.md` | đạo diễn | trạng thái tập (§5). **Không đặt tên `STATE.md`** – tên đó thuộc cinecode |
 | `budget.yaml` | đạo diễn | trần chi phí (§7) |
 | `research.md` | film-researcher | nguyên văn, link, cách đọc tên |
-| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]` |
+| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`. Mọi dòng không phải tiêu đề `#`, dòng trống, chú thích `<!-- -->` hay trích dẫn `>` đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>` |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp |
@@ -161,6 +163,10 @@ models:                  # (tuỳ chọn) trần riêng theo model, đơn vị �
 - Mỗi lần gọi API tạo ảnh/video (kể cả lỗi) ghi đúng một dòng; ghi bằng khoá file (`fcntl.flock`) vì agent chạy song song.
 - Trước khi gọi API: cộng ledger (`status` ∈ ok, failed, cut-502 – mọi lần có thể đã bị tính phí) + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget`, thoát mã 3.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
+- Giới hạn đã biết: khoá chỉ bao quanh lúc đọc/ghi ledger, không giữ trong lúc gọi API, nên N agent chạy song song có thể
+  vượt trần tối đa N−1 request. Chấp nhận ở v1 (tối đa 3 agent tạo ảnh song song, §10); đặt trần có dư tương ứng.
+- File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5
+  (được viết dần từ khâu 3). Trước đó thiếu file chỉ là WARN.
 
 ## 8. Quy trình và cổng duyệt
 Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở phiên chính; agent không hỏi người dùng, không tự qua cổng.

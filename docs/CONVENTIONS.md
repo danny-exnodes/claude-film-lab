@@ -22,7 +22,7 @@ claude-film-lab/
 ├── templates/episode/            # EPISODE.md, budget.yaml, shots.csv, prompts.csv mẫu
 ├── templates/project/            # PROJECT.md, SERIES.md, README_CauTruc.md, TienDo_SanXuat.csv mẫu (§11)
 ├── formats/                      # CINECODE_FORMATS (định dạng cinecode đã lưu, xem §9)
-├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, layers/, compose/
+├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, drive_sync.py, layers/, compose/
 ├── tests/                        # python3 -m unittest discover -s tests
 ├── lambda/ · docs/
 ├── projects/<project>/           # git bỏ qua – bản làm việc CHỈ CHỮ kéo từ Drive (§11):
@@ -207,13 +207,15 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   **một lần** theo dòng cuối (`ok/failed/cut-502`) mới nhất, chưa có dòng cuối thì theo dòng `pending` (coi như đã tính phí).
   Dòng không có cả `req=` lẫn `task_id` (ledger cũ) mỗi dòng tính một lần như trước. `refused-budget` không tính.
 - Trước khi gọi API: tổng đã dùng + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget` (không có `pending`), thoát mã 3.
+- Kiểm và giữ chỗ là **một bước nguyên tử**: một khoá `LOCK_EX` trên `ledger.csv` bao quanh việc đọc ledger, cộng tổng
+  và ghi dòng `pending` (hoặc `refused-budget`), rồi mới mở khoá. Việc chậm (nén ảnh `--ref`, đọc khung đầu, tạo thư mục,
+  đọc `budget.yaml`) làm trước khi lấy khoá; lệnh gọi API làm sau khi mở khoá (khoá không giữ trong lúc gọi API).
+  Nhờ vậy N agent chạy song song trong cùng container không vượt trần.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
 - Thư mục chứa file đầu ra được tạo trước khi kiểm ngân sách và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
   tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
 - `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
   poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.
-- Giới hạn đã biết: khoá chỉ bao quanh lúc đọc/ghi ledger, không giữ trong lúc gọi API, nên N agent chạy song song có thể
-  vượt trần tối đa N−1 request. Chấp nhận ở v1 (tối đa 3 agent tạo ảnh song song, §10); đặt trần có dư tương ứng.
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5
   (được viết dần từ khâu 3). Trước đó thiếu file chỉ là WARN.
 
@@ -253,7 +255,9 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 Mọi dữ liệu của một dự án phim nằm trên Google Drive, dưới thư mục gốc của lab `ClaudeFilmLab`
 (ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục. Drive là **nguồn gốc**; `projects/<project>/` và
 `out/<project>/` chỉ là bản làm việc trong container. Đồng bộ do Claude làm bằng connector Google Drive
-(`search_files`, `download_file_content`, `create_file`, `update_file`); không có CLI.
+(`search_files`, `download_file_content`, `create_file`, `update_file`); không có CLI. Việc nhớ thì giao cho
+`tools/drive_sync.py` (cục bộ, không gọi mạng): chụp dấu sau khi kéo, lập danh sách lệnh connector cho file đã đổi,
+ghi lại file đã đẩy (§11.6).
 
 ### 11.1 Cấu trúc
 
@@ -355,18 +359,32 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
    cũ vào `99_LuuTru/` theo bước 3 của mục đẩy.
 4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
+   `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>` (từ thư mục gốc repo).
+   Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
+   `find projects/<project>` in ra, media dạng `out/<project>/…`; không có file nào bắt đầu bằng `.`) và
+   `projects/<project>/.pulled.at` (`2026-11-10T15:30:00Z`). Tương đương bằng shell khi không chạy được công cụ:
    `find projects/<project> -type f ! -name '.*' -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`
    và `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`. Mọi lần tải lên trong phiên ghi một dòng
-   `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log`.
+   `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log` (`drive_sync.py record`).
 
 **Đẩy (sau mỗi khâu, sau mỗi lần sửa theo ghi chú, và trước khi dừng phiên – container bị thu hồi khi rảnh):**
-1. File chữ mới hoặc đã đổi = các dòng `>` của
-   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`
-   (`TienDo_SanXuat.csv` đi theo bước 5, không tải lên như file chữ).
-   Cộng `out/<project>/ep<NN>/ledger.csv` nếu khâu vừa rồi có tạo ảnh/video.
-2. Mỗi file: `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
+1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (`--json` để đọc
+   bằng máy). Mỗi file mới/đã đổi có: thư mục đích (đường dẫn logic + ID từ `PROJECT.md`, hoặc
+   `MISSING – create folder <đường dẫn> under <ID cha> first`), `title`, `contentMimeType`, tham chiếu
+   `sha256:<hex>:<đường dẫn tuyệt đối>` cho `create_file`, lệnh `record`, và với file đã đổi: câu truy vấn `search_files`
+   tìm bản cũ cùng tên mới trong `99_LuuTru/` (bước 3). Cùng ánh xạ §11.3 cho media (`ledger.csv`, gói shot theo ngày
+   trong tên zip, bản nháp, bản cuối, ảnh khóa); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
+   `TienDo_SanXuat.csv` được tách riêng (`[sheet]`, bước 5), không tải lên như file chữ. File không có ánh xạ (UNMAPPED)
+   hay thư mục thiếu ID → mã thoát 1: tạo thư mục (`create_file` folder, `parentId` = ID cha), ghi ID vào
+   `drive.folders`, chạy lại `plan`. File gốc trong `sources/` đã sửa thì không lập (chỉ `DanhMuc.csv` được sửa).
+   Shell tương đương: các dòng `>` của
+   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`,
+   cộng `out/<project>/ep<NN>/ledger.csv` nếu khâu vừa rồi có tạo ảnh/video.
+2. Mỗi file (đúng các tham số `plan` in ra): `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
    `sha256:<hex>:<đường dẫn tuyệt đối>` (hex từ `sha256sum`), `contentMimeType` (`.md` `text/markdown`, `.csv` `text/csv`,
-   `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`.
+   `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`. Tải lên thành công →
+   ngay lập tức `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>`
+   (thay đúng dòng của file trong `.pulled.sha256`, thêm dòng vào `.pushed.log`).
 3. **Quy tắc phiên bản (chọn vì đơn giản và chắc):** connector không ghi đè được nội dung file (`update_file` chỉ sửa
    tên, thư mục, thuộc tính), nên lịch sử phiên bản của Drive không dùng được. Mỗi lần đẩy là **file mới**; chỉ sau khi
    tải lên thành công, tìm bản cũ ngay lúc đó bằng `search_files` (`parentId = '<id thư mục>' and title = '<tên file>'
@@ -383,8 +401,9 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `templates/project/TienDo_SanXuat.csv`). Có công cụ sửa Google Sheets thì sửa đúng dòng đó tại chỗ (giữ link); không
    có thì tải CSV lên **có** chuyển đổi (Sheet mới tên `TienDo_SanXuat` trong `00_QuanLy/`), chuyển Sheet cũ vào
    `99_LuuTru/` theo bước 3, cập nhật `drive.files` và đẩy `PROJECT.md`.
-6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (thay đúng dòng của file đó trong `.pulled.sha256`;
-   file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách); ghi giờ đẩy vào cột cuối dòng
+6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (`record` ở bước 2 thay đúng dòng của file đó trong
+   `.pulled.sha256`; file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách – không chạy lại
+   `snapshot` sau khi đẩy). `plan` chạy lại phải in `Nothing to push.` (trừ file cố ý chưa đẩy); ghi giờ đẩy vào cột cuối dòng
    `## Nhật ký` của EPISODE.md.
 7. Mỗi lần tải lên người dùng duyệt: gom file của một khâu đẩy một lượt, báo trước danh sách.
 

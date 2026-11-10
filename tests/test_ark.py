@@ -213,6 +213,75 @@ class TestLedger(ArkCase):
         self.assertEqual({r["agent"] for r in rows}, {f"agent-{k}" for k in range(4)})
 
 
+class TestAtomicReserve(ArkCase):
+    """Budget check and pending row happen under one LOCK_EX: parallel agents cannot overrun a cap."""
+
+    RACE_SCRIPT = (
+        "import base64, importlib.util, io, sys, time\n"
+        "from PIL import Image\n"
+        "s = importlib.util.spec_from_file_location('a', sys.argv[1]); m = importlib.util.module_from_spec(s)\n"
+        "s.loader.exec_module(m)\n"
+        "buf = io.BytesIO(); Image.new('RGB', (4, 4)).save(buf, 'JPEG')\n"
+        "b64 = base64.b64encode(buf.getvalue()).decode()\n"
+        "def call(method, path, body=None, timeout=300):\n"
+        "    assert path == '/images/generations', path\n"
+        "    time.sleep(0.3)                     # the API call runs outside the lock\n"
+        "    return {'data': [{'b64_json': b64}], 'usage': {'generated_images': 1}}\n"
+        "def slow_ref(p):\n"
+        "    time.sleep(0.3)                     # slow --ref re-encoding: the old race window\n"
+        "    return 'data:image/jpeg;base64,' + b64\n"
+        "m.call = call\n"
+        "m.ref_data_uri = slow_ref\n"
+        "start = float(sys.argv[2])\n"
+        "while time.time() < start:              # all processes start together\n"
+        "    time.sleep(0.005)\n"
+        "m.main(sys.argv[3:])\n")
+
+    def test_parallel_agents_cannot_overrun_cap(self):
+        """8 processes race for a cap of 3 images: exactly 3 reservations, 5 refused-budget rows."""
+        self.write_budget("images: 3\n")
+        ref = self.tmp / "ref.png"
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(ref)
+        start = time.time() + 1.5
+        procs = [subprocess.Popen(
+            [sys.executable, "-c", self.RACE_SCRIPT, str(REPO / "tools" / "ark.py"), str(start),
+             "image", f"shot {k}", str(self.tmp / f"s{k}.png"), "--ref", str(ref), *self.cost],
+            env=dict(os.environ, FILM_AGENT=f"agent-{k}"), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True) for k in range(8)]
+        codes = []
+        for pr in procs:
+            _, err = pr.communicate(timeout=60)
+            codes.append(pr.returncode)
+            if pr.returncode == ark.BUDGET_EXIT:
+                self.assertIn("REFUSED (budget", err)
+        self.assertEqual(sorted(codes), [0] * 3 + [ark.BUDGET_EXIT] * 5)
+        rows = self.rows()
+        by_status = {}
+        for r in rows:
+            by_status.setdefault(r["status"], []).append(r)
+        self.assertEqual(len(by_status["pending"]), 3)
+        self.assertEqual(len(by_status["ok"]), 3)
+        self.assertEqual(len(by_status["refused-budget"]), 5)
+        self.assertEqual(set(by_status), {"pending", "ok", "refused-budget"})
+        # each winner: pending then ok with the same req id; the refused ones have no req id
+        self.assertEqual({ark.req_id(r) for r in by_status["pending"]}, {ark.req_id(r) for r in by_status["ok"]})
+        self.assertTrue(all(ark.req_id(r) is None for r in by_status["refused-budget"]))
+        self.assertEqual(sum(ark.units(r) for r in ark.billed_requests(rows)), 3)
+        # winners' out files exist, refused agents never reached the API
+        self.assertEqual(sum(os.path.exists(self.tmp / f"s{k}.png") for k in range(8)), 3)
+
+    def test_refused_row_written_under_same_lock(self):
+        """In-process: a full ledger refuses with exit 3, one refused-budget row, no pending, no call."""
+        self.write_budget("images: 1\n")
+        self.seed_ledger({"kind": "image", "model": "m", "count": 1, "status": "ok"})
+        f = self.fake()
+        code, _, err = self.run_ark("image", "x", str(self.tmp / "r.png"), *self.cost)
+        self.assertEqual(code, ark.BUDGET_EXIT)
+        self.assertIn("REFUSED", err)
+        self.assertEqual(f.calls, [])
+        self.assertEqual([r["status"] for r in self.rows()], ["ok", "refused-budget"])
+
+
 class TestCostFlags(ArkCase):
     """Budget is not opt-in: image/video need budget + ledger, or an explicit --no-budget."""
 

@@ -8,7 +8,7 @@ Kiểm tra ngày 2026-11-10 trên tài khoản Ark của Film Lab. Model trong C
 |---|---|---|---|
 | Dola-Seedream-5.0-lite | `seedream-5-0-lite-260128` | **Ảnh mặc định** (`tools/ark.py image`) | 2K: ~25–26 s ✅ · 4K: bị cắt ở 30 s ❌ |
 | Dola-Seedream-5.0-flash | `dola-seedream-5-0-flash-260915` | Ảnh nhanh, nháp (`--fast`) | 1024²: ~11 s ✅ · 2K: chưa đo |
-| Dola-Seedream-5.0-pro | `dola-seedream-5-0-pro-260628` | Ảnh chất lượng cao – **chỉ qua Lambda** (`ark.py lambda-job`, `lambda/README.md`) | 1024² và 2K: luôn > 30 s → 502 ❌ · qua Lambda: chưa đo (đã triển khai, chờ khóa Ark) |
+| Dola-Seedream-5.0-pro | `dola-seedream-5-0-pro-260628` | Ảnh chất lượng cao – **chỉ qua Lambda** (`ark.py lambda-job`, `lambda/README.md`) | 1024² và 2K: luôn > 30 s → 502 ❌ · qua Lambda 2K: **77,3 s** ✅ (2026-11-10, 1 ảnh, trả 1664×2496: `2K` không cố định tỉ lệ, luôn truyền `WxH`) · 4K: chưa đo |
 | ByteDance-Seedream-4.5 | `seedream-4-5-251128` | Ảnh dự phòng | 2K ✅ |
 | ByteDance-Seedream-4.0 | `seedream-4-0-250828`, `seedream-4-0-20260415` | Ảnh dự phòng | 1024²: 7–9 s ✅ |
 | Dreamina-Seedance-2.5 | `dreamina-seedance-2-5-260628` | **Video mặc định** | 5 s 720p: ~2,5 phút ✅ (task bất đồng bộ); `ark.py video` mặc định `--resolution 720p` (1080p chưa đo) |

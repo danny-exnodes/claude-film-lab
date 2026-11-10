@@ -23,7 +23,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `docs/WORKFLOW.md` | Quy trình một tập: khâu 0–11, cổng G1–G4, ngân sách, chuyển giao phiên |
 | `docs/MODELS.md` · `docs/RUNBOOK.md` | Model Ark đã kiểm chứng · sự cố đã gặp và cách xử lý |
 | `.claude/skills/` | `film-pipeline`, `film-script`, `film-prompt-layers`, `film-compose-shot` |
-| `.claude/agents/` | 8 agent theo vai: researcher, writer, art-director, plate-maker, animator, compositor, reviewer, publisher |
+| `.claude/agents/` | 9 agent theo vai: researcher, writer, art-director, plate-maker, animator, compositor, reviewer, publisher, narrator (lồng tiếng, chưa gắn vào khâu nào) |
 | `styles/` | Style pack: `thuy-mac` (ổn định), `moc-ban` (nháp), `_template` |
 | `templates/project/` | Mẫu dự án mới: `PROJECT.md` (manifest ID Drive), `SERIES.md`, `README_CauTruc.md`, `TienDo_SanXuat.csv` |
 | `templates/episode/` | Mẫu `EPISODE.md`, `budget.yaml`, `shots.csv`, `prompts.csv` |
@@ -32,10 +32,13 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
 | `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, đung đưa, chớp mắt, thở |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
+| `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
+| `tools/layers/matte_seq.py` | Tách nền cả clip Seedance thành chuỗi khung, kèm số đo nhấp nháy |
 | `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài riêng, xem `tools/tts/README.md` |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
-| `tools/doctor.sh` | Kiểm tra môi trường (miễn phí) |
-| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – đã triển khai, chưa thử ảnh thật |
+| `tools/doctor.sh` | Kiểm tra môi trường (không tính phí) |
+| `docs/BACKLOG.md` | Lỗi đã biết chưa sửa và việc hoãn lại sau đợt kiểm toán 2026-11-10 |
+| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – đã triển khai; ảnh thật đầu tiên 2026-11-10 (Pro 2K, 77 s) |
 | `docs/RELEASING.md` | Bước phát hành: Claude sửa CHANGELOG + mở PR, người dùng tạo tag và GitHub Release |
 | `formats/` | Định dạng cinecode đã lưu (`CINECODE_FORMATS`) |
 | `tests/` | `python3 -m unittest discover -s tests` |

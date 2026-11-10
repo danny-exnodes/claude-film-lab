@@ -18,7 +18,8 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Gốc lab: Drive `ClaudeFilmLab` (ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục `<ProjectName>/`
   (vd. `SonHaiKinh/`): `00_QuanLy · 01_TaiLieuGoc · 02_KinhThu · 03_KichBan · 04_SanXuat · 05_ThanhPham · 99_LuuTru`.
   Cấu trúc, `PROJECT.md`, ánh xạ đường dẫn, quy tắc đặt tên: `docs/CONVENTIONS.md` §11. Mẫu: `templates/project/`.
-- **Kéo** đầu phiên, trước mọi việc: đọc `00_QuanLy/PROJECT.md` trước (ID mọi thư mục), tải kinh thư, tập đang làm và
+- **Kéo** đầu phiên, trước mọi việc: đọc `00_QuanLy/PROJECT.md` trước (ID mọi thư mục), luôn tải `SERIES.md`, `EPISODE.md`, `budget.yaml` và mọi bản `ledger.csv`,
+  file khác kéo theo khâu sắp chạy (film-pipeline mục 0); kinh thư, tập đang làm và
   `ledger.csv` về `projects/<project>/` và `out/<project>/ep<NN>/` bằng connector Google Drive (không có CLI).
 - **Đẩy** file chữ đã đổi sau mỗi khâu và trước khi dừng phiên (container bị thu hồi khi rảnh); cập nhật
   `TienDo_SanXuat`. Bản mới = file mới; bản cũ chuyển vào `99_LuuTru/` (§11.6). Không xoá gì trên Drive.
@@ -30,21 +31,39 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Trạng thái tập là `EPISODE.md`, **không bao giờ** `STATE.md` (tên đó thuộc cinecode).
 - Mọi lệnh tạo ảnh/video cho một tập phải có `--budget <tập>/budget.yaml --ledger out/<project>/ep<NN>/ledger.csv`
   và `FILM_AGENT=<tên agent>` khi chạy trong agent.
-- Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập>` không còn ERROR.
+- Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe`
+  từ G3) không còn ERROR, và `python3 tools/status.py <thư mục tập> --gate <G>` in `READY`. `budget.yaml` thiếu hoặc sai
+  khóa, và `stage` vượt cổng chưa có ngày, đều là ERROR.
 
 ## Khởi động phiên
 Hook `.claude/hooks/session-start.sh` tự chạy: cài font CJK + `rembg`, trỏ `/opt/byteplus/ark.py` vào
 `tools/ark.py`, in báo cáo `doctor --quick`. Nếu báo cáo có FAIL → xử lý theo `docs/RUNBOOK.md` trước khi làm việc.
-Kiểm tra đầy đủ (vẫn miễn phí): `tools/doctor.sh`.
+Kiểm tra đầy đủ: `tools/doctor.sh` – gửi thêm đúng một request video với độ phân giải sai, Ark từ chối trước khi tạo task nên
+không bị tính phí; nếu doctor báo `unexpected task <id> created` thì huỷ task đó trong Ark Console. Trong git worktree hook
+không đổi `/opt/byteplus/ark.py`. Hook luôn in báo cáo doctor, kể cả khi pip lỗi (`film-lab: pip install failed`).
 
 ## Công cụ
 ```
 python3 tools/ark.py ping
-python3 tools/ark.py image "<prompt>" <file>.png --size 2K [--fast] [--ref a.png] --budget B --ledger L   # lite ~25 s · flash ~11 s
-python3 tools/ark.py video "<prompt>" <file>.mp4 --image <khung đầu>.png --duration 5 --resolution 720p [--no-audio] --budget B --ledger L
-python3 tools/layers/matte.py IN.png OUT.png --style styles/<id> --layer L2 --preview check.png
-python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>
+python3 tools/status.py projects/<project>/ep<NN>-<slug> [--gate G2]   # chỉ đọc: khâu, cổng, ngân sách, request dở, lớp tranh, điều kiện cổng
+python3 tools/ark.py image "<prompt>" <file>.png --size 2K [--fast] [--ref a.png] --budget B --ledger L   # lite 2K ~25 s · flash 1024² ~11 s
+python3 tools/ark.py video "<prompt>" <file>.mp4 --image <khung đầu>.png --duration 5 [--resolution 720p] [--no-audio] --budget B --ledger L
+python3 tools/layers/matte.py IN.png [OUT.png] --style styles/<id> --layer L2 --preview check.png   # bỏ OUT → plates/matte/<cùng tên>.png
+python3 tools/compose/keyframe.py --check <khung đầu>.png --key "#RRGGBB"                # miễn phí, trước mỗi clip tính phí
+python3 tools/layers/matte_seq.py <clip>.mp4 --start-frame <khung đầu>.png --strict      # tách nền cả clip + số đo nhấp nháy
+python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --dry-run --strict
+python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
+python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>]
 ```
+- Mã thoát của `ark.py image|video|lambda-job prepare`: **2** = từ chối tại chỗ, chưa gửi gì → sửa lệnh; **3** = vượt trần;
+  **1** = request đã rời máy, xem dòng ledger. File đầu ra đã tồn tại bị từ chối (tăng `_v<NN>`; `--overwrite` chỉ cho thử
+  tay); `budget.yaml` chỉ nhận `images / video_seconds / models / ledger_required`; `matte.py` và `upscale.py` không ghi đè
+  ảnh gốc. `ark.py video` mặc định 720p, chỉ nhận `480p|720p|1080p`.
+- `matte.py --method rembg` dùng model `u2net` (đổi bằng `--rembg-model` / `FILM_REMBG_MODEL`); model chưa tải sẵn thì bị từ
+  chối, không tự tải (`--allow-download`).
+- Khung đầu của clip luôn do `tools/compose/keyframe.py` tạo (`clips/..._start_v<NN>.png`, không lấy file trong `plates/`);
+  khung clip tách nền bằng `tools/layers/matte_seq.py`, không chạy `matte.py` từng khung.
+- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
   Mọi job Lambda đi qua `ark.py lambda-job prepare` (kiểm trần, ghi `pending`, in payload) và `lambda-job finish`
@@ -66,7 +85,11 @@ python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.
 - Gặp lỗi mới → thêm vào `docs/RUNBOOK.md` (triệu chứng, nguyên nhân, cách xử lý).
-- Sửa `lambda/ark_image_worker.py` → triển khai lại theo `lambda/README.md`.
+- Sửa `lambda/ark_image_worker.py` → triển khai lại theo `lambda/README.md` (mục "Triển khai lại"); `build_deploy.py --check`
+  in hai mã băm phải khớp với function đang chạy.
+- Sửa `tools/compose/*.js` → tăng `C.VERSION` trong `core.js`, chạy test (`tests/test_compose_js.py` cần node) và
+  `python3 tools/compose/inline.py --lint`.
+- Lỗi đã biết nhưng chưa sửa và việc hoãn lại: `docs/BACKLOG.md`.
 - cinecode được ghim ở `tools/compose/cinecode.ref` (= `CINECODE_REF` trong `docs/setup-script.sh`); đổi ghim theo
   `docs/RUNBOOK.md` ("cinecode đổi template"), không `git pull` trong thư mục skill.
 - Phát hành: `docs/RELEASING.md`. Claude chỉ sửa `CHANGELOG.md` và mở PR; **không** `git tag`, không push tag, không gọi

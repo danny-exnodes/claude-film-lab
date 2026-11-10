@@ -11,7 +11,7 @@ Phiên bản theo SemVer, ghi trong `CHANGELOG.md`. Từ phiên Claude Code clou
    [x.y.z]: https://github.com/danny-exnodes/claude-film-lab/compare/v<bản trước>...vx.y.z
    ```
    Chọn số: đổi phá vỡ hợp đồng (`docs/CONVENTIONS.md`, cờ CLI, schema) → major; thêm tính năng → minor; chỉ sửa → patch.
-2. Chạy và ghi kết quả vào PR: `python3 -m unittest discover -s tests` và `tools/doctor.sh` (cả hai miễn phí).
+2. Chạy và ghi kết quả vào PR: `python3 -m unittest discover -s tests` và `tools/doctor.sh` (không tính phí: bản đầy đủ gửi một request video không hợp lệ, Ark từ chối trước khi tạo task).
 3. Soạn nội dung release từ mục CHANGELOG của bản đó vào `docs/releases/vx.y.z.md` (tiêu đề + phần thân để dán;
    việc người dùng phải làm sau khi nâng cấp đặt lên đầu).
 4. Mở PR tên `Release vx.y.z`. Không tự merge.

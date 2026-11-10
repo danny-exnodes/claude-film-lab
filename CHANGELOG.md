@@ -29,6 +29,11 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
 - Fixture test chuyển sang `tests/fixtures/projects/test-series/`.
 
 ### Thêm
+- `tools/drive_sync.py` (cục bộ, không gọi mạng): `snapshot` sau khi kéo (`.pulled.sha256`, `.pulled.at`), `plan` in
+  lệnh connector cho mỗi file mới/đã đổi theo ánh xạ §11.3 (ID thư mục từ `PROJECT.md` hoặc thư mục cần tạo trước, mime,
+  tham chiếu `sha256:<hex>:<đường dẫn>`, truy vấn `search_files` và tên lưu trữ `99_LuuTru/`; `--json`), `record` sau
+  mỗi lần tải lên (thay dòng dấu, ghi `.pushed.log`). CONVENTIONS §11.6 và `film-pipeline` §0 dùng công cụ này;
+  test `tests/test_drive_sync.py`.
 - `templates/project/`: `PROJECT.md`, `SERIES.md`, `README_CauTruc.md` (Google Doc cho người đọc),
   `TienDo_SanXuat.csv` (header của Google Sheet tiến độ).
 

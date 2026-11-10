@@ -24,6 +24,8 @@
 | Hai file cùng tên trong một thư mục Drive | Lần đẩy trước bị ngắt giữa "tải bản mới" và "chuyển bản cũ" | Giữ file `modifiedTime` mới nhất, chuyển file cũ vào `99_LuuTru/` với tên có giờ (§11.6 bước 3) |
 | `update_file` không đổi được nội dung file trên Drive | Connector chỉ sửa metadata (tên, thư mục) | Đúng thiết kế: đẩy bản mới bằng `create_file`, chuyển bản cũ vào `99_LuuTru/` |
 | CSV/Markdown tải lên thành Google Sheet/Doc | Thiếu `disableConversionToGoogleType: true` | Chuyển file đó vào `99_LuuTru/`, tải lại với cờ này (chỉ `README_CauTruc`, `TienDo_SanXuat` được chuyển đổi) |
+| `drive_sync.py plan` thoát mã 1: `MISSING – create folder …` hoặc `UNMAPPED` | Thư mục Drive chưa có ID trong `drive.folders` của `PROJECT.md` (hoặc còn `<id>`), hay file nằm ngoài bảng ánh xạ §11.3 | Tạo thư mục theo đúng thứ tự `plan` in (`create_file` folder, `parentId` = ID cha), ghi ID vào `drive.folders`, chạy lại `plan`; file UNMAPPED thì chuyển vào thư mục có ánh xạ |
+| `plan` vẫn liệt kê file vừa đẩy | Chưa chạy `drive_sync.py record … --uploaded <file> --id <ID mới>` sau `create_file` | Chạy `record` cho đúng file đã tải; không chạy lại `snapshot` sau khi đẩy (sẽ xoá dấu của file người dùng từ chối tải) |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

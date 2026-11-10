@@ -32,6 +32,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
 | `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, đung đưa, chớp mắt, thở |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
+| `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài riêng, xem `tools/tts/README.md` |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (miễn phí) |
 | `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K) – chưa triển khai |

@@ -855,6 +855,9 @@ def probe_media(media, meta, rep, fmt=None):
             rep.info(msg)
             if final:
                 if (w, h) != (fw, fh) or not pr["fps"] or abs(pr["fps"] - ffps) > FPS_TOL:
+                    if pr["fps"] and abs(pr["fps"] - ffps) > FPS_TOL and fps == f"{ffps:.3g} fps":
+                        # 23.976 must not print as '24 fps is not ... 24 fps'
+                        fps = f"{pr['fps']:.3f} fps"
                     rep.error(where, f"{w}x{h} at {fps} is not the series format {fw}x{fh} at {ffps:g} fps")
                 if not pr["audio"]:
                     rep.error(where, f"final render has no audio stream (master must be {LUFS_TARGET:g} LUFS)")

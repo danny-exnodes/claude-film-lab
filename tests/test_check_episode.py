@@ -1,6 +1,7 @@
 """tools/check_episode.py: a valid episode/style fixture passes; broken variants (made in tmp dirs) fail."""
 import os, re, shutil, subprocess, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
 from helpers import EPISODE_FIX, STYLE_FIX, TmpDirCase, load, run_main
 
@@ -426,6 +427,15 @@ class TestEpisodeProbe(EpisodeCase):
         code, out, _ = self.check("--probe")
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: 160x120 at 24 fps is not the series format")
+
+    def test_final_fps_just_off_shows_the_difference(self):
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        real = ce.ffprobe
+        with mock.patch.object(ce, "ffprobe", lambda path: dict(real(path), fps=24000 / 1001)):
+            code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: 1920x1080 at 23.976 fps is not the series "
+                              r"format 1920x1080 at 24 fps")
 
     def test_final_duration_is_error(self):
         self.put("final_12s.mp4", "renders/ep01_final_v01.mp4")

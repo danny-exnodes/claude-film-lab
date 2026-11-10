@@ -1,5 +1,5 @@
 """tools/drive_sync.py: snapshot / plan / record round trip on a temp project with fake Drive IDs (no network)."""
-import json, os, re, unittest
+import json, os, re, subprocess, sys, unittest, zipfile
 
 from helpers import TmpDirCase, load, run_main
 
@@ -382,6 +382,400 @@ class TestRecord(DriveSyncCase):
         self.assertIn("file not found", err)
         code, _, err = self.run_tool("record", "projects/demo", "--uploaded", "SERIES.md", "--id", "<new ID>")
         self.assertEqual(code, 2)
+
+
+class TestSnapshotGuard(DriveSyncCase):
+    """A second snapshot must not mark unpushed local edits as pulled."""
+
+    def state(self):
+        return (self.pd / ".pulled.sha256").read_bytes(), (self.pd / ".pulled.at").read_bytes()
+
+    def test_second_snapshot_refuses_pending_change(self):
+        self.snapshot()
+        (self.pd / ".pulled.at").write_text("2026-11-01T00:00:00Z\n")
+        before = self.state()
+        self.write("ep01-bac-thi/script.md", "[00:05] them\n", append=True)     # local edit, not pushed
+        self.write("ep01-bac-thi/research.md", "# keo sau\n")                    # the later pull
+        code, out, err = self.run_tool("snapshot", "projects/demo")
+        self.assertEqual(code, 1)
+        text = out + err
+        self.assertIn("2 local change(s) not yet pushed would be marked as pulled", text)
+        self.assertIn("drive_sync.py pulled projects/demo <path>...", text)
+        self.assertIn("projects/demo/ep01-bac-thi/script.md", text)
+        self.assertIn("projects/demo/ep01-bac-thi/research.md", text)
+        self.assertEqual(self.state(), before)
+        code, plan = self.plan()
+        self.assertEqual((plan["counts"]["changed"], plan["counts"]["new"]), (1, 1))
+
+    def test_refusal_lists_at_most_20(self):
+        self.snapshot()
+        for i in range(25):
+            self.write(f"ep01-bac-thi/prompts/s{i:02d}_L9.txt", "x\n")
+        code, out, err = self.run_tool("snapshot", "projects/demo")
+        self.assertEqual(code, 1)
+        self.assertIn("25 local change(s)", out + err)
+        self.assertEqual(len(re.findall(r"_L9\.txt", out + err)), 20)
+
+    def test_force_overrides(self):
+        self.snapshot()
+        (self.pd / ".pulled.at").write_text("2026-11-01T00:00:00Z\n")
+        self.write("ep01-bac-thi/script.md", "[00:05] them\n", append=True)
+        code, out, err = self.run_tool("snapshot", "projects/demo", "--force")
+        self.assertEqual(code, 0, err)
+        self.assertNotEqual((self.pd / ".pulled.at").read_text(), "2026-11-01T00:00:00Z\n")
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+
+    def test_first_snapshot_and_clean_resnapshot(self):
+        out = self.snapshot()
+        self.assertRegex(out, rf"^snapshot  projects/demo/\.pulled\.sha256: {len(FILES)} file\(s\) · pulled at ")
+        first = (self.pd / ".pulled.sha256").read_bytes()
+        self.snapshot()                                   # nothing pending: allowed, same content
+        self.assertEqual((self.pd / ".pulled.sha256").read_bytes(), first)
+        os.remove(self.pd / "SERIES.md")                  # a deletion is not an unpushed change
+        self.snapshot()
+
+    def test_temp_files_and_ledger_copies_do_not_block(self):
+        self.snapshot("--include-out", "out/demo")
+        self.write("ep01-bac-thi/script.md.b64", "eA==\n")
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text("ts,kind\n")
+        self.snapshot("--include-out", "out/demo")
+        text = (self.pd / ".pulled.sha256").read_text()
+        self.assertNotIn(".b64", text)
+        self.assertNotIn("ledger.drive-1.csv", text)
+
+    def test_pulled_updates_one_line(self):
+        self.snapshot()
+        at = (self.pd / ".pulled.at").read_bytes()
+        self.write("ep01-bac-thi/script.md", "[00:05] them\n", append=True)
+        research = self.write("ep01-bac-thi/research.md", "# keo sau\n")
+        code, out, err = self.run_tool("pulled", "projects/demo", "projects/demo/ep01-bac-thi/research.md")
+        self.assertEqual(code, 0, err)
+        self.assertIn("pulled    projects/demo/ep01-bac-thi/research.md", out)
+        self.assertIn(f"{ds.sha256(research)}  projects/demo/ep01-bac-thi/research.md\n",
+                      (self.pd / ".pulled.sha256").read_text())
+        self.assertEqual((self.pd / ".pulled.at").read_bytes(), at)
+        self.assertFalse((self.pd / ".pushed.log").exists())
+        code, plan = self.plan()
+        self.assertEqual([a["local"] for a in plan["actions"]], ["projects/demo/ep01-bac-thi/script.md"])
+        self.assertEqual(plan["actions"][0]["status"], "changed")
+        # the remaining pending change still blocks a full snapshot
+        code, _, _ = self.run_tool("snapshot", "projects/demo")
+        self.assertEqual(code, 1)
+
+    def test_pulled_several_and_media(self):
+        self.snapshot()
+        self.write("ep01-bac-thi/research.md", "# keo sau\n")
+        code, out, err = self.run_tool("pulled", "projects/demo", "ep01-bac-thi/research.md",
+                                       "out/demo/ep01/ledger.csv")
+        self.assertEqual(code, 0, err)
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual(plan["actions"], [])
+
+    def test_pulled_outside_project(self):
+        self.snapshot()
+        before = (self.pd / ".pulled.sha256").read_bytes()
+        other = self.tmp / "projects" / "other" / "SERIES.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x\n")
+        for path in ("/etc/hostname", "projects/other/SERIES.md"):
+            if not os.path.exists(path):
+                continue
+            code, _, err = self.run_tool("pulled", "projects/demo", path)
+            self.assertEqual(code, 2, path)
+            self.assertIn("projects/demo/", err)
+        code, _, err = self.run_tool("pulled", "projects/demo", "nope.md")
+        self.assertEqual(code, 2)
+        self.assertEqual((self.pd / ".pulled.sha256").read_bytes(), before)
+
+    def test_pulled_needs_a_snapshot(self):
+        code, _, err = self.run_tool("pulled", "projects/demo", "SERIES.md")
+        self.assertEqual(code, 2)
+        self.assertIn("snapshot", err)
+        self.assertFalse((self.pd / ".pulled.sha256").exists())
+
+
+class TestLockedState(DriveSyncCase):
+    def test_parallel_record_keeps_every_line(self):
+        tool = os.path.join(os.path.dirname(os.path.abspath(ds.__file__)), "drive_sync.py")
+        names = [f"ep01-bac-thi/prompts/s{i:02d}_L1.txt" for i in range(10, 22)]
+        for n in names:
+            self.write(n, "v1\n")
+        self.snapshot()
+        total = len((self.pd / ".pulled.sha256").read_text().splitlines())
+        for rnd in range(3):
+            for n in names:
+                self.write(n, f"round {rnd}\n", append=True)
+            procs = [subprocess.Popen([sys.executable, tool, "record", "projects/demo", "--uploaded",
+                                       f"projects/demo/{n}", "--id", f"ID-{rnd}-{i}"],
+                                      cwd=self.tmp, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                     for i, n in enumerate(names)]
+            for pr in procs:
+                _, err = pr.communicate(timeout=60)
+                self.assertEqual(pr.returncode, 0, err.decode())
+            self.assertEqual(len((self.pd / ".pulled.sha256").read_text().splitlines()), total, f"round {rnd}")
+            self.assertEqual(len((self.pd / ".pushed.log").read_text().splitlines()), 12 * (rnd + 1))
+            code, out, _ = self.run_tool("plan", "projects/demo")
+            self.assertEqual(code, 0, out)
+            self.assertIn("Nothing to push.", out)
+        self.assertEqual([f for f in os.listdir(self.pd) if f.endswith(".tmp")], [])
+
+    def test_lock_file_is_never_planned(self):
+        self.snapshot()
+        self.assertTrue((self.pd / ".drive_sync.lock").exists())
+        code, plan = self.plan()
+        self.assertEqual((plan["actions"], plan["unmapped"]), ([], []))
+        self.assertNotIn(".drive_sync.lock", (self.pd / ".pulled.sha256").read_text())
+
+
+class TestRecordSafety(DriveSyncCase):
+    def test_sha256_keeps_later_edit_changed(self):
+        self.snapshot()
+        script = self.write("ep01-bac-thi/script.md", "v2\n", append=True)
+        code, plan = self.plan()
+        planned = self.action(plan, "projects/demo/ep01-bac-thi/script.md")["sha256"]
+        self.write("ep01-bac-thi/script.md", "v3\n", append=True)           # edit after create_file
+        code, out, err = self.run_tool("record", "projects/demo", "--uploaded", "projects/demo/ep01-bac-thi/script.md",
+                                       "--sha256", planned, "--id", "NEW1")
+        self.assertEqual(code, 0, err)
+        self.assertIn("WARN projects/demo/ep01-bac-thi/script.md changed after the upload: still to push", out + err)
+        self.assertIn(f"{planned}  projects/demo/ep01-bac-thi/script.md\n", (self.pd / ".pulled.sha256").read_text())
+        code, plan = self.plan()
+        x = self.action(plan, "projects/demo/ep01-bac-thi/script.md")
+        self.assertEqual((x["status"], x["sha256"]), ("changed", ds.sha256(script)))
+        self.assertEqual(plan["pushed_ids"], ["NEW1"])
+
+    def test_sha256_matching_file(self):
+        self.snapshot()
+        script = self.write("ep01-bac-thi/script.md", "v2\n", append=True)
+        code, out, err = self.run_tool("record", "projects/demo", "--uploaded", "projects/demo/ep01-bac-thi/script.md",
+                                       "--sha256", ds.sha256(script).upper(), "--id", "NEW1")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("WARN", out + err)
+        self.assertNotIn("--sha256", out + err)
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+
+    def test_without_sha256_reminder(self):
+        self.snapshot()
+        self.write("SERIES.md", "y\n", append=True)
+        code, out, err = self.run_tool("record", "projects/demo", "--uploaded", "SERIES.md", "--id", "S1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len([l for l in (out + err).splitlines() if "--sha256" in l]), 1)
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+
+    def test_bad_sha256(self):
+        self.snapshot()
+        before = (self.pd / ".pulled.sha256").read_bytes()
+        code, _, err = self.run_tool("record", "projects/demo", "--uploaded", "SERIES.md", "--sha256", "abc123",
+                                     "--id", "S1")
+        self.assertEqual(code, 2)
+        self.assertIn("64 hex", err)
+        code, _, err = self.run_tool("record", "projects/demo", "--uploaded", "SERIES.md", "--uploaded", "PROJECT.md",
+                                     "--sha256", "a" * 64, "--id", "S1", "--id", "S2")
+        self.assertEqual(code, 2)
+        self.assertIn("one --sha256 per --uploaded", err)
+        self.assertEqual((self.pd / ".pulled.sha256").read_bytes(), before)
+        self.assertFalse((self.pd / ".pushed.log").exists())
+
+    def test_foreign_paths_refused(self):
+        self.snapshot()
+        before = (self.pd / ".pulled.sha256").read_bytes()
+        other = self.tmp / "projects" / "other" / "SERIES.md"
+        other.parent.mkdir(parents=True)
+        other.write_text("x\n")
+        (self.tmp / "out" / "other").mkdir()
+        (self.tmp / "out" / "other" / "ledger.csv").write_text("ts,kind\n")
+        for path in ("/etc/hostname", "projects/other/SERIES.md", "out/other/ledger.csv"):
+            if not os.path.exists(path):
+                continue
+            code, _, err = self.run_tool("record", "projects/demo", "--uploaded", path, "--id", "X")
+            self.assertEqual(code, 2, path)
+            self.assertIn("projects/demo/", err)
+        # one bad path refuses the whole call
+        code, _, _ = self.run_tool("record", "projects/demo", "--uploaded", "SERIES.md", "--id", "A",
+                                   "--uploaded", "projects/other/SERIES.md", "--id", "B")
+        self.assertEqual(code, 2)
+        self.assertEqual((self.pd / ".pulled.sha256").read_bytes(), before)
+        self.assertFalse((self.pd / ".pushed.log").exists())
+
+    def test_backslash_path(self):
+        self.snapshot()
+        self.write("SERIES.md", "y\n", append=True)
+        code, out, err = self.run_tool("record", "projects/demo", "--uploaded", "projects\\demo\\SERIES.md",
+                                       "--id", "S1")
+        self.assertEqual(code, 0, err)
+        self.assertRegex((self.pd / ".pushed.log").read_text(), r" projects/demo/SERIES\.md S1\n$")
+        self.assertNotIn("\\", (self.pd / ".pulled.sha256").read_text())
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+
+    def test_backslash_snapshot_keys(self):
+        lines = [f"{ds.sha256(self.pd / r)}  " + f"projects/demo/{r}".replace("/", "\\") for r in sorted(FILES)]
+        (self.pd / ".pulled.sha256").write_text("\n".join(lines) + "\n")
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+        self.assertEqual(plan["counts"]["unchanged"], len(FILES))
+
+
+class TestLedgerPlan(DriveSyncCase):
+    def setUp(self):
+        super().setUp()
+        self.snapshot("--include-out", "out/demo")
+        (self.out / "ep01" / "ledger.csv").write_text("ts,kind\n1,image\n")
+
+    def test_ledger_action(self):
+        (self.out / "ep01" / "renders").mkdir()
+        (self.out / "ep01" / "renders" / "ep01_draft_v01.mp4").write_bytes(b"mp4")
+        code, plan = self.plan("--include-out", "out/demo")
+        led = self.action(plan, "out/demo/ep01/ledger.csv")
+        self.assertEqual(led["notes"], ["ledger: push after every stage that generated; no approval gate"])
+        self.assertEqual(led["pre"], {"ledger_merge": {
+            "into": "out/demo/ep01/ledger.csv", "copies_glob": "out/demo/ep01/ledger.drive-*.csv",
+            "search_files": "parentId = 'F-SX-E1' and title = 'ledger.csv' and trashed = false",
+            "excludeContentSnippets": True}})
+        draft = self.action(plan, "out/demo/ep01/renders/ep01_draft_v01.mp4")
+        self.assertEqual(draft["notes"], ["media: push only after the user approved it (§9)"])
+        self.assertNotIn("pre", draft)
+
+    def test_text_merge_before_upload(self):
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo", "--now", "20261110-1530")
+        self.assertEqual(code, 0)
+        block = out.split("CHANGED out/demo/ep01/ledger.csv", 1)[1]
+        self.assertLess(block.index("ledger-merge"), block.index("create_file"))
+        self.assertIn("1) search_files parentId = 'F-SX-E1' and title = 'ledger.csv' and trashed = false"
+                      "  excludeContentSnippets=true", block)
+        self.assertIn("2) download EVERY result to out/demo/ep01/ledger.drive-<n>.csv", block)
+        self.assertIn("3) python3 tools/ark.py ledger-merge out/demo/ep01/ledger.csv out/demo/ep01/ledger.drive-*.csv "
+                      "-o out/demo/ep01/ledger.csv", block)
+        self.assertIn("4) run plan again", block)
+        self.assertIn("note         ledger: push after every stage that generated; no approval gate", block)
+        self.assertNotIn("only after the user approved", block)
+
+    def test_drive_copies_never_planned(self):
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text("ts,kind\n9,image\n")
+        (self.out / "ledger.drive-2.csv").write_text("ts,kind\n")
+        self.write("ep01-bac-thi/ledger.drive-1.csv", "ts,kind\n")
+        self.write("ledger.drive-3.csv", "ts,kind\n")
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual(code, 0)
+        self.assertEqual([a["local"] for a in plan["actions"]], ["out/demo/ep01/ledger.csv"])
+        self.assertEqual(plan["unmapped"], [])
+        self.assertEqual(plan["skipped_media"], 1)          # the plate only
+        self.assertEqual(plan["ignored_temp"], [])
+
+
+class TestPlanHygiene(DriveSyncCase):
+    def test_search_lines_exclude_snippets(self):
+        self.snapshot()
+        self.write("ep01-bac-thi/script.md", "x\n", append=True)
+        self.write("ep01-bac-thi/prompts/s02_L4.txt", "bac thi\n")
+        self.write("TienDo_SanXuat.csv", "ep02,0\n", append=True)
+        code, out, _ = self.run_tool("plan", "projects/demo", "--now", "20261110-1530")
+        searches = [l for l in out.splitlines() if re.search(r"\bsearch_files parentId", l)]
+        self.assertEqual(len(searches), 3)
+        for line in searches:
+            self.assertTrue(line.endswith("and trashed = false  excludeContentSnippets=true"), line)
+        code, plan = self.plan()
+        for x in plan["actions"] + [plan["sheet"]]:
+            self.assertIs(x["archive"]["excludeContentSnippets"], True)
+
+    def test_apostrophe_and_backslash_title(self):
+        self.assertEqual(ds.search_query("F1", "02_KinhThu", "quach-phac's_note.txt"),
+                         "parentId = 'F1' and title = 'quach-phac\\'s_note.txt' and trashed = false")
+        self.assertEqual(ds.search_query("F1", "02_KinhThu", "a\\b.txt"),
+                         "parentId = 'F1' and title = 'a\\\\b.txt' and trashed = false")
+        self.snapshot()
+        self.write("ep01-bac-thi/quach-phac's_note.txt", "x\n")
+        code, plan = self.plan()
+        x = self.action(plan, "projects/demo/ep01-bac-thi/quach-phac's_note.txt")
+        self.assertIn("title = 'quach-phac\\'s_note.txt'", x["archive"]["search_files"])
+        self.assertEqual(x["create_file"]["title"], "quach-phac's_note.txt")
+
+    def test_temp_files_ignored(self):
+        self.snapshot("--include-out", "out/demo")
+        for name in ("research.md.b64", "script.md.orig", "script.md.bak", "x.tmp", "shots.csv~"):
+            self.write(f"ep01-bac-thi/{name}", "x\n")
+        self.write("notes.part", "x\n")                                  # would be UNMAPPED
+        (self.out / "ep01" / "bundles").mkdir()
+        (self.out / "ep01" / "bundles" / "ep01_s01_20261110.zip.part").write_bytes(b"x")
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual(code, 0)
+        self.assertEqual((plan["actions"], plan["unmapped"]), ([], []))
+        self.assertEqual(len(plan["ignored_temp"]), 7)
+        self.assertIn("projects/demo/ep01-bac-thi/research.md.b64", plan["ignored_temp"])
+        self.assertEqual(plan["skipped_media"], 1)
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        self.assertEqual(out.count("ignored temp files"), 1)
+        self.assertIn("script.md.orig", out)
+        self.assertNotIn("NEW", out)
+        self.assertNotIn("UNMAPPED", out)
+
+    def test_changed_paragraph_only_with_a_changed_file(self):
+        self.snapshot()
+        self.write("ep01-bac-thi/prompts/s02_L4.txt", "bac thi\n")
+        code, out, _ = self.run_tool("plan", "projects/demo")
+        self.assertIn("Before uploading a NEW file", out)
+        self.assertNotIn("Before uploading a CHANGED file", out)
+        self.write("ep01-bac-thi/script.md", "x\n", append=True)
+        code, out, _ = self.run_tool("plan", "projects/demo")
+        self.assertIn("Before uploading a CHANGED file", out)
+
+    def test_record_line_carries_sha256(self):
+        self.snapshot()
+        script = self.write("ep01-bac-thi/script.md", "x\n", append=True)
+        code, out, _ = self.run_tool("plan", "projects/demo")
+        self.assertIn("record projects/demo --uploaded projects/demo/ep01-bac-thi/script.md --id <new ID> "
+                      f"--sha256 {ds.sha256(script)}", out)
+
+    def test_unbundled_media_message(self):
+        self.snapshot("--include-out", "out/demo")
+        ep = self.out / "ep01"
+        (ep / "clips").mkdir()
+        (ep / "clips" / "ep01_s01_seedance_v01.mp4").write_bytes(b"mp4")
+        (ep / "plates" / "notes.txt").write_text("no shot tag")
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        self.assertEqual(code, 0)
+        self.assertIn("Nothing to push (text). 2 plate/clip file(s) are in no bundle: "
+                      "they exist only in this container", out)
+        self.assertNotIn("Nothing to push.", out)
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual(plan["unbundled_media"], 2)
+
+        (ep / "bundles").mkdir()
+        zp = ep / "bundles" / "ep01_s01_20261110.zip"
+        with zipfile.ZipFile(zp, "w") as z:
+            z.writestr("plates/ep01_s01_L1_nui_v01.png", b"png")
+        self.run_tool("record", "projects/demo", "--uploaded", "out/demo/ep01/bundles/ep01_s01_20261110.zip",
+                      "--id", "Z1")
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        self.assertIn("Nothing to push (text). 1 plate/clip file(s) are in no bundle", out)
+
+        with zipfile.ZipFile(zp, "a") as z:
+            z.writestr("clips/ep01_s01_seedance_v01.mp4", b"mp4")
+        self.run_tool("record", "projects/demo", "--uploaded", "out/demo/ep01/bundles/ep01_s01_20261110.zip",
+                      "--id", "Z2")
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        self.assertIn("Nothing to push.", out)
+        self.assertNotIn("in no bundle", out)
+
+    def test_unreadable_bundle_counts_as_empty(self):
+        self.snapshot("--include-out", "out/demo")
+        (self.out / "ep01" / "bundles").mkdir()
+        (self.out / "ep01" / "bundles" / "ep01_s01_20261110.zip").write_bytes(b"not a zip")
+        self.run_tool("record", "projects/demo", "--uploaded", "out/demo/ep01/bundles/ep01_s01_20261110.zip",
+                      "--id", "Z1")
+        code, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        self.assertEqual(code, 0)
+        self.assertIn("1 plate/clip file(s) are in no bundle", out)
+
+
+class TestCli(unittest.TestCase):
+    def test_help_lists_commands(self):
+        code, out, _ = run_main(ds.main, ["--help"])
+        self.assertEqual(code, 0)
+        self.assertRegex(out, r"\{snapshot,pulled,plan,record\}")
 
 
 class TestManifestErrors(DriveSyncCase):

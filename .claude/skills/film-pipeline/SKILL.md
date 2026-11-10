@@ -36,15 +36,21 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 
 **Kéo (đầu mỗi phiên, trước mọi việc khác):**
 1. `00_QuanLy/PROJECT.md` trước → `projects/<project>/PROJECT.md` (chưa biết ID: tìm `<ProjectName>` một lần trong gốc lab).
-2. Theo bảng CONVENTIONS §11.3: `02_KinhThu/` (SERIES.md, CHARACTER.md, LOCATION.md, PhongCach) → `projects/<project>/`;
-   tập đang làm `03_KichBan/ep<NN>-<slug>/` (cả `prompts/`, `review/`) → `projects/<project>/ep<NN>-<slug>/`;
+2. Theo bảng CONVENTIONS §11.3, **kéo theo khâu, không kéo cả cây** (đo 2026-11-10: kéo trọn một tập tốn khoảng
+   250 KB ngữ cảnh). Luôn kéo: `PROJECT.md`, `SERIES.md`, `EPISODE.md`, `budget.yaml` của tập đang làm và **mọi** bản
+   `ledger.csv`. File khác của `02_KinhThu/` và `03_KichBan/ep<NN>-<slug>/` (→ `projects/<project>/…`): chỉ những gì
+   khâu sắp chạy cần – các file agent của khâu đó ghi ở dòng `Đầu vào` trong `.claude/agents/<agent>.md` và các file sẽ
+   sửa. Sau mỗi file: `wc -c` phải bằng `fileSize` của Drive, lệch thì tải lại.
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
    ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
    `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –
    CONVENTIONS §7, §11.6); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
    Ảnh khóa, gói shot, tài liệu gốc: chỉ kéo khi cần.
-3. Chụp dấu và giờ kéo: `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
-   (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo).
+3. Chụp dấu và giờ kéo, **một lần** sau lần kéo đầu của container:
+   `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
+   (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo). Đã có snapshot
+   (kéo thêm cho khâu sau, container cũ): `python3 tools/drive_sync.py pulled projects/<project> <các file vừa kéo>`.
+   `snapshot` từ chối (mã thoát 1) khi còn thay đổi chưa đẩy: đẩy chúng trước, không dùng `--force` để cho qua.
 4. Có file trong `01_TaiLieuGoc/_ChoPhanLoai/`: đặt tên theo §11.4, chuyển vào đúng thư mục, ghi `DanhMuc.csv`, báo người dùng.
 
 **Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
@@ -57,10 +63,12 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về, gộp trước.
    `create_file` (`title`, `parentId`, `contentMimeType`, `base64Content=sha256:<hex>:<đường dẫn tuyệt đối>`,
    `disableConversionToGoogleType: true`); thành công → ngay
-   `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>` (thay dòng dấu của file,
-   ghi `.pushed.log`); rồi chạy lại câu `search_files` và `update_file` **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`
+   `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới> --sha256 <hex>` đúng
+   như `plan` in (thay dòng dấu của file, ghi `.pushed.log`; `WARN … still to push` = file bị sửa sau lúc tải, lần
+   `plan` sau vẫn là CHANGED); rồi chạy lại câu `search_files` và `update_file` **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`
    với tên `plan` in sẵn (`<thư mục logic, / → __>__<tên>_<YYYYMMDD-HHMM>.<đuôi>`, CONVENTIONS §11.6 – connector không
-   ghi đè nội dung được).
+   ghi đè nội dung được). `ledger.csv`: làm khối `pre` của nó **trước** `create_file` (tải mọi bản trên Drive,
+   `ledger-merge`, chạy lại `plan`); ledger đẩy sau mỗi khâu có tạo ảnh/video, không chờ duyệt.
 3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
    theo §11.6 bước 5.
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy

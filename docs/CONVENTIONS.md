@@ -387,8 +387,13 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    (`out/<project>/ep<NN>/ledger.drive-1.csv`, `…-2.csv`) rồi gộp, không chọn bản mới nhất:
    `python3 tools/ark.py ledger-merge out/<project>/ep<NN>/ledger.drive-*.csv -o out/<project>/ep<NN>/ledger.csv`
    (§7); lần đẩy ledger kế tiếp sẽ đưa các bản cũ vào `99_LuuTru/`.
-4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
+4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC), **một lần** sau lần kéo đầu của container:
    `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>` (từ thư mục gốc repo).
+   Đã có snapshot (kéo thêm theo khâu, container cũ còn sống): `python3 tools/drive_sync.py pulled projects/<project>
+   <các file vừa kéo>` – chỉ thay dòng của các file đó, không đụng `.pulled.at`, không ghi `.pushed.log`. `snapshot`
+   từ chối (mã thoát 1, không ghi gì) khi còn thay đổi chưa đẩy, vì chụp lại sẽ đánh dấu chúng là đã đẩy; `--force`
+   chỉ dùng khi chắc chắn bỏ các thay đổi đó khỏi danh sách đẩy. File tạm (`*.b64`, `*.orig`, `*.bak`, `*.tmp`,
+   `*.part`, `*~`) và `ledger.drive-*.csv` không vào dấu, không vào danh sách đẩy.
    Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
    `find projects/<project>` in ra, media dạng `out/<project>/…`; không có file nào bắt đầu bằng `.`) và
    `projects/<project>/.pulled.at` (`2026-11-10T15:30:00Z`). Tương đương bằng shell khi không chạy được công cụ:
@@ -416,8 +421,11 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 2. Mỗi file (đúng các tham số `plan` in ra): `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
    `sha256:<hex>:<đường dẫn tuyệt đối>` (hex từ `sha256sum`), `contentMimeType` (`.md` `text/markdown`, `.csv` `text/csv`,
    `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`. Tải lên thành công →
-   ngay lập tức `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>`
-   (thay đúng dòng của file trong `.pulled.sha256`, thêm dòng vào `.pushed.log`).
+   ngay lập tức `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>
+   --sha256 <hex>` đúng như `plan` in ra (thay đúng dòng của file trong `.pulled.sha256`, thêm dòng vào
+   `.pushed.log`). `--sha256` là bản đã tải lên: file bị sửa sau lúc tải thì `record` in `WARN … still to push` và
+   file vẫn là CHANGED ở lần `plan` sau. `record`/`pulled` chỉ nhận file trong `projects/<project>/` hoặc
+   `out/<project>/` (mã thoát 2); chạy song song nhiều lệnh `record` được (có khoá `.drive_sync.lock`).
 3. **Quy tắc phiên bản (chọn vì đơn giản và chắc):** connector không ghi đè được nội dung file (`update_file` chỉ sửa
    tên, thư mục, thuộc tính), nên lịch sử phiên bản của Drive không dùng được. Mỗi lần đẩy là **file mới**; chỉ sau khi
    tải lên thành công, tìm bản cũ ngay lúc đó bằng `search_files` (`parentId = '<id thư mục>' and title = '<tên file>'
@@ -427,7 +435,9 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `03_KichBan__ep01-bac-thi__script_20261110-1530.md`. Kết quả: mỗi thư mục luôn có đúng một bản hiện hành mỗi tên;
    mọi bản cũ nằm ở `99_LuuTru/`, tìm lại được theo tên. Tải lên trước, chuyển sau: bị ngắt giữa chừng chỉ để lại
    bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
-   **`ledger.csv` trước khi đẩy:** phiên khác có thể đã đẩy ledger của cùng tập sau lần kéo. Tải bản đang ở Drive về
+   **`ledger.csv` trước khi đẩy:** phiên khác có thể đã đẩy ledger của cùng tập sau lần kéo. `plan` in sẵn các bước
+   này thành khối `pre` ngay trước dòng `create_file` của ledger (JSON: `pre.ledger_merge`) và ghi chú `ledger: push
+   after every stage that generated; no approval gate` – ledger không chờ duyệt như media. Tải bản đang ở Drive về
    `out/<project>/ep<NN>/ledger.drive-1.csv`, `ark.py ledger-merge out/<project>/ep<NN>/ledger.csv
    out/<project>/ep<NN>/ledger.drive-1.csv -o out/<project>/ep<NN>/ledger.csv`, xoá bản tạm, rồi mới đẩy bản đã gộp
    (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào).

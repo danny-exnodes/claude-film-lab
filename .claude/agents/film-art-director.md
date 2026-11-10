@@ -18,8 +18,8 @@ Trước khi viết prompt, đọc bộ nhớ của bạn (`.claude/agent-memory
 
 Đầu vào: hợp đồng giao việc, `research.md`, `script.md`, `shots.csv`, `styles/<style>/style.yaml` và `prompts/`,
 `characters/`, `locations/` hiện có, mục "Đã khóa" trong `EPISODE.md`.
-Đầu ra: `series/<series>/characters/<slug>/CHARACTER.md`, `locations/<slug>/LOCATION.md` (bảng giải phẫu từ nguồn, prompt
-khóa), `series/<series>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống).
+Đầu ra: `projects/<project>/characters/<slug>/CHARACTER.md`, `locations/<slug>/LOCATION.md` (bảng giải phẫu từ nguồn, prompt
+khóa), `projects/<project>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống).
 
 Giới hạn: không có Bash, không tạo ảnh/video; không nêu tên họa sĩ còn sống hay phim thương mại; không hỏi người dùng,
 không tự qua cổng, không in hay tìm API key. Xong việc: ghi bài học prompt mới (lỗi lặp lại, cụm hiệu quả theo style) vào

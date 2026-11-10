@@ -536,7 +536,7 @@ def check_cost_args(a):
         return
     if a.budget and not a.ledger:
         usage_error("--budget without --ledger: the budget cannot count earlier requests. "
-                    "Pass --ledger out/<series>/ep<NN>/ledger.csv (or FILM_LEDGER)")
+                    "Pass --ledger out/<project>/ep<NN>/ledger.csv (or FILM_LEDGER)")
     if not (a.budget and a.ledger):
         usage_error(f"refusing to call the paid API without a budget: pass --budget B.yaml --ledger L.csv "
                     f"(or FILM_BUDGET/FILM_LEDGER), or --no-budget for an ad-hoc test (docs/CONVENTIONS.md §7)")

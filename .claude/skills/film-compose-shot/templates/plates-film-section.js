@@ -12,7 +12,7 @@
 const CUES = { open: 0, blink: 3.0, event: 4.6, end: DURATION };
 
 // Plates: one row per layer file (docs/CONVENTIONS.md §2 names), paths relative to this film.html, which lives in
-// out/<series>/ep<NN>/film/<slug>/ -> '../../plates/<file>'. depth: COMPOSE.DEPTH (bg 0.12 · mid 0.45 · fg and the
+// out/<project>/ep<NN>/film/<slug>/ -> '../../plates/<file>'. depth: COMPOSE.DEPTH (bg 0.12 · mid 0.45 · fg and the
 // character 1.0 · front mist 1.25 · near particles 1.7). Anchors (plate px) come from anchors.json via inline.py.
 // place: omitted = cover the frame (L1); { x, y, h, pivot } puts an anchor of the plate at a stage point.
 // rig: strip-warp (warp), eyelids (eyes), breath; a keyed Seedance clip is a plate with seq instead of src.

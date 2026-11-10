@@ -1,14 +1,14 @@
 ---
-# Mẫu trạng thái tập – docs/CONVENTIONS.md §5. Chép vào series/<series>/ep<NN>-<slug>/EPISODE.md và điền.
+# Mẫu trạng thái tập – docs/CONVENTIONS.md §5. Chép vào projects/<project>/ep<NN>-<slug>/EPISODE.md và điền.
 # KHÔNG đặt tên STATE.md (tên đó thuộc cinecode).
-series: <series>             # slug series, trùng tên thư mục series/<series>/
+series: <series>             # slug series, trùng tên thư mục projects/<project>/
 episode: 1                   # số tập (số nguyên)
 slug: <slug>                 # slug tập, thư mục là ep<NN>-<slug>
 style: <style-id>            # thường bằng style trong SERIES.md; thư mục styles/<style-id>/
 length_s: 60                 # thời lượng đích (giây); shot cuối trong shots.csv kết thúc đúng số này
 stage: 0                     # khâu hiện tại 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày người dùng duyệt YYYY-MM-DD, hoặc null
-media: out/<series>/ep01     # thư mục media (git bỏ qua)
+media: out/<project>/ep01     # thư mục media (git bỏ qua)
 drive: "AI Film Lab/<series>/ep01"
 ---
 

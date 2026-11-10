@@ -14,7 +14,7 @@ tách nền, neo). Hợp đồng file: `docs/CONVENTIONS.md` §2, §3, §6, §7.
 
 ## 1. style.yaml quyết định mọi thứ
 
-Đọc `series/<series>/SERIES.md` → `style: <id>` → `styles/<id>/style.yaml`. Không chép giá trị style vào skill hay prompt
+Đọc `projects/<project>/SERIES.md` → `style: <id>` → `styles/<id>/style.yaml`. Không chép giá trị style vào skill hay prompt
 bằng tay; luôn đọc lại từ file:
 - `style_block`: câu đặt **đầu mọi prompt ảnh**, nguyên văn.
 - `negative`: gửi qua `--negative` **và** viết thành ràng buộc trong prompt ("no text, no signature…"), vì chưa xác minh
@@ -44,14 +44,14 @@ Nền phẳng lấy màu từ `matte.paper_bg` (luminance) hoặc `matte.key_bg`
 
 ## 3. Nhân vật (khâu 3, art-director)
 
-1. Bảng giải phẫu trong `series/<series>/characters/<slug>/CHARACTER.md`: mỗi đặc điểm một dòng, cột "nguồn" (mệnh đề
+1. Bảng giải phẫu trong `projects/<project>/characters/<slug>/CHARACTER.md`: mỗi đặc điểm một dòng, cột "nguồn" (mệnh đề
    chữ Hán từ `research.md`) hoặc "diễn giải". Mỗi đặc điểm thành **một cụm viết HOA** trong prompt
    (`NINE TAILS`, `FOUR EARS`, `EYES ON ITS BACK`, `NO EYES ON THE FACE`).
 2. Prompt khóa nhân vật (front, toàn thân) → ảnh khóa duyệt ở G2 → các góc khác dùng ảnh khóa làm `--ref`.
 3. Biến thể trạng thái (mắt nhắm, cúi đầu): đổi đúng một chi tiết, ảnh khóa làm `--ref`. Seedream Pro chỉ qua Lambda,
    v1.0.0 chưa triển khai → dùng model `image` 2K.
 4. Lỗi hay gặp, ghi thành ràng buộc: tự thêm mắt trên mặt, sai số đuôi/tai, quầng sương quanh viền, bóng đổ dưới chân.
-5. Mỗi prompt lưu thành file `series/<series>/ep<NN>-<slug>/prompts/<tên-file-ảnh-không-đuôi>.txt` và một dòng
+5. Mỗi prompt lưu thành file `projects/<project>/ep<NN>-<slug>/prompts/<tên-file-ảnh-không-đuôi>.txt` và một dòng
    `prompts.csv` (cột `file` ghi tên ảnh sẽ tạo, `usage` và `approved` để trống).
 
 ## 4. Tạo ảnh (khâu 4–5, plate-maker)
@@ -59,9 +59,9 @@ Nền phẳng lấy màu từ `matte.paper_bg` (luminance) hoặc `matte.key_bg`
 Mọi lần tạo ảnh đều có ledger và trần (thiếu là lỗi quy trình):
 ```
 FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
-  out/<series>/ep<NN>/plates/ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.png --size <layers.<lớp>.size trong style.yaml> \
+  out/<project>/ep<NN>/plates/ep<NN>_s<NN>_<lớp>_<chủ-thể>_v<NN>.png --size <layers.<lớp>.size trong style.yaml> \
   [--ref <ảnh khóa>.png] [--negative "<negative>"] [--seed <n>] \
-  --ledger out/<series>/ep<NN>/ledger.csv --budget series/<series>/ep<NN>-<slug>/budget.yaml
+  --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml
 ```
 - **G2 trước hàng loạt:** khâu 4 chỉ tạo ảnh khóa nhân vật và đủ lớp của **một** shot mẫu (2K, hoặc `--fast` để nháp).
   Không tạo shot khác cho tới khi `gates.G2` có ngày trong EPISODE.md.

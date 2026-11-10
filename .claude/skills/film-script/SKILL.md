@@ -9,7 +9,7 @@ description: >-
 
 # film-script – kịch bản tập phim 2.5D
 
-Đầu ra nằm trong `series/<series>/ep<NN>-<slug>/`: `research.md` (nếu chưa có), `script.md`, `shots.csv`.
+Đầu ra nằm trong `projects/<project>/ep<NN>-<slug>/`: `research.md` (nếu chưa có), `script.md`, `shots.csv`.
 Hợp đồng file: `docs/CONVENTIONS.md` §4–§6. Phương pháp viết chung (đi rộng rồi thu hẹp, một cú lật, viết kết trước,
 cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root/.claude/skills/cinecode/references/writing.md` §1–§4, §8,
 §14–§15; file này chỉ ghi phần riêng của Film Lab.
@@ -17,7 +17,7 @@ cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root
 ## 0. Đọc trước
 
 1. `EPISODE.md` của tập: `length_s`, `style`, ghi chú người dùng, mục đã khóa (không viết lại câu đã khóa).
-2. `series/<series>/SERIES.md`: khán giả, ngôn ngữ, quy ước riêng.
+2. `projects/<project>/SERIES.md`: khán giả, ngôn ngữ, quy ước riêng.
 3. `styles/<style>/STYLE.md`, mục **`## Giọng kể và nhịp`**: giọng, tốc độ đọc, motif quen, nhịp cắt. Mục này thắng các
    mặc định dưới đây khi khác. Chưa có mục đó: dùng mặc định ở đây và ghi "chưa có giọng kể của style" vào báo cáo.
 4. `characters/` và `locations/` của series: nhân vật, bối cảnh đã có thì dùng lại (`reuse_of`), không vẽ lại.
@@ -62,7 +62,7 @@ Danh sách lỗi văn máy và cách sửa: `references/writing-tells.md`. Tóm 
 
 `script.md`:
 ```
-# <Tên tập> · <series> ep<NN>
+# <Tên tập> · <tên dự án> ep<NN>
 
 > Độ dài: <n> s · Style: <id> · Giọng: <theo STYLE.md>
 > Luận đề: [mm:ss] · Câu hỏi treo: [mm:ss] · Lật: [mm:ss] · Giải: [mm:ss]
@@ -92,7 +92,7 @@ Mốc tăng dần, nằm trong `length_s`. Không dùng dấu gạch ngang ở b
 
 ## 5. Tự kiểm trước G1
 
-- Có Bash (phiên chính): `python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug>` → sửa hết ERROR.
+- Có Bash (phiên chính): `python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>` → sửa hết ERROR.
 - Không có Bash (agent `film-writer`): tự kiểm theo danh sách dưới, báo "chưa chạy check_episode"; đạo diễn chạy.
 - [ ] Tổng thời lượng shot = `length_s`; shot 3–13 s; không hai shot liền nhau trùng cả cỡ cảnh và máy.
 - [ ] Mỗi câu có mốc, cách nhau ≥ 3 s; không dấu gạch ngang; một câu luận đề; kết có giây không lời.

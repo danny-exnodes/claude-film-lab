@@ -5,7 +5,7 @@ description: >-
   giữ cổng duyệt G1–G4, giao việc cho các agent film-*, kiểm ngân sách qua ledger, cập nhật EPISODE.md, commit/push,
   đóng gói shot và lưu Drive. Dùng khi người dùng nói "làm tập phim", "làm tập mới", "mở tập", "tiếp tục tập",
   "làm tiếp ep01", "tập tiếp theo", "duyệt kịch bản", "qua cổng", "duyệt shot mẫu", "duyệt bản nháp", "bản cuối",
-  "lưu Drive", hoặc nhắc tới EPISODE.md, budget.yaml, ledger.csv, series/<series>/ep<NN>-<slug>.
+  "lưu Drive", hoặc nhắc tới EPISODE.md, budget.yaml, ledger.csv, projects/<project>/ep<NN>-<slug>.
 ---
 
 # film-pipeline – đạo diễn một tập phim
@@ -16,10 +16,10 @@ file này). Bản cho người đọc: `docs/WORKFLOW.md`.
 
 ## 1. Việc đầu tiên mỗi phiên
 
-1. Đọc `series/<series>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì ghi trong EPISODE.md,
+1. Đọc `projects/<project>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì ghi trong EPISODE.md,
    file trong thư mục tập và `git log` mới là sự thật.
-2. Đọc `budget.yaml` và (nếu có) `out/<series>/ep<NN>/ledger.csv` để biết còn bao nhiêu ảnh/giây video.
-3. Kiểm `out/<series>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
+2. Đọc `budget.yaml` và (nếu có) `out/<project>/ep<NN>/ledger.csv` để biết còn bao nhiêu ảnh/giây video.
+3. Kiểm `out/<project>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
    trong `prompts.csv`), media chưa lưu là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
 4. Báo người dùng 3–5 dòng: khâu hiện tại, cổng đã qua, việc tiếp theo, ngân sách còn lại. Rồi làm `## Việc tiếp theo`.
 
@@ -48,7 +48,7 @@ Quy tắc cổng:
 - Cổng **chỉ** qua ở phiên chính, khi người dùng nói rõ là duyệt. Ghi ngày vào `gates: {G1: YYYY-MM-DD}`.
   Agent không bao giờ tự qua cổng, không hỏi người dùng thay bạn.
 - Trước mỗi cổng chạy
-  `python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> --out review/check-v<N>.txt`
+  `python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> --out review/check-v<N>.txt`
   (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md; từ G3, trước khâu 9 và G4 thêm
   `--probe` để file có số đo ffprobe/LUFS). Mã thoát 1 = còn ERROR: không mở
   cổng, giao lại agent của khâu đó kèm nguyên văn dòng lỗi. WARN thì nêu cho người dùng.
@@ -59,7 +59,7 @@ Quy tắc cổng:
 
 ## 3. Mở tập (khâu 0)
 
-1. Tạo `series/<series>/ep<NN>-<slug>/`, chép `templates/episode/EPISODE.md` và `budget.yaml` (không có mẫu thì theo
+1. Tạo `projects/<project>/ep<NN>-<slug>/`, chép `templates/episode/EPISODE.md` và `budget.yaml` (không có mẫu thì theo
    CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`), `length_s`, `media`, `drive`.
 2. Hỏi người dùng một lần: độ dài, style (mặc định của series), trần ảnh và giây video. Ghi câu trả lời nguyên văn vào
    `## Ghi chú người dùng (nguyên văn)`.
@@ -70,7 +70,7 @@ Quy tắc cổng:
 Mỗi lần gọi agent, viết **hợp đồng giao việc** đủ 6 mục (agent không thấy lịch sử chat):
 
 ```
-Tập: series/<series>/ep<NN>-<slug>/   (media: out/<series>/ep<NN>/)
+Tập: projects/<project>/ep<NN>-<slug>/   (media: out/<project>/ep<NN>/)
 Khâu: <số> – <tên khâu>
 Đầu vào: <danh sách file đọc>; đã khóa (chỉ đọc, không làm lại): <file/shot>
 Đầu ra: <danh sách file tạo/sửa, tên theo CONVENTIONS §2>
@@ -83,7 +83,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 - Agent tạo ảnh/video (`film-plate-maker`, `film-animator`) luôn gọi:
   ```
   FILM_AGENT=<tên-agent> python3 tools/ark.py image ... \
-    --ledger out/<series>/ep<NN>/ledger.csv --budget series/<series>/ep<NN>-<slug>/budget.yaml
+    --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml
   ```
   Mã thoát 3 = vượt trần (`refused-budget`): agent dừng và báo; bạn hỏi người dùng nâng trần hay cắt bớt.
   Bạn tự gọi ark.py ở phiên chính cũng dùng `--ledger/--budget` (cột `agent` trống = phiên chính).
@@ -119,9 +119,9 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 ## 7. Lưu media lên Drive
 
 Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot, G3/G4 cho bản dựng):
-1. `python3 tools/bundle.py out/<series>/ep<NN> --shot s03` → `out/<series>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
+1. `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → `out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
    (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot). Lệnh in sẵn tham chiếu `sha256:<hex>:<đường dẫn>`.
-2. Tải lên Drive `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với tham chiếu
+2. Tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với tham chiếu
    đó); người dùng duyệt từng lần tải. Bản dựng duyệt (`renders/*.mp4`) tải riêng từng file.
 3. Ghi `drive_link` và `approved=yes` vào `prompts.csv`, ghi Nhật ký, commit + push.
 

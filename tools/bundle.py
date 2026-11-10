@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Zip one shot's media for a single Drive upload (docs/CONVENTIONS.md §9).
 
-  python3 tools/bundle.py out/<series>/ep<NN> --shot s03 [--series-dir series/<series>/ep<NN>-<slug>]
+  python3 tools/bundle.py out/<project>/ep<NN> --shot s03 [--series-dir projects/<project>/ep<NN>-<slug>]
 
 The zip holds every file under plates/ and clips/ whose name contains `_s03_`, the prompts.csv rows for
 that shot (header kept) and the anchors.json entries for that shot's files, if those files exist. It is
-written to out/<series>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
-Without --series-dir the episode text folder is looked up as series/<series>/ep<NN>-*/ in the repo.
+written to out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip (UTC date; same-day re-runs replace it).
+Without --series-dir the episode text folder is looked up as projects/<project>/ep<NN>-*/ in the repo.
 Prints the path, size and the Drive connector file reference `sha256:<hex>:<absolute path>`.
 """
 import argparse, csv, datetime, glob, hashlib, io, json, os, re, sys, zipfile
@@ -102,7 +102,7 @@ def bundle(media, shot, series_dir=None, today=None, with_film=False):
         raise SystemExit(f"{media}: media folder not found")
     ep = os.path.basename(os.path.normpath(media))
     if not re.fullmatch(r"ep\d{2}", ep):
-        raise SystemExit(f"{media}: expected out/<series>/ep<NN>")
+        raise SystemExit(f"{media}: expected out/<project>/ep<NN>")
     series_dir = series_dir or find_series_dir(media)
     files = shot_media(media, shot)
     if not files:
@@ -136,9 +136,9 @@ def bundle(media, shot, series_dir=None, today=None, with_film=False):
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
-    p.add_argument("media", help="out/<series>/ep<NN>")
+    p.add_argument("media", help="out/<project>/ep<NN>")
     p.add_argument("--shot", required=True, help="shot id, e.g. s03")
-    p.add_argument("--series-dir", default=None, help="series/<series>/ep<NN>-<slug> (prompts.csv, anchors.json)")
+    p.add_argument("--series-dir", default=None, help="projects/<project>/ep<NN>-<slug> (prompts.csv, anchors.json)")
     p.add_argument("--with-film", action="store_true",
                    help="also include the cinecode film sources under <media>/film (html, md, json...; no media)")
     a = p.parse_args(argv)

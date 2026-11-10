@@ -72,7 +72,7 @@ Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` 
 
 - `budget.yaml` trong thư mục tập: `images`, `video_seconds`, `models` (trần riêng theo model).
 - Mọi lần tạo ảnh/video:
-  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<series>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
+  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<project>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
   `ark.py` bắt buộc có `--budget` và `--ledger` (thiếu → thoát mã 2), cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Khóa không giữ trong lúc gọi API, nên N agent song
@@ -82,9 +82,9 @@ Chỉ `film-plate-maker` và `film-animator` tạo ảnh/video. `film-reviewer` 
 ## 5. Lưu trữ
 
 - Chữ (kịch bản, prompt, CSV, EPISODE.md): git. Cuối mỗi khâu: commit + push.
-- Media: `out/<series>/ep<NN>/{plates,clips,renders}/` (git bỏ qua). Container bị thu hồi khi rảnh → media chưa lưu là mất.
-- Sau khi duyệt: `python3 tools/bundle.py out/<series>/ep<NN> --shot s03` → một zip mỗi shot, tải lên Drive
-  `AI Film Lab/<series>/ep<NN>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản dựng duyệt tải riêng từng file.
+- Media: `out/<project>/ep<NN>/{plates,clips,renders}/` (git bỏ qua). Container bị thu hồi khi rảnh → media chưa lưu là mất.
+- Sau khi duyệt: `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → một zip mỗi shot, tải lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản dựng duyệt tải riêng từng file.
   Link ghi vào cột `drive_link` của `prompts.csv`.
 
 ## 6. Chuyển giao giữa phiên

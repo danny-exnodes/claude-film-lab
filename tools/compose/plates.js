@@ -6,7 +6,7 @@
 //   window.READY = loadType(TYPE).then(loadFormulas).then(loadPlates).then(...)       (inline.py patches this line)
 //
 // PLATES = { <id>: spec }, spec:
-//   src       'relative/path.png' (from film.html; plates live in out/<series>/ep<NN>/plates/, so '../../plates/<file>')
+//   src       'relative/path.png' (from film.html; plates live in out/<project>/ep<NN>/plates/, so '../../plates/<file>')
 //   depth     parallax depth (COMPOSE.DEPTH: bg 0.12, mid 0.45, fg/char 1.0, mist 1.25, near 1.7)
 //   place     omitted: cover the 1920x1080 stage, centred (an opaque L1). Or { x, y, h | w | scale, pivot }: the plate
 //             point `pivot` ('center' | 'bottom' | 'top' | an anchor point name | [px, py]) goes to stage (x, y), sized
@@ -19,7 +19,7 @@
 //   seq       a frame sequence instead of src (a keyed Seedance clip): { pattern: '../../clips/<stem>/{n}.png',
 //             digits: 6, start: 1, count: 120, fps: 24, at: <film time of its first frame>, end: 'hold' | 'loop' | 'hide' }
 //
-// anchors.json (series/<series>/ep<NN>-<slug>/anchors.json, written with tools/layers/anchors.py set; embedded by
+// anchors.json (projects/<project>/ep<NN>-<slug>/anchors.json, written with tools/layers/anchors.py set; embedded by
 // inline.py --anchors): coordinates in the plate's own pixels, per plate file name; a box is two points <box>_tl and
 // <box>_br (or one [x0, y0, x1, y1] value):
 //   { "<file>.png": { "subject": [x, y], "feet": [x, y], "tail_root": [x, y], "tail_tip": [x, y],

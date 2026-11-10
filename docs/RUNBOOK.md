@@ -8,7 +8,7 @@
 | Video ra vuông dù `--resolution 720p` | Ảnh đầu vào vuông, `ratio=adaptive` | Truyền `--ratio 16:9` (model sẽ crop) hoặc dùng ảnh 16:9 |
 | `ModuleNotFoundError: rembg` / thiếu font CJK | Hook khởi động chưa chạy hoặc lỗi | `CLAUDE_CODE_REMOTE=true .claude/hooks/session-start.sh` |
 | Connector (AWS, Drive…) báo cần đăng nhập lại, sau khi đăng nhập vẫn không có tool | Phiên đã gỡ server khi lỗi xác thực, không nạp lại giữa chừng | Commit/push công việc, mở **phiên mới** |
-| `ark.py image/video` thoát mã 2: "budget and ledger required" | Từ v1.0.0 ngân sách là bắt buộc | Thêm `--budget <tập>/budget.yaml --ledger out/<series>/ep<NN>/ledger.csv`; thử nhanh ngoài tập (phiên chính) dùng `--no-budget` |
+| `ark.py image/video` thoát mã 2: "budget and ledger required" | Từ v1.0.0 ngân sách là bắt buộc | Thêm `--budget <tập>/budget.yaml --ledger out/<project>/ep<NN>/ledger.csv`; thử nhanh ngoài tập (phiên chính) dùng `--no-budget` |
 | Ledger có dòng `pending` không có dòng kết thúc | Tiến trình bị kill (timeout, container thu hồi) giữa lúc tạo | Vẫn tính là đã trả phí. Video: `ark.py video --resume-task <task_id> --ledger L` để tải clip thay vì tạo lại |
 | `ark.py` thoát mã 3, ledger ghi `refused-budget` | Vượt trần trong `budget.yaml` của tập | Hỏi người dùng nâng trần (phiên chính), không tự sửa `budget.yaml` trong agent |
 | `ctext.org` trả trang ~2,8 KB nhắc "robot" thay vì nội dung | ctext chặn truy cập tự động | Dùng `zh.wikisource.org` (tải bình thường từ container) |

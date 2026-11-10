@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Free schema/timing/naming checks for AI Film Lab episodes and style packs (docs/CONVENTIONS.md).
 
-  python3 tools/check_episode.py episode series/<series>/ep<NN>-<slug> [--media out/<series>/ep<NN>] [--probe] [--out review/check-v1.txt]
+  python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--media out/<project>/ep<NN>] [--probe] [--out review/check-v1.txt]
   python3 tools/check_episode.py style styles/<id>
 
 Prints ERROR / WARN lines and a summary. Exit 1 when there is any ERROR, else 0.
 Relative --out paths are taken relative to the episode directory (so `--out review/check-v1.txt`
-lands in series/<series>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
+lands in projects/<project>/ep<NN>-<slug>/review/). Without --media the `media:` path from EPISODE.md
 front matter is used (relative to the repo root).
 
 --probe measures every clip and render mp4 with ffprobe (size, fps, duration, audio) and, for
@@ -826,9 +826,9 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
     sp = p.add_subparsers(dest="cmd", required=True)
-    e = sp.add_parser("episode", help="check an episode folder series/<series>/ep<NN>-<slug>")
+    e = sp.add_parser("episode", help="check an episode folder projects/<project>/ep<NN>-<slug>")
     e.add_argument("episode")
-    e.add_argument("--media", default=None, help="media folder out/<series>/ep<NN> (default: EPISODE.md media:)")
+    e.add_argument("--media", default=None, help="media folder out/<project>/ep<NN> (default: EPISODE.md media:)")
     e.add_argument("--probe", action="store_true",
                    help="measure clips/renders with ffprobe and final renders' loudness with ffmpeg ebur128")
     e.add_argument("--out", default=None, help="also write the report here (relative = inside the episode folder)")

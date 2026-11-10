@@ -5,3 +5,6 @@ __pycache__/
 *.zip
 .env
 *.lock
+
+# Bản làm việc của dự án phim: nguồn gốc nằm trên Google Drive (docs/CONVENTIONS.md §11), không commit
+projects/

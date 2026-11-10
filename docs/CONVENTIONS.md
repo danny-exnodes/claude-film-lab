@@ -136,9 +136,9 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/`:
 | File | Ai viết | Nội dung |
 |---|---|---|
 | `EPISODE.md` | đạo diễn | trạng thái tập (§5). **Không đặt tên `STATE.md`** – tên đó thuộc cinecode |
-| `budget.yaml` | đạo diễn | trần chi phí (§7) |
+| `budget.yaml` | đạo diễn | trần chi phí (§7). `tools/check_episode.py` kiểm: thiếu file là ERROR từ khâu 0; chỉ bốn khóa `images`, `video_seconds`, `models`, `ledger_required` (khóa lạ là ERROR: gõ sai tên trần = không có trần); `images` và `video_seconds` bắt buộc, là số ≥ 0 |
 | `research.md` | film-researcher | nguyên văn, link, cách đọc tên; tài liệu gốc dùng tới ghi theo tên file trong `01_TaiLieuGoc/` (§11.4) |
-| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`. Mọi dòng không phải tiêu đề `#`, dòng trống, chú thích `<!-- -->` hay trích dẫn `>` đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>` |
+| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`; hai mốc liền nhau cách nhau tối thiểu 3 s. Dòng không phải lời bình: tiêu đề `#`, dòng trống, trích dẫn `>`, chú thích `<!-- -->` (kể cả chú thích nằm trong dòng: bị bỏ, phần chữ còn lại vẫn là lời bình), khối code ` ``` `/`~~~`, khối YAML đầu file, đường kẻ `---`/`***`/`___`. Mọi dòng khác đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>`. Lời bình không dùng dấu gạch ngang (`—`, `–`, `--`: ERROR; trong `>` là WARN), không để chữ Hán hay ký hiệu markdown (`\|`, `` ` ``, `](`, `<`, `>`: WARN, TTS không đọc được) |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |

@@ -47,7 +47,8 @@ flowchart TD
 | 11 | Xuất bản | `film-publisher` | `publish.md` | người dùng tự đăng |
 
 Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, không tự qua cổng. Trước mỗi cổng phiên chính chạy
-`python3 tools/check_episode.py episode <thư mục tập>` (ghi `review/check-<v>.txt`); còn ERROR thì chưa trình duyệt.
+`python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe` từ G3; file chỉ được ghi
+khi có `--out`); còn ERROR thì chưa trình duyệt.
 
 ## 3. Agents
 

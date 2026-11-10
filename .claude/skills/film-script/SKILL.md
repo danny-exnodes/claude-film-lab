@@ -28,6 +28,9 @@ cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root
 
 ## 1. Nguồn trước, chữ sau
 
+Phần này dành cho phiên chính hoặc `film-researcher`. `film-writer` chỉ đọc `research.md`: thiếu đoạn nguyên văn thì ghi
+vào báo cáo, không tự chép từ trí nhớ.
+
 - Nguồn chữ Hán: **zh.wikisource.org** (bản thô: `https://zh.wikisource.org/w/index.php?title=<trang>&action=raw`).
   ctext.org chặn truy cập tự động (trả trang "robot"), chỉ dùng khi người dùng tự mở để đối chiếu.
 - Chép **nguyên văn** đoạn dùng vào `research.md`: chữ Hán, link trang, `oldid` (bản sửa), ngày truy cập; nguồn là tài

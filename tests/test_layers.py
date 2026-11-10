@@ -468,6 +468,21 @@ class TestMatteStyleBackground(TmpDirCase, unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("matte: ", err)
 
+    def test_colour_of_the_other_method_is_not_validated(self):
+        # as before this package: a colour the method does not use (a stray flag, a style-wide key_bg that
+        # is not a colour) must not fail a matte that never reads it
+        src = self.block("ep01_s01_L2_nui_v01.png", (255, 255, 255), (0, 0, 0))
+        code, so, err = run_main(matte.main, [src, str(self.tmp / "o1.png"), "--method", "luminance", "--key", "junk"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("method luminance paper #FFFFFF", so)
+        code, so, err = run_main(matte.main, [src, str(self.tmp / "o2.png"), "--method", "chroma",
+                                              "--key", "#FFFFFF", "--paper", "junk"])
+        self.assertEqual(code, 0, err)
+        self.assertIn("method chroma key #FFFFFF", so)
+        code, _, err = run_main(matte.main, [src, str(self.tmp / "o3.png"), "--method", "chroma", "--key", "junk"])
+        self.assertEqual(code, 1)
+        self.assertIn("matte: ", err)
+
     def test_non_mapping_layer_spec(self):
         style = self.style("    L4: rembg\n")
         code, _, err = run_main(matte.main, [self.block("ep01_s01_L4_thu_v01.png", (255, 255, 255), (0, 0, 0)),
@@ -654,7 +669,7 @@ class TestAnchors(TmpDirCase, unittest.TestCase):
         j = self.tmp / "a.json"
         with self.assertRaises(ValueError):
             anchors.set_point(str(j), self.NAME, "-x", 1, 2)     # (argparse itself refuses "-x" on the CLI)
-        for name in ("", "tail tl", "_x", "a.b", "đuôi", "a/b", "size", "_size", "points", "boxes", "version"):
+        for name in ("", "tail tl", "_x", "a.b", "đuôi", "a/b", "neck\n", "size", "_size", "points", "boxes", "version"):
             code, _, err = run_main(anchors.main, ["set", str(j), self.NAME, name, "1", "2"])
             self.assertEqual(code, 2, name)
             self.assertIn("point name", err)

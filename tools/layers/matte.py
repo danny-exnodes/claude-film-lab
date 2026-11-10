@@ -251,8 +251,9 @@ def main(argv=None):
             sys.exit(2)
     try:
         # the layer's own background (per_layer.<code>.bg) beats the style-wide colour; a flag beats both
-        key = hex_text(a.key or (cfg["bg"] if method == "chroma" else None) or cfg["key"] or "#FF00FF")
-        paper = hex_text(a.paper or (cfg["bg"] if method == "luminance" else None) or cfg["paper"] or "#FFFFFF")
+        # (only the colour the method reads is checked: the other one never stopped a matte)
+        key = hex_text(a.key or cfg["bg"] or cfg["key"] or "#FF00FF") if method == "chroma" else "#FF00FF"
+        paper = hex_text(a.paper or cfg["bg"] or cfg["paper"] or "#FFFFFF") if method == "luminance" else "#FFFFFF"
     except ValueError as e:
         sys.exit(f"matte: {e}")
     try:

@@ -75,7 +75,7 @@ RESERVED_NAMES = ("size", "_size", "points", "boxes", "version")   # keys with a
 
 
 def check_name(name):
-    if not RE_POINT_NAME.match(name):
+    if not RE_POINT_NAME.fullmatch(name):     # fullmatch: `$` alone would let a trailing newline through
         raise ValueError(f"point name {name!r} must be ASCII letters, digits, _ or - and start with a letter or digit")
     if name in RESERVED_NAMES:
         raise ValueError(f"point name {name!r} is reserved ({', '.join(RESERVED_NAMES)})")

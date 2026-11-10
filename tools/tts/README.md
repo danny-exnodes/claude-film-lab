@@ -86,15 +86,22 @@ term,doc
 Chiêu Diêu,Chiêu Diêu
 ```
 
-## Tốc độ CPU đo được (4 vCPU Xeon 2,1 GHz, AVX-512 VNNI, không GPU)
+## Tốc độ CPU đo được (4 vCPU Xeon 2,1 GHz, AVX-512 VNNI, không GPU, 2026-11-10)
 
-Xem báo cáo audition `out/son-hai-kinh/ep01/vo/audition/audition-log.json` (trường `audio_per_compute_s`).
-v3 Turbo int8: ~1,5 giây audio cho mỗi giây tính toán (nhanh hơn thời gian thực); nạp model ~20 s mỗi lần chạy.
-1 phút lời ≈ 40–50 s render. fp32: chậm hơn (xem `audition/fp32/`).
+| Backbone | 54 s lời (10 câu, giọng Đức Trí) | Tốc độ | Nạp model |
+|---|---|---|---|
+| int8 (mặc định) | 33,5 s tính toán | **1,6 s audio / 1 s** | ~7 s (cache sẵn), lần đầu +tải ~300 MB |
+| fp32 | 47,5 s tính toán | 1,15 s audio / 1 s | như trên |
+
+1 phút lời ≈ 40 s (int8) hoặc ≈ 55 s (fp32), RAM đỉnh ~1 GB (int8, có watermark).
 
 ## Chọn giọng
 
 Chọn bằng tai ở cổng duyệt (issue #8): render audition, người dùng nghe và chọn, ghi giọng đã chọn vào `SERIES.md`
 của dự án để mọi tập dùng chung. Giọng nam miền Nam có sẵn (v3 Turbo 3.8.3, theo nhãn của thư viện):
 `Thái Sơn` (kể chuyện), `Đức Trí` (đọc truyện), `Minh Triết` (tin tức), `Adam` (tự nhiên).
-Nhãn vùng miền do thư viện ghi, không phải đo được; tên giọng có thể đổi giữa các bản SDK (có alias) → ghim phiên bản.
+Nhãn vùng miền do thư viện ghi, không phải đo được (bản v3 Nano lại ghi `Đức Trí` là "Nam · Bắc" → nghe kỹ giọng
+miền); tên giọng có thể đổi giữa các bản SDK (có alias) → ghim phiên bản.
+
+Không nghe được thì kiểm khách quan: thời lượng, RMS, đỉnh, clip (`audition-log.json`), và đọc ngược bằng ASR
+(PhoWhisper-small, chỉ để QA, không nằm trong repo) để bắt từ bị nuốt/đọc sai.

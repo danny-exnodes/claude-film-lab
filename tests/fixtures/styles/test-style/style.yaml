@@ -1,0 +1,27 @@
+id: test-style
+name: Phong cách thử
+status: draft
+base: cinecode:ink-wash
+style_block: >-
+  ink wash painting on rice paper, soft graded washes
+negative: [text, signature, watermark]
+palette: {ink: "#1A1714", paper: "#F4EFE4", seal: "#B0302A"}
+light: "upper-left, soft"
+matte:
+  key_bg: "#FF00FF"
+  paper_bg: "#FFFFFF"
+  per_layer:
+    L1: {method: none}
+    L2: {method: luminance, low: 8, high: 245}
+    L3: {method: chroma, low: 20, high: 230}
+    L4: {method: rembg, low: 60, high: 200}
+    P:  {method: rembg, low: 60, high: 200}
+layers:
+  L1: {size: 2K, opaque: true, note: "background"}
+  L2: {size: 2K, note: "mid"}
+  L4: {size: 2K, note: "character"}
+  P:  {size: 2K, note: "parts"}
+models: {image: seedream-5-0-lite-260128, draft: dola-seedream-5-0-flash-260915, video: dreamina-seedance-2-5-260628}
+motion: [mist-bands]
+sound: {scale: "D minor pentatonic", instruments: [guqin], notes: ""}
+type: {latin: "Cormorant Garamond", cjk: "Noto Serif CJK TC"}

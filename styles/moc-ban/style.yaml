@@ -1,0 +1,73 @@
+# Style pack Mộc bản – NHÁP (status: draft). Tạo bằng cách chép styles/_template/ và điền, không sửa skill nào
+# (kiểm chứng tính mở rộng, issue #5). Chưa gen thử ảnh nào: mọi giá trị dưới đây là đề xuất ban đầu.
+# Giải thích từng khóa: styles/_template/style.yaml.
+
+# id: tên thư mục, kebab-case không dấu (CONVENTIONS §2). Phải trùng tên thư mục sau khi chép.
+id: moc-ban
+# name: tên hiển thị tiếng Việt.
+name: "Mộc bản"
+# status: draft khi đang thử; stable khi đã có ít nhất một bộ lớp được duyệt (ghi ở examples.md).
+status: draft
+# base: recipe cinecode kế thừa, dạng cinecode:<id> (xem: python3 <cinecode>/scripts/styles.py list),
+#       hoặc null nếu không có recipe gần. motion.md/sound.md chỉ ghi phần khác recipe.
+base: cinecode:woodcut   # /root/.claude/skills/cinecode/styles/woodcut.md
+
+# style_block: một câu tiếng Anh đặt đầu MỌI prompt ảnh (chỗ trống {style_block}). Mô tả chất liệu, kỹ thuật,
+#              bề mặt; không tên họa sĩ còn sống, không tên phim.
+style_block: >-
+  Black-and-white woodcut relief print on laid paper, carved knife and gouge lines that follow the form,
+  bold black masses and carved white light, slightly uneven ink with wood grain, high detail
+
+# negative: danh sách cụm tiếng Anh. Gửi qua --negative (chưa xác minh model có áp dụng) VÀ viết lại thành
+#           ràng buộc "no ..." trong prompts/*.txt.
+negative: [text, signature, watermark, frame, grey wash, gradient shading, photorealistic, 3d render]
+
+# palette: tên -> mã hex "#RRGGBB". Dùng cho code (sương, chữ, triện) và để duyệt màu tranh.
+palette:
+  ink: "#141210"      # mực in gần đen
+  paper: "#EDE4D0"    # giấy vergé ấm
+  plate: "#B5562B"    # bản màu duy nhất (đồng cháy) – chỉ cho vật "đang cháy" (recipe §3)
+
+# light: hướng sáng chung của series, tiếng Anh, chèn vào {light} trong mọi prompt.
+light: "low raking light from the upper right"
+
+# matte: cách tách alpha từng lớp (tools/layers/matte.py).
+matte:
+  key_bg: "#FF00FF"      # nền phẳng khi method=chroma (tách theo màu khóa)
+  paper_bg: "#FFFFFF"    # nền phẳng khi method=luminance (alpha = 1 - độ sáng)
+  per_layer:             # method: none | luminance | chroma | rembg ; low/high: ngưỡng dọn alpha 0-255
+    L1: {method: none}                          # nền đặc
+    L2: {method: luminance, low: 40, high: 215} # mộc bản chỉ có đen/trắng: ngưỡng cứng hơn thủy mặc
+    L3: {method: luminance, low: 40, high: 215}
+    L4: {method: rembg, low: 60, high: 200}     # nhân vật: thân đặc, viền cứng
+    P:  {method: rembg, low: 60, high: 200}     # bộ phận: như L4
+
+# layers: quy cách tạo ảnh. size truyền thẳng vào ark.py --size (2K, 2560x1440...). 4K/pro phải qua Lambda.
+#         note: ràng buộc bố cục của lớp; mẫu prompt trong prompts/ phải khớp note.
+layers:
+  L1: {size: 2560x1440, opaque: true, note: "nền xa; rộng hơn khung 20-30% để lia; nửa dưới ít chi tiết; không tiền cảnh, nhân vật, chữ, triện"}
+  L2: {size: 2560x1440, note: "tầng giữa; giữa khung trống; chân khối tan dần; không trời; không vẽ sương"}
+  L3: {size: 2560x1440, note: "tiền cảnh; mặt đứng đủ rộng cho nhân vật; cùng hướng sáng"}
+  L4: {size: 2K, note: "nhân vật toàn thân có lề; không bóng đổ, không mặt đất; nền trắng phẳng (rembg không cần màu khóa; viền đen trên trắng tách sạch)"}
+  P:  {size: 2K, note: "only the <part>, same position and scale; ảnh L4 làm --ref"}
+
+# models: id model Ark (docs/MODELS.md). image = mặc định, draft = nháp --fast, pro = qua Lambda, video = Seedance.
+models:
+  image: seedream-5-0-lite-260128
+  draft: dola-seedream-5-0-flash-260915
+  pro: dola-seedream-5-0-pro-260628
+  video: dreamina-seedance-2-5-260628
+
+# motion: id module có thật trong tools/compose/ (không bịa id mới ở đây; module mới viết ở tools/compose/ trước).
+motion: [strip-warp, embers]   # embers = đốm khắc (stab cuts) bay; module có ở tools/compose/ (#1)
+
+# sound: thang âm, nhạc cụ, ghi chú. Chỉ ghi phần chọn/khác so với recipe base.
+sound:
+  scale: "A aeolian"
+  instruments: [low strings, log drum, woodblock, frame drum, tam-tam]
+  notes: "Theo recipe woodcut §7; chưa chọn kỹ – nháp."
+
+# type: font chữ La-tinh (phải có dấu tiếng Việt) và font chữ Hán. Font phải cài được trong container.
+type:
+  latin: "Noto Serif"   # recipe §4 dùng IM Fell English nhưng font đó chỉ có bộ latin (Google Fonts, kiểm 2026-11-10), không đủ dấu tiếng Việt
+  cjk: "Noto Serif CJK TC"

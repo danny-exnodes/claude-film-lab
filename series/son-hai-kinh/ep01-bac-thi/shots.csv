@@ -1,0 +1,11 @@
+shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of
+s01,0,5.5,wide,drift,"Núi Cơ lúc chiều. Người gánh muối nhỏ (dưới 1/10 khung) bước trên đường đá, bên đường có bụi gai.",L1;L2;L3;L4,mist-bands;sun-glow,,gió núi; đòn gánh kẽo kẹt; zither gảy một nốt,
+s02,5.5,12.5,close,push-in,"Người gánh muối ngoái nhìn qua vai (motif lần 1). Sau lưng chỉ có sương.",L1;L3;L4,mist-bands,,tiếng thở; bước chân dừng rồi đi,
+s03,12.5,18.5,extreme-wide,pan-left,"Lia cuộn tranh phải sang trái qua núi Cơ: sườn nắng có vân ngọc ánh ochre, sườn râm là rừng cây lạ. Cột chữ Hán 其陽多玉 其陰多怪木.",L1;L2;L3,mist-bands;sun-glow,,bowed drone vào; sáo trúc một câu ngắn,
+s04,18.5,23.5,medium,static,"Rừng cây lạ. Một thân trắng lướt qua giữa các thân cây, chỉ thấy bóng và đầu các đuôi. Cột chữ 其狀如羊 九尾四耳.",L1;L2;L3;P1-duoi,mist-bands;strip-warp,,lá xào xạc; cành gãy một tiếng,
+s05,23.5,32,close,tilt-up,"Từ bàn tay siết đòn gánh lên mặt người gánh muối đang nhìn vào rừng. Cột chữ 其名曰猼訑 佩之不畏.",L1;L3;L4,mist-bands,,trống khung rất nhỏ như tim đập; nhạc thưa dần,
+s06,32,38.5,wide,static,"Rừng im. Sương dày lên giữa các thân cây; không gì chuyển động ngoài sương. Khoảng lặng thật trước lộ diện.",L1;L2;L3,mist-bands,,gió tắt dần tới im lặng,s04
+s07,38.5,43.5,extreme-close,static,"Cắt cứng: lưng Bác Thi. Các mắt trên lưng mở ra cùng lúc (đổi từ P2-mat-lung mắt nhắm sang L4 mắt mở) và nhìn thẳng ra khung. Cột chữ 其目在背.",L4;P2-mat-lung,,,một tiếng gong nhỏ; đuôi âm dài,
+s08,43.5,49.5,medium,static,"Bác Thi bước đi về phía trước, rời khung bên phải, không quay đầu; chín đuôi lay; mắt trên lưng vẫn nhìn về phía người (motif lần 2).",L1;L2;L3;L4;P1-duoi,mist-bands;strip-warp,"the goat-like beast walks slowly forward and out of frame right, head never turns, nine tails sway",móng trên đá; drone giữ một nốt,
+s09,49.5,53.5,insert,push-in,"Bụi gai bên đường vướng một túm lông trắng. Bàn tay người gánh muối gỡ ra, buộc vào đầu đòn gánh.",L3;L4,sun-glow,,sột soạt; nút buộc thắt lại,
+s10,53.5,60,wide,pull-out,"Trở lại khung đường đá của s01. Người gánh muối đi tiếp, không ngoái lại (motif lần 3). Sương khép dần, giữ hình 3 s cuối không lời.",L1;L2;L3;L4,mist-bands;sun-glow,,zither gảy lại nốt của s01; đuôi âm tới hết,s01

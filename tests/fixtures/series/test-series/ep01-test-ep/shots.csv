@@ -1,0 +1,5 @@
+shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of
+s01,0,8,wide,static,"Núi, sương sớm",L1;L2;L3,mist-bands,,wind,
+s02,8,15,medium,push-in,Nhân vật xuất hiện,L1;L2;L4;P1-duoi,strip-warp,,drum,
+s03,15,24.5,close,drift,Cận mặt,L1;L4,,slow blink,,
+s04,24.5,30,wide,pan-left,Toàn cảnh khép lại,L1;L2;L3,mist-bands,,wind,s01

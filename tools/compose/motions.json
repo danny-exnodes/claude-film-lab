@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "note": "Motion ids for style.yaml `motion:` and shots.csv `code_motion` (docs/CONVENTIONS.md §3, §6) -> the compose kit call that makes them. Read by people and checks; the kit itself does not read this file.",
+  "motions": {
+    "mist-bands": {"module": "mist.js", "call": "COMPOSE.mist.band / bands / open", "needs": []},
+    "embers": {"module": "embers.js", "call": "COMPOSE.embers.draw", "needs": []},
+    "sun-glow": {"module": "glow.js", "call": "COMPOSE.glow.sun", "needs": []},
+    "strip-warp": {"module": "strip-warp.js", "call": "PLATES.<id>.rig.warp", "needs": ["anchors box", "anchors points <name>_root, <name>_tip (or root: left|right|top|bottom)"]},
+    "eyelid": {"module": "eyelid.js", "call": "PLATES.<id>.rig.eyes", "needs": ["anchors box of the eye"]},
+    "breath": {"module": "breath.js", "call": "PLATES.<id>.rig.breath", "needs": ["anchors point for the pivot (or bottom)"]},
+    "parallax": {"module": "stage.js", "call": "COMPOSE.stage + PLATES.<id>.depth", "needs": []},
+    "push-in": {"module": "stage.js", "call": "COMPOSE.camera({ zoom, toward, events })", "needs": ["anchors point subject"]}
+  }
+}

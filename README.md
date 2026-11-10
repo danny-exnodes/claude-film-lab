@@ -45,4 +45,5 @@ tools/doctor.sh
 ## Cấu hình môi trường (trên claude.ai, làm một lần)
 - **Network secrets**: khóa Ark cho `ark.ap-southeast.bytepluses.com` (proxy chèn vào request).
 - **Connectors**: Google Drive (lưu sản phẩm), AWS (Lambda, khi triển khai).
-- **Setup script**: giữ phần đang có (ffmpeg, Chrome, skill `cinecode`); font CJK, `rembg`, PyYAML do hook cài.
+- **Setup script**: dán nội dung `docs/setup-script.sh` (cài ffmpeg, font, Chrome, `rembg`, cinecode và shim
+  `/opt/byteplus/ark.py` gọi sang `tools/ark.py` của repo). Hook khởi động vẫn kiểm tra lại font và gói Python.

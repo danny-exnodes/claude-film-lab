@@ -17,7 +17,7 @@ claude-film-lab/
 │   ├── settings.json · hooks/session-start.sh
 │   ├── skills/film-pipeline/ · film-script/ · film-prompt-layers/ · film-compose-shot/   # skill lõi
 │   ├── agents/film-<vai>.md                                                               # subagent theo vai
-│   └── agent-memory/<agent>/MEMORY.md                                                     # bài học (memory: project)
+│   └── agent-memory/<agent>/MEMORY.md                                                     # bài học (memory: project; agent cần Write/Edit trong tools)
 ├── styles/<style-id>/            # style pack dùng lại: STYLE.md, style.yaml, prompts/, motion.md, sound.md, examples.md
 ├── templates/episode/            # EPISODE.md, budget.yaml, shots.csv, prompts.csv mẫu
 ├── templates/project/            # PROJECT.md, SERIES.md, README_CauTruc.md, TienDo_SanXuat.csv mẫu (§11)

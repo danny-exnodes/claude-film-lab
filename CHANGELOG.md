@@ -49,6 +49,9 @@ Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi d
   đọc ledger, cộng tổng, ghi `pending` hoặc `refused-budget`; nén `--ref` làm trước khoá). N agent song song không còn
   vượt trần tối đa N−1 request; gỡ "giới hạn đã biết" ở CONVENTIONS §7 và WORKFLOW §4. Thêm test 8 tiến trình
   tranh trần 3 ảnh (#15 phần 1).
+- `film-reviewer` không ghi được `review/qc-<v>.md` và MEMORY.md (chỉ có `Read, Glob, Grep`; `memory: project` không tự
+  cấp công cụ ghi, đạo diễn phải lưu báo cáo tay). Thêm `Write, Edit` (vẫn không Bash), prompt giới hạn chỉ ghi
+  `review/qc-*.md` của tập và `.claude/agent-memory/film-reviewer/MEMORY.md`; sửa WORKFLOW §3, CONVENTIONS, film-pipeline.
 
 ### Gỡ bỏ
 - `series/son-hai-kinh/` khỏi repo (đã chuyển lên Drive `ClaudeFilmLab/SonHaiKinh/`).

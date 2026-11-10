@@ -213,7 +213,16 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   đọc `budget.yaml`) làm trước khi lấy khoá; lệnh gọi API làm sau khi mở khoá (khoá không giữ trong lúc gọi API).
   Nhờ vậy N agent chạy song song trong cùng container không vượt trần.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
-- Thư mục chứa file đầu ra được tạo trước khi kiểm ngân sách và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
+- Mã thoát của `image` / `video` / `lambda-job prepare`: **2** = bị từ chối tại chỗ, không gửi gì, không ghi dòng ledger,
+  không tạo thư mục đầu ra → sửa lệnh; **3** = vượt trần (dòng `refused-budget`); **1** = request đã rời máy → xem dòng
+  ledger của nó (có thể đã tính phí), không tự chạy lại.
+- `budget.yaml` chỉ nhận bốn khoá `images`, `video_seconds`, `models`, `ledger_required`; khoá lạ (vd. `image:`), trần
+  không phải số ≥ 0, file thiếu/rỗng/hỏng → mã 2. Request phải nằm dưới một trần (ảnh: `images` hoặc `models.<model>`;
+  video: `video_seconds` hoặc `models.<model>`), không thì mã 2 `has no cap for ...`.
+- File đầu ra đã tồn tại (kích thước > 0) → mã 2 `output exists`, kèm gợi ý `_v<NN>` còn trống: phiên bản chỉ tăng, không
+  ghi đè file đã trả tiền (`--overwrite` chỉ cho thử nhanh ngoài tập). Ledger có header khác chuẩn → mã 2
+  `ledger header mismatch`: sửa header hoặc kéo lại từ Drive, không xoá file.
+- Thư mục chứa file đầu ra được tạo sau các kiểm tra tại chỗ ở trên, trước khi ghi `pending` và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
   tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
 - `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
   poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.

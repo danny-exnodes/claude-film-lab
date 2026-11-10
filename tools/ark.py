@@ -3,14 +3,15 @@
 
   python3 ark.py ping [--all]
   python3 ark.py image "prompt" out.png [--model seedream-5-0-lite-260128 | --fast] [--size 2K|2560x1440] [--ref a.png ...]
-                       [--seed N] [--negative TEXT ...] [--guidance F] [--force]
+                       [--seed N] [--negative TEXT ...] [--guidance F] [--force] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video "prompt" out.mp4 [--image first.png] [--model dreamina-seedance-2-5-260628]
-                       [--ratio adaptive|16:9] [--duration 5] [--resolution 1080p] [--no-audio]
+                       [--ratio adaptive|16:9] [--duration 5] [--resolution 480p|720p|1080p (default 720p)]
+                       [--no-audio] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video --resume-task TASK_ID [out.mp4] --ledger L.csv
   python3 ark.py lambda-job prepare "prompt" out.png [--model dola-seedream-5-0-pro-260628] [--size 2K|4K] [--ref a.png ...]
-                       [--refs-dir DIR] [--payload FILE] --ledger L.csv (--budget B.yaml | --no-budget)
+                       [--refs-dir DIR] [--payload FILE] [--overwrite] --ledger L.csv (--budget B.yaml | --no-budget)
   python3 ark.py lambda-job finish --status-json jobs/<job_id>.json [--job ID] [--image downloaded.jpg] [--out out.png] --ledger L.csv
   python3 ark.py ledger-merge A.csv B.csv [...] -o OUT.csv
 
@@ -28,11 +29,19 @@ in the same exclusive ledger lock that appends the request's 'pending' row (note
 agents cannot overrun a cap. Each request then gets a final row
 (ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row.
 
+Exit codes of image / video / lambda-job prepare: 2 = refused locally (nothing sent, no ledger row, no output folder:
+fix the command), 3 = over a cap (refused-budget row), 1 = the request left this machine (see its ledger row).
+Local refusals, checked before anything is written or sent: a --size larger than 2K or a pro model on `image`
+(the proxy would cut it), a missing --ref / --image file, an output file that already exists (versions only go up;
+--overwrite for ad-hoc use), a budget.yaml with an unknown key, a bad value or no cap for the request, and a ledger
+whose header is not the ledger header.
+
 Credentials: in a Claude cloud session the agent proxy injects the real Ark key
 for ark.ap-southeast.bytepluses.com, so this script sends a placeholder. Outside
 that proxy, set ARK_API_KEY. Never print, log or search for the key.
 """
-import argparse, base64, csv, datetime, fcntl, io, json, mimetypes, os, re, signal, sys, time, uuid
+import argparse, base64, csv, datetime, difflib, fcntl, http.client, io, json, mimetypes, os, re, signal, sys, time
+import uuid
 import urllib.request, urllib.error
 
 BASE = os.environ.get("ARK_BASE", "https://ark.ap-southeast.bytepluses.com/api/v3")
@@ -47,6 +56,9 @@ def call(method, path, body=None, timeout=300):
             return json.loads(r.read())
     except urllib.error.HTTPError as e:
         sys.exit(f"HTTP {e.code}: {e.read().decode()[:600]}")
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as e:
+        # no traceback; the message never holds the request (its headers carry the key)
+        sys.exit(f"network error: {type(e).__name__}: {getattr(e, 'reason', None) or e}")
 
 
 def data_uri(path):
@@ -93,12 +105,18 @@ def ref_data_uri(path):
 # --- models available on this account (see Ark Console) --------------------
 IMAGE_DEFAULT = "seedream-5-0-lite-260128"        # Dola-Seedream-5.0-lite, 2K ~25s
 IMAGE_FAST = "dola-seedream-5-0-flash-260915"     # Dola-Seedream-5.0-flash
-IMAGE_SLOW = {"dola-seedream-5-0-pro-260628"}     # always > proxy cutoff
+IMAGE_SLOW = {"dola-seedream-5-0-pro-260628"}     # always > proxy cutoff (any '-pro-' id counts as slow)
 LAMBDA_DEFAULT = "dola-seedream-5-0-pro-260628"   # lambda-job: the model the Lambda worker exists for
 LAMBDA_NOTE = "lambda"                            # note tag of rows written by lambda-job
 VIDEO_DEFAULT = "dreamina-seedance-2-5-260628"    # Dreamina-Seedance-2.5
 PROXY_CUTOFF = 30  # seconds: the agent proxy cuts synchronous requests here
 POLL_SECONDS = 10  # video task polling interval
+POLL_RETRIES = 5   # consecutive failed status GETs tolerated before polling stops (the task keeps running)
+POLL_RETRYABLE = ("network error", "HTTP 429", "HTTP 5")   # prefixes of call()'s messages worth another GET
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_RETRY_SECONDS = 2
+MAX_PIXELS = 2048 * 2048 * 1.15   # `image --size WxH` above this is "larger than 2K" (2560x1440 fits)
+VIDEO_RESOLUTIONS = ("480p", "720p", "1080p")
 CUT_PREFIX = "HTTP 502 after"  # api() message for a request cut by the proxy
 
 
@@ -148,7 +166,30 @@ def save_image(raw, out):
 
 
 def download(url, out):
-    urllib.request.urlretrieve(url, out)
+    """Fetch url into out via <out>.part: `out` only ever holds a complete file. Up to DOWNLOAD_ATTEMPTS tries;
+    a failed download leaves neither a stub at `out` nor the .part (an older file at `out` is left as it was)."""
+    part = out + ".part"
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=300) as r, open(part, "wb") as f:
+                want, got = r.headers.get("Content-Length"), 0
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    got += len(chunk)
+            if got == 0 or (want is not None and got != int(want)):
+                raise OSError(f"incomplete download: {got} of {want or '?'} bytes")
+            os.replace(part, out)
+            return
+        except BaseException as e:
+            if os.path.exists(part):
+                os.remove(part)
+            if not isinstance(e, Exception) or attempt == DOWNLOAD_ATTEMPTS:
+                raise            # a signal (Interrupted) is never retried
+            print(f"download error ({attempt}/{DOWNLOAD_ATTEMPTS}): {err_note(e)}", file=sys.stderr)
+            time.sleep(DOWNLOAD_RETRY_SECONDS * attempt)
 
 
 # --- ledger and budget (docs/CONVENTIONS.md §7) ------------------------------
@@ -198,6 +239,24 @@ def _parse_rows(path, text):
     return rows
 
 
+def _header_ok(text):
+    """True when the first CSV record of a ledger's text is exactly LEDGER_FIELDS (BOM and CRLF tolerated)."""
+    return next(csv.reader(io.StringIO(text.lstrip("\ufeff"))), None) == LEDGER_FIELDS
+
+
+def _header_refusal(path):
+    usage_error(f"ledger header mismatch in {path}: repair it or pull it again; nothing sent")
+
+
+def check_ledger_header(path):
+    """Early (unlocked) copy of the check reserve() repeats inside the ledger lock: a refusal here happens before
+    the output folder exists. A ledger with a foreign header would be read as zero billed requests."""
+    if path and os.path.exists(path) and os.path.getsize(path):
+        with open(path, newline="", encoding="utf-8") as f:
+            if not _header_ok(f.readline()):
+                _header_refusal(path)
+
+
 def ledger_append(path, row):
     """Append one row under an exclusive flock; writes the header when the file is new/empty."""
     if not path:
@@ -223,19 +282,73 @@ def ledger_rows(path):
     return _parse_rows(path, text)
 
 
+BUDGET_KEYS = ("images", "video_seconds", "models", "ledger_required")
+
+
+def _is_cap(x):
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and x >= 0     # NaN fails x >= 0
+
+
 def load_budget(path):
+    """Read and validate budget.yaml; any problem is exit 2 `budget <path>: <reason>` (docs/CONVENTIONS.md §7).
+    A cap that is silently missing means "no cap", so nothing is guessed: only the four known keys, numbers >= 0."""
     if not path:
         return None
     import yaml
-    with open(path, encoding="utf-8") as f:
-        b = yaml.safe_load(f) or {}
+
+    def bad(reason):
+        usage_error(f"budget {path}: {reason}")
+    try:
+        with open(path, encoding="utf-8") as f:
+            b = yaml.safe_load(f)
+    except (OSError, UnicodeDecodeError) as e:
+        bad(f"cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})")
+    except yaml.YAMLError as e:
+        bad("invalid YAML (" + " ".join(str(e).split())[:160] + ")")
+    if b is None:              # an empty or comment-only file is an empty mapping: it has no cap at all
+        b = {}
     if not isinstance(b, dict):
-        sys.exit(f"budget {path}: expected a mapping with images / video_seconds / models")
-    models = b.get("models") or {}
+        bad("expected a mapping with " + " / ".join(BUDGET_KEYS))
+    for key in b:
+        if key not in BUDGET_KEYS:
+            close = difflib.get_close_matches(str(key), BUDGET_KEYS, n=1, cutoff=0.4)
+            bad(f"unknown key {str(key)!r}" + (f", did you mean {close[0]!r}?" if close else "")
+                + " (allowed keys: " + ", ".join(BUDGET_KEYS) + ")")
+    for key in ("images", "video_seconds"):
+        if key in b and not _is_cap(b[key]):
+            bad(f"{key!r} must be a number >= 0, not {b[key]!r}")
+    models = b.get("models")
+    if models is None:
+        models = {}
     if not isinstance(models, dict):
-        sys.exit(f"budget {path}: 'models' must be a mapping model-id -> cap")
+        bad("'models' must be a mapping model-id -> cap")
+    for model, cap in models.items():
+        if not _is_cap(cap):
+            bad(f"models.{model} must be a number >= 0, not {cap!r}")
+    if "ledger_required" in b and not isinstance(b["ledger_required"], bool):
+        bad(f"'ledger_required' must be true or false, not {b['ledger_required']!r}")
     return {"images": b.get("images"), "video_seconds": b.get("video_seconds"), "models": models,
             "ledger_required": bool(b.get("ledger_required"))}
+
+
+def checked_budget(a, kind, model):
+    """Everything about budget and ledger that can be refused (exit 2) before any work is done for a request:
+    the ledger header, budget.yaml itself, a cap that covers this request, ledger_required. Returns the budget
+    (None with --no-budget) for reserve()."""
+    check_ledger_header(a.ledger)
+    if a.no_budget:
+        return None
+    budget = load_budget(a.budget)
+    cap = "images" if kind == "image" else "video_seconds"
+    if budget[cap] is None and budget["models"].get(model) is None:
+        usage_error(f"budget {a.budget} has no cap for {kind} ({model}): add `{cap}:` or `models: {{{model}: N}}`")
+    if budget["ledger_required"] and not (os.path.exists(a.ledger) and os.path.getsize(a.ledger)):
+        print(f"error: {a.budget} has ledger_required: true but {a.ledger} does not exist (or is empty).\n"
+              "Pull the episode's ledger.csv from Drive first (04_SanXuat/ep<NN>-<slug>/ledger.csv, "
+              "docs/CONVENTIONS.md §11.6). Only when Drive has none yet (no image/video made for this episode): "
+              f"python3 tools/ark.py ledger-merge -o {a.ledger}", file=sys.stderr)
+        sys.exit(USAGE_EXIT)
+    return budget
 
 
 def _num(x):
@@ -247,7 +360,8 @@ def _num(x):
 
 def units(row):
     """Billing units of a ledger row: images for kind=image, seconds for kind=video."""
-    return _num(row.get("seconds")) if row.get("kind") == "video" else _num(row.get("count") or 1)
+    n = _num(row.get("seconds")) if row.get("kind") == "video" else _num(row.get("count") or 1)
+    return max(0.0, n)        # a negative row must never credit a cap
 
 
 def req_id(row):
@@ -299,33 +413,29 @@ def budget_check(budget, rows, req):
     return over
 
 
-def reserve(a, req, rid, tag=""):
+def reserve(a, req, rid, tag="", budget=None):
     """Atomic budget check + reservation (docs/CONVENTIONS.md §7), called just before the POST.
     One LOCK_EX on the ledger covers reading it, summing the billed requests and appending either the
     'pending' row (note req=<rid>) or, over a cap, the 'refused-budget' row (then exit 3). Parallel
     agents are serialised here, so they can no longer all pass the check before any pending row exists.
     Slow work (ref re-encoding, folders, loading budget.yaml) happens before the lock; the API call after it.
-    --no-budget: no check, the pending row is still written when a ledger is given.
-    budget.yaml `ledger_required: true`: the ledger file must already exist and be non-empty (pulled from Drive),
-    else exit 2 before anything is written - an empty ledger would restart every cap from zero."""
-    budget = None if a.no_budget else load_budget(a.budget)
+    `budget` is what checked_budget() returned (None with --no-budget: no check, the pending row is still written
+    when a ledger is given). checked_budget() has already refused, with exit 2 and before anything was written,
+    a bad budget.yaml, a request no cap covers and `ledger_required: true` without a ledger.
+    A non-empty ledger whose header is not LEDGER_FIELDS is refused here again, inside the lock (exit 2, no row):
+    it would be read as zero billed requests and restart every cap from zero."""
     pending = dict(req, status="pending", note="; ".join(x for x in (f"req={rid}", tag) if x))
     if not a.ledger:          # only possible with --no-budget (main() guarantees budget+ledger otherwise)
         return
-    if budget and budget.get("ledger_required") and not (os.path.exists(a.ledger) and os.path.getsize(a.ledger)):
-        print(f"error: {a.budget} has ledger_required: true but {a.ledger} does not exist (or is empty).\n"
-              "Pull the episode's ledger.csv from Drive first (04_SanXuat/ep<NN>-<slug>/ledger.csv, "
-              "docs/CONVENTIONS.md §11.6). Only when Drive has none yet (no image/video made for this episode): "
-              f"python3 tools/ark.py ledger-merge -o {a.ledger}", file=sys.stderr)
-        sys.exit(USAGE_EXIT)
     os.makedirs(os.path.dirname(os.path.abspath(a.ledger)), exist_ok=True)
     with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
-            over = []
-            if budget:
-                f.seek(0)
-                over = budget_check(budget, _parse_rows(a.ledger, f.read()), req)
+            f.seek(0)
+            text = f.read()
+            if text and not _header_ok(text):     # also with --no-budget: no row is appended to a foreign file
+                _header_refusal(a.ledger)
+            over = budget_check(budget, _parse_rows(a.ledger, text), req) if budget else []
             _write_locked(f, dict(req, status="refused-budget", note="; ".join(over)) if over else pending)
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
@@ -384,17 +494,58 @@ def ping(a):
     print(f"# Note: {IMAGE_DEFAULT} works but is not listed by /models.")
 
 
+VERSION_RE = re.compile(r"_v(\d+)$")
+NAMED_SIZE_RE = re.compile(r"(\d+)K", re.I)
+WXH_RE = re.compile(r"(\d+)x(\d+)", re.I)
+
+
+def need_files(paths):
+    """Exit 2 for an input file (--ref, --image) that is missing or unreadable, before anything is re-encoded."""
+    for path in paths or []:
+        if not (os.path.isfile(path) and os.access(path, os.R_OK)):
+            usage_error(f"no such file: {path}")
+
+
+def guard_output(path, overwrite=False):
+    """Exit 2 when the output file already exists (size > 0): a paid file is never replaced, versions only go up.
+    The message suggests the first free `_v<NN>` (same zero padding) when the name ends in one."""
+    if overwrite or not (os.path.exists(path) and os.path.getsize(path) > 0):
+        return
+    stem, ext = os.path.splitext(path)
+    m = VERSION_RE.search(stem)
+    if not m:
+        usage_error(f"output exists: {path} (versions only go up)")
+    n, width = int(m.group(1)), len(m.group(1))
+    while True:
+        n += 1
+        free = f"{stem[:m.start()]}_v{n:0{width}d}{ext}"
+        if not os.path.exists(free):
+            break
+    usage_error(f"output exists: {path} (versions only go up; next free: {free})")
+
+
+def guard_proxy_cut(model, size):
+    """Exit 2 for an `image` request the proxy would cut at ~30 s (and that may still be billed)."""
+    force = "" if os.environ.get("FILM_AGENT") else " (--force sends it anyway)"
+    lam = "the Lambda worker: `ark.py lambda-job prepare` (lambda/README.md)"
+    if model in IMAGE_SLOW or "-pro-" in model.lower():
+        usage_error(f"{model} always takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
+                    f"(possibly still billed). Run it on {lam}.{force}")
+    named, wxh = NAMED_SIZE_RE.fullmatch(size), WXH_RE.fullmatch(size)
+    if not (named or wxh):
+        usage_error(f"unknown --size {size}: use 1K, 2K or <W>x<H> (e.g. 2560x1440).{force}")
+    if (int(named.group(1)) not in (1, 2)) if named else (int(wxh.group(1)) * int(wxh.group(2)) > MAX_PIXELS):
+        usage_error(f"--size {size} is larger than 2K: it takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff "
+                    f"and fails with 502 (possibly still billed). Use 2K, or {lam}.{force}")
+
+
 def image(a):
     model = a.model or (IMAGE_FAST if a.fast else IMAGE_DEFAULT)
     if not a.force:
-        if model in IMAGE_SLOW:
-            sys.exit(f"{model} always takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
-                     "(possibly still billed). Run it on the Lambda worker: `ark.py lambda-job prepare` "
-                     "(lambda/README.md).")
-        if a.size.upper() == "4K":
-            sys.exit(f"--size 4K takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
-                     "(possibly still billed). Use 2K, or the Lambda worker: `ark.py lambda-job prepare` "
-                     "(lambda/README.md).")
+        guard_proxy_cut(model, a.size)
+    need_files(a.ref)
+    guard_output(a.out, a.overwrite)
+    budget = checked_budget(a, "image", model)
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
     make_out_dir(a.out)
     body = {"model": model, "prompt": a.prompt, "size": a.size, "response_format": "b64_json", "watermark": False}
@@ -408,7 +559,7 @@ def image(a):
         refs = [ref_data_uri(p) for p in a.ref]
         body["image"] = refs if len(refs) > 1 else refs[0]
     rid = new_req()
-    reserve(a, req, rid)      # slow ref re-encoding is done above, outside the ledger lock
+    reserve(a, req, rid, budget=budget)      # slow ref re-encoding is done above, outside the ledger lock
     print("model", model)
     try:
         r = api("POST", "/images/generations", body)
@@ -437,6 +588,9 @@ def image(a):
 def video(a):
     if a.resume_task:
         return resume_video(a)
+    need_files([a.image] if a.image else [])
+    guard_output(a.out, a.overwrite)
+    budget = checked_budget(a, "video", a.model)
     content = [{"type": "text", "text": a.prompt}]
     if a.image:
         content.append({"type": "image_url", "image_url": {"url": data_uri(a.image)}, "role": "first_frame"})
@@ -448,7 +602,7 @@ def video(a):
     if a.no_audio:
         body["generate_audio"] = False
     rid = new_req()
-    reserve(a, req, rid)
+    reserve(a, req, rid, budget=budget)
     print("model", a.model, "| ratio", ratio, "| audio", "off" if a.no_audio else "model default")
     try:
         task = api("POST", "/contents/generations/tasks", body)["id"]
@@ -487,11 +641,25 @@ def poll_and_save(a, req, rid, tag=""):
     """Poll task req['task_id'] until done, download the clip, append the final ledger row."""
     task = req["task_id"]
     pre = tag + "; " if tag else ""
+    resume_hint = (f"task {task} may still run; resume with: python3 tools/ark.py video --resume-task {task} "
+                   f"{a.out} --ledger {a.ledger or 'L.csv'}")
     logged = False
     try:
+        errors, wait = 0, POLL_SECONDS
         while True:
-            time.sleep(POLL_SECONDS)
-            t = api("GET", f"/contents/generations/tasks/{task}")
+            time.sleep(wait)
+            try:
+                t = api("GET", f"/contents/generations/tasks/{task}")
+            except SystemExit as e:
+                # One bad status GET must not turn a healthy paid task into a 'failed' row. Only transient
+                # failures are polled again; a signal (Interrupted, also a SystemExit) and a 4xx end it at once.
+                errors += 1
+                if isinstance(e, Interrupted) or errors > POLL_RETRIES or not str(e).startswith(POLL_RETRYABLE):
+                    raise
+                print(f"poll error ({errors}/{POLL_RETRIES}): {err_note(e)}", file=sys.stderr, flush=True)
+                wait = min(60, POLL_SECONDS * 2 ** errors)
+                continue
+            errors, wait = 0, POLL_SECONDS
             print("status", t["status"], flush=True)
             if t["status"] == "succeeded":
                 break
@@ -504,11 +672,14 @@ def poll_and_save(a, req, rid, tag=""):
     except BaseException as e:
         if not logged:  # polling broke off: the task may still run and be billed
             log_row(a, req, rid, "failed", f"{pre}polling stopped (task may still run): " + err_note(e))
-            print(f"task {task} may still run; resume with: python3 tools/ark.py video --resume-task {task} "
-                  f"{a.out} --ledger {a.ledger or 'L.csv'}", file=sys.stderr)
+            print(resume_hint, file=sys.stderr)
         raise
     usage = json.dumps(t.get("usage", {}), separators=(",", ":"))
-    url = t["content"]["video_url"]
+    url = (t.get("content") or {}).get("video_url")
+    if not url:
+        log_row(a, req, rid, "failed", f"{pre}no video_url in task: " + json.dumps(t)[:200], usage=usage)
+        print(f"task {task} succeeded but its status has no video_url.\n{resume_hint}", file=sys.stderr)
+        sys.exit(1)
     print("video host:", url.split("/")[2])
     try:
         download(url, a.out)
@@ -530,6 +701,12 @@ def lambda_prepare(a):
     """Budget check + pending row for an image the Lambda worker will make; prints the Invoke payload.
     Nothing is sent anywhere: the caller invokes the Lambda with the payload (AWS MCP run_script)."""
     model = a.model or LAMBDA_DEFAULT
+    need_files(a.ref)
+    if a.size.upper() in ("1K", "2K", "4K"):
+        print(f"note: --size {a.size} is a named size and does not fix the aspect ratio (Pro 2K returned 1664x2496 "
+              "on 2026-11-10); pass <W>x<H> for a layer plate.", file=sys.stderr)
+    guard_output(a.out, a.overwrite)
+    budget = checked_budget(a, "image", model)
     rid = new_req()
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
     make_out_dir(a.out)
@@ -546,7 +723,7 @@ def lambda_prepare(a):
             print("ref", desc, file=sys.stderr)
             uploads.append((local, f"refs/{rid}-{n}.jpg"))
         payload["ref_keys"] = [key for _, key in uploads]
-    reserve(a, req, rid, LAMBDA_NOTE)     # exit 3 over a cap: no payload is printed, so nothing can be invoked
+    reserve(a, req, rid, LAMBDA_NOTE, budget=budget)     # exit 3 over a cap: no payload is printed, so nothing can be invoked
     text = json.dumps(payload, ensure_ascii=False)
     if a.payload:
         os.makedirs(os.path.dirname(os.path.abspath(a.payload)), exist_ok=True)
@@ -558,6 +735,14 @@ def lambda_prepare(a):
     print(f"reserved req={rid} in {a.ledger}. Invoke the Lambda once with this payload, then:\n"
           f"  python3 tools/ark.py lambda-job finish --status-json <jobs/{rid}.json> --image <downloaded image>"
           f" --ledger {a.ledger}", file=sys.stderr)
+
+
+def redact(text):
+    """Cut a worker error from its first 'Bearer ' on: a mis-pasted key echoed by the HTTP client must not
+    reach stderr or the ledger."""
+    text = "" if text is None else str(text)
+    cut = text.find("Bearer ")
+    return text if cut < 0 else text[:cut] + "Bearer <redacted>"
 
 
 def lambda_finish(a):
@@ -584,9 +769,10 @@ def lambda_finish(a):
     secs = f"{LAMBDA_NOTE}; seconds={st.get('seconds', '?')}"
     usage = json.dumps(st.get("usage") or {}, separators=(",", ":"))
     if status == "failed":
+        error = redact(st.get("error"))
         if not done:
-            log_row(a, req, job, "failed", f"{secs}; {str(st.get('error', ''))[:240]}")
-        print(f"job {job} FAILED: {st.get('error')}\nIt may still have been billed; it stays counted. Not retried.",
+            log_row(a, req, job, "failed", f"{secs}; {error[:240]}")
+        print(f"job {job} FAILED: {error}\nIt may still have been billed; it stays counted. Not retried.",
               file=sys.stderr)
         sys.exit(1)
     final = dict(count=max(1, len(st.get("keys") or [])), usage=usage)
@@ -688,6 +874,15 @@ def add_cost_args(sp):
                          "(env FILM_BUDGET). Required together with --ledger unless --no-budget")
     sp.add_argument("--no-budget", action="store_true",
                     help="run without a budget (ad-hoc tests in the main session only; --ledger optional)")
+    sp.add_argument("--overwrite", action="store_true",
+                    help="replace an existing output file (ad-hoc use; a plate or clip gets a new _v<NN> instead)")
+
+
+def positive_int(text):
+    n = int(text)
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be >= 1, not {n}")
+    return n
 
 
 p = argparse.ArgumentParser(description="BytePlus ModelArk helper")
@@ -697,14 +892,15 @@ pg.add_argument("--all", action="store_true", help="also show Shutdown models")
 i = sp.add_parser("image"); i.add_argument("prompt"); i.add_argument("out")
 i.add_argument("--model", default=None, help=f"default {IMAGE_DEFAULT}")
 i.add_argument("--fast", action="store_true", help=f"use {IMAGE_FAST}")
-i.add_argument("--size", default="2K")
+i.add_argument("--size", default="2K", help="1K, 2K or <W>x<H> up to about 2K (default 2K); larger: lambda-job")
 i.add_argument("--ref", nargs="*", help=f"reference image(s); re-encoded in memory to JPEG q{REF_QUALITY}, "
                f"long edge <= {REF_LONG_EDGE}, alpha flattened onto white (files on disk untouched)")
 i.add_argument("--seed", type=int, default=None, help="sent as 'seed' (model support unverified)")
 i.add_argument("--negative", action="append", metavar="TEXT",
                help="repeatable; joined with ', ' into 'negative_prompt' (model support unverified)")
 i.add_argument("--guidance", type=float, default=None, help="sent as 'guidance_scale' (model support unverified)")
-i.add_argument("--force", action="store_true", help="allow 4K / slow models despite the proxy cutoff")
+i.add_argument("--force", action="store_true",
+               help="send a size above 2K, an unknown size or a pro model despite the proxy cutoff")
 add_cost_args(i)
 v = sp.add_parser("video")
 v.add_argument("prompt", nargs="?", help="text prompt (omit with --resume-task)")
@@ -712,7 +908,8 @@ v.add_argument("out", nargs="?", help="output .mp4 (with --resume-task: optional
 v.add_argument("--image")
 v.add_argument("--model", default=VIDEO_DEFAULT)
 v.add_argument("--ratio", default=None, help="default: adaptive with --image, else 16:9")
-v.add_argument("--duration", type=int, default=5); v.add_argument("--resolution", default="1080p")
+v.add_argument("--duration", type=positive_int, default=5, help="seconds, >= 1 (default 5)")
+v.add_argument("--resolution", default="720p", choices=VIDEO_RESOLUTIONS, help="default 720p")
 v.add_argument("--no-audio", action="store_true", help="send generate_audio=false")
 v.add_argument("--resume-task", metavar="TASK_ID", default=None,
                help="resume polling + download of an existing task (no new request, no budget check; needs --ledger)")

@@ -1,7 +1,7 @@
 # Ví dụ đã duyệt – Thủy mặc
 
-**v1.0.0: chưa có prompt nào được duyệt.** Bộ 4 lớp Bác Thi (`projects/son-hai-kinh/ep01-bac-thi/`, trên Drive `SonHaiKinh/03_KichBan/ep01-bac-thi/`) sẽ là ví dụ đầu tiên
-sau khi người dùng duyệt ở phiên chính. Không commit ảnh; chỉ ghi chữ và link Drive.
+**Chưa có prompt nào được duyệt.** Ví dụ đầu tiên sẽ lấy từ tập đầu tiên làm bằng style này, sau khi người dùng
+duyệt ở phiên chính (ghi đường dẫn tập dạng `projects/<project>/ep<NN>-<slug>/` và link Drive). Không commit ảnh; chỉ ghi chữ và link Drive.
 
 ## Cách ghi một ví dụ
 

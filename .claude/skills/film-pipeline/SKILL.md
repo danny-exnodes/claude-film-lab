@@ -41,20 +41,24 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
    ngân sách cộng dồn từ ledger); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
    Ảnh khóa, gói shot, tài liệu gốc: chỉ kéo khi cần.
-3. Chụp dấu: `find projects/<project> -type f ! -name .pulled.sha256 -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`.
+3. Chụp dấu và giờ kéo: `find projects/<project> -type f ! -name '.*' -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`;
+   `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`.
 4. Có file trong `01_TaiLieuGoc/_ChoPhanLoai/`: đặt tên theo §11.4, chuyển vào đúng thư mục, ghi `DanhMuc.csv`, báo người dùng.
 
 **Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
 1. File đã đổi/mới: dòng `>` của
-   `find projects/<project> -type f ! -name .pulled.sha256 -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`;
-   thêm `ledger.csv` nếu khâu có tạo ảnh/video.
+   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`;
+   thêm `ledger.csv` nếu khâu có tạo ảnh/video (`TienDo_SanXuat` theo bước 3).
 2. Mỗi file: `create_file` vào thư mục Drive tương ứng (tham chiếu `sha256:<hex>:<đường dẫn tuyệt đối>`,
-   `disableConversionToGoogleType: true`); thành công rồi mới `update_file` chuyển bản cũ vào `99_LuuTru/`, đổi tên
+   `disableConversionToGoogleType: true`), ghi `<giờ UTC> <đường dẫn> <ID mới>` vào `projects/<project>/.pushed.log`;
+   thành công rồi mới tìm bản cũ bằng `search_files` (`parentId = '<id>' and title = '<tên>' and trashed = false`) và
+   `update_file` chuyển **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`, đổi tên
    `<thư mục logic, / → __>__<tên>_<YYYYMMDD-HHMM>.<đuôi>` (CONVENTIONS §11.6 – connector không ghi đè nội dung được).
-   Người dùng sửa trên Drive sau lúc kéo → tải về, gộp trước khi đẩy.
+   File trên Drive có `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về,
+   gộp trước khi đẩy.
 3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
    theo §11.6 bước 5.
-4. Chụp dấu lại; ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+4. Cập nhật dấu chỉ cho file đã tải lên thành công (thay đúng dòng trong `.pulled.sha256`); ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
 
 ## 1. Việc đầu tiên mỗi phiên
 

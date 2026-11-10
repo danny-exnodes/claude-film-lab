@@ -11,7 +11,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 1. Mở phiên Claude Code cloud với **môi trường Film Lab** và repo này làm nguồn.
 2. Hook khởi động tự cài phụ thuộc, trỏ `/opt/byteplus/ark.py` vào `tools/ark.py`, đặt `CINECODE_FORMATS`
    và in báo cáo kiểm tra môi trường.
-3. Nói với Claude, ví dụ: *"Làm tập 1 Sơn Hải Kinh"* hoặc *"Tiếp tục tập ep01-bac-thi"*. Skill `film-pipeline`
+3. Nói với Claude, ví dụ: *"Làm tập 1 Sơn Hải Kinh"* hoặc *"Tiếp tục tập ep01-<slug>"*. Skill `film-pipeline`
    kéo dự án từ Drive (`00_QuanLy/PROJECT.md` trước), đọc `EPISODE.md`, giao việc cho các agent theo vai, dừng ở 4 cổng
    duyệt (kịch bản, ảnh khóa, bản nháp, bản cuối) và đẩy kết quả lên Drive sau mỗi khâu.
 
@@ -43,7 +43,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 ```bash
 python3 -m unittest discover -s tests
 python3 tools/check_episode.py style styles/thuy-mac
-python3 tools/check_episode.py episode projects/son-hai-kinh/ep01-bac-thi   # sau khi kéo dự án từ Drive
+python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>   # sau khi kéo dự án từ Drive
 tools/doctor.sh
 ```
 Đổi schema → sửa `docs/CONVENTIONS.md` trước. Thay đổi ghi vào `CHANGELOG.md`.

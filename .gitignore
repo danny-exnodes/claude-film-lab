@@ -7,4 +7,9 @@ __pycache__/
 *.lock
 
 # Bản làm việc của dự án phim: nguồn gốc nằm trên Google Drive (docs/CONVENTIONS.md §11), không commit
-projects/
+/projects/
+# Bố cục cũ trước v1.1: dữ liệu dự án không bao giờ vào repo
+/series/
+
+# Worktree git của agent (Claude Code)
+/.claude/worktrees/

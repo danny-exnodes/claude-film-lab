@@ -310,6 +310,7 @@ drive:
 | `00_QuanLy/TienDo_SanXuat` (Sheet) | `projects/<project>/TienDo_SanXuat.csv` | kéo bằng xuất CSV; cập nhật sau mỗi khâu (§11.6) |
 | `00_QuanLy/README_CauTruc` (Doc) | – | tạo một lần từ `templates/project/README_CauTruc.md` |
 | `01_TaiLieuGoc/<…>` | chữ: `projects/<project>/sources/<…>` · ảnh, PDF: `out/<project>/sources/<…>` | kéo khi cần; chỉ thêm, không sửa file gốc |
+| `01_TaiLieuGoc/DanhMuc.csv` (ngoại lệ: được sửa) | `projects/<project>/sources/DanhMuc.csv` (mẫu `templates/project/DanhMuc.csv`) | thêm một dòng cho mỗi tài liệu mới; đẩy như file chữ (§11.6) |
 | `02_KinhThu/SERIES.md` | `projects/<project>/SERIES.md` | kéo đầu phiên; đẩy khi đổi |
 | `02_KinhThu/NhanVat/<c>/CHARACTER.md` | `projects/<project>/characters/<c>/CHARACTER.md` | như trên |
 | `02_KinhThu/NhanVat/<c>/<ảnh khóa>` | `out/<project>/characters/<c>/` | kéo khi cần làm `--ref`; đẩy sau G2 |
@@ -353,30 +354,38 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
    cũ vào `99_LuuTru/` theo bước 3 của mục đẩy.
-4. Chụp dấu bản vừa kéo:
-   `find projects/<project> -type f ! -name .pulled.sha256 -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`
+4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
+   `find projects/<project> -type f ! -name '.*' -print0 | sort -z | xargs -0 sha256sum > projects/<project>/.pulled.sha256`
+   và `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`. Mọi lần tải lên trong phiên ghi một dòng
+   `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log`.
 
 **Đẩy (sau mỗi khâu, sau mỗi lần sửa theo ghi chú, và trước khi dừng phiên – container bị thu hồi khi rảnh):**
 1. File chữ mới hoặc đã đổi = các dòng `>` của
-   `find projects/<project> -type f ! -name .pulled.sha256 -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`.
+   `find projects/<project> -type f ! -name '.*' ! -name TienDo_SanXuat.csv -print0 | sort -z | xargs -0 sha256sum | diff projects/<project>/.pulled.sha256 - | grep '^>'`
+   (`TienDo_SanXuat.csv` đi theo bước 5, không tải lên như file chữ).
    Cộng `out/<project>/ep<NN>/ledger.csv` nếu khâu vừa rồi có tạo ảnh/video.
 2. Mỗi file: `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
    `sha256:<hex>:<đường dẫn tuyệt đối>` (hex từ `sha256sum`), `contentMimeType` (`.md` `text/markdown`, `.csv` `text/csv`,
    `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`.
 3. **Quy tắc phiên bản (chọn vì đơn giản và chắc):** connector không ghi đè được nội dung file (`update_file` chỉ sửa
    tên, thư mục, thuộc tính), nên lịch sử phiên bản của Drive không dùng được. Mỗi lần đẩy là **file mới**; chỉ sau khi
-   tải lên thành công, bản cũ (ID có từ lúc kéo) được `update_file` chuyển vào `99_LuuTru/` (`parentId`) và đổi tên
+   tải lên thành công, tìm bản cũ ngay lúc đó bằng `search_files` (`parentId = '<id thư mục>' and title = '<tên file>'
+   and trashed = false`) – không dựa vào ID nhớ từ lúc kéo, vì đẩy nhiều lần trong phiên hoặc ngữ cảnh bị nén sẽ làm
+   mất ID – rồi **mọi kết quả trừ ID vừa tạo** được `update_file` chuyển vào `99_LuuTru/` (`parentId`) và đổi tên
    `<đường dẫn logic của thư mục, '/' → '__'>__<tên không đuôi>_<YYYYMMDD-HHMM>.<đuôi>` (giờ UTC lúc thay), vd.
    `03_KichBan__ep01-bac-thi__script_20261110-1530.md`. Kết quả: mỗi thư mục luôn có đúng một bản hiện hành mỗi tên;
    mọi bản cũ nằm ở `99_LuuTru/`, tìm lại được theo tên. Tải lên trước, chuyển sau: bị ngắt giữa chừng chỉ để lại
    bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
-4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau lúc kéo → tải về, so với bản làm
-   việc, gộp (giữ chữ của người dùng), xung đột thì hỏi người dùng; rồi mới đẩy.
+4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
+   trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
+   dùng), xung đột thì hỏi người dùng; rồi mới đẩy.
 5. `TienDo_SanXuat` (Sheet): sửa dòng của tập trong `projects/<project>/TienDo_SanXuat.csv` (cột theo
    `templates/project/TienDo_SanXuat.csv`). Có công cụ sửa Google Sheets thì sửa đúng dòng đó tại chỗ (giữ link); không
    có thì tải CSV lên **có** chuyển đổi (Sheet mới tên `TienDo_SanXuat` trong `00_QuanLy/`), chuyển Sheet cũ vào
    `99_LuuTru/` theo bước 3, cập nhật `drive.files` và đẩy `PROJECT.md`.
-6. Chụp dấu lại (bước 4 của mục kéo); ghi giờ đẩy vào cột cuối dòng `## Nhật ký` của EPISODE.md.
+6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (thay đúng dòng của file đó trong `.pulled.sha256`;
+   file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách); ghi giờ đẩy vào cột cuối dòng
+   `## Nhật ký` của EPISODE.md.
 7. Mỗi lần tải lên người dùng duyệt: gom file của một khâu đẩy một lượt, báo trước danh sách.
 
 **Media:** gói shot, bản nháp, bản cuối, ảnh khóa chỉ đẩy sau khi người dùng duyệt (§9); đã có trên Drive thì kéo về

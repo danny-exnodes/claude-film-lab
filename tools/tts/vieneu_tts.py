@@ -23,7 +23,7 @@ abbreviations (TCN, SCN), Roman numerals and ordinals (thế kỷ IV -> thế k�
 (km, m, kg, °C, ...), decimals (3,5), thousands (3.000) and plain numbers/years, read the Southern way
 (ngàn, lẻ) with --numbers nam (default) or the Northern way (nghìn, linh) with --numbers bac.
 
-Licence rule (docs/TTS.md): only Apache-2.0 models whose preset voices allow commercial use are wired in:
+Licence rule (tools/tts/README.md): only Apache-2.0 models whose preset voices allow commercial use are wired in:
 v3 Turbo (final) and v3 Nano (fast draft). VieNeu-TTS 0.3B and the legacy 0.5B presets (voices.json says
 CC BY-NC 4.0) are not offered. The library's audio watermark (resemble-perth) is applied whenever it is installed.
 
@@ -548,7 +548,7 @@ def run_audition(a, lines, pron, make_engine):
         json.dump(log, f, ensure_ascii=False, indent=1)
     tot_a = sum(r["duration_s"] for r in rows)
     tot_c = sum(r["compute_s"] for r in rows)
-    print(f"{len(rows)} take(s), {tot_a:.1f} s audio in {tot_c:.1f} s compute = {tot_a / tot_c:.2f} s audio per s"
+    print(f"{len(rows)} take(s), {tot_a:.1f} s audio in {tot_c:.1f} s compute = {tot_a / max(tot_c, 1e-6):.2f} s audio per s"
           f" · log {os.path.join(a.out, 'audition-log.json')} · the user picks by ear")
     return 0
 

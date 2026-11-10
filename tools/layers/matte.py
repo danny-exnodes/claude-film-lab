@@ -17,8 +17,8 @@ Then cleanup: alpha < low -> 0, alpha > high -> 255, linear in between.
 
 With --style/--layer the method, low/high and key/paper colours come from style.yaml matte.per_layer
 (layer codes P1-x map to P). Explicit flags override the style. Without --layer the code is read from
-the IN file name when it follows ep<NN>_s<NN>_<layer>_... . --preview composites the result over pure
-red for checking edges. OUT is always an RGBA PNG.
+the IN file name when it follows ep<NN>_s<NN>_<layer>_... or q<NN>t<NN>_s<NN>_<layer>_... . --preview composites the
+result over pure red for checking edges. OUT is always an RGBA PNG.
 """
 import argparse, os, re, sys
 
@@ -28,7 +28,7 @@ from PIL import Image, ImageFilter
 METHODS = ("none", "luminance", "chroma", "rembg")
 CHROMA_FULL = 160.0   # RGB distance from the key at which a pixel is fully opaque (before cleanup)
 DESPILL_RADIUS = 3    # px: despill pixels within this distance of a non-opaque pixel
-RE_LAYER = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_")
+RE_LAYER = re.compile(r"^(?:ep\d{2}|q\d{2}t\d{2})_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_")
 
 
 def hex_rgb(s):

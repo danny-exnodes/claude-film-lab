@@ -9,6 +9,8 @@ description: >-
 
 # film-prompt-layers – prompt và lớp tranh
 
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
+
 Ai dùng: `film-art-director` (khâu 3: viết thiết kế và prompt, **không tạo ảnh**), `film-plate-maker` (khâu 4–5: tạo ảnh,
 tách nền, neo). Hợp đồng file: `docs/CONVENTIONS.md` §2, §3, §6, §7. Model và giới hạn: `docs/MODELS.md`.
 

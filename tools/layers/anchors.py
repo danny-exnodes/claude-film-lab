@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Anchor points for layer images (projects/<project>/ep<NN>-<slug>/anchors.json, docs/CONVENTIONS.md §4).
+"""Anchor points for layer images (projects/<project>/<episode folder>/anchors.json, docs/CONVENTIONS.md §4).
 
   python3 tools/layers/anchors.py set  ANCHORS_JSON FILE NAME X Y     add or update a point (pixel coords)
   python3 tools/layers/anchors.py mark IMAGE ANCHORS_JSON OUT         draw labelled crosshairs for IMAGE's points
@@ -13,7 +13,7 @@ import argparse, contextlib, fcntl, json, os, re, sys, tempfile
 
 from PIL import Image, ImageDraw, ImageFont
 
-RE_LAYER_FILE = re.compile(r"^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
+RE_LAYER_FILE = re.compile(r"^(?:ep\d{2}|q\d{2}t\d{2})_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
 
 
 def load(path):

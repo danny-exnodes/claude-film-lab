@@ -12,7 +12,7 @@ format: {width: 1920, height: 1080, fps: 24}
 # <Tên dự án> (<tên gốc nếu có>)
 
 <!-- Một đoạn: mỗi tập dài bao nhiêu, kể về cái gì, dựng từ nguồn nào. Phong cách: styles/<style-id>/.
-     Media: out/<project>/ep<NN>/. -->
+     Media: out/<project>/<ep<NN>|q<NN>t<NN>>/. -->
 
 ## Khán giả và lời hứa của series
 

@@ -5,10 +5,12 @@ description: >-
   độ sâu, máy quay tiến về chủ thể, rung nhẹ, sương cuộn, tàn lửa, quầng sáng, đuôi/tóc/vạt áo đung đưa, mắt nhắm mở,
   thở; clip Seedance đã tách nền cho cử động lớn; âm thanh; render stills → draft → final; gói và lưu Drive. Dùng khi
   người dùng nói "dựng shot", "ghép lớp", "ghép tranh", "parallax", "làm sống tranh", "cho con thú cử động",
-  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<project>/ep<NN>/plates/.
+  "render tập", "bản nháp tập", "compose shot", hoặc khi tập đã có lớp tranh duyệt trong out/<project>/ep<NN>/plates/ hoặc out/<project>/q<NN>t<NN>/plates/.
 ---
 
 # film-compose-shot
+
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
 
 Biến các lớp tranh đã duyệt (L1 nền, L2 tầng giữa, L3 tiền cảnh, L4 nhân vật, P bộ phận) thành shot chuyển động,
 rồi thành bản dựng của cả tập, bằng **cinecode Quick mode** + bộ mã dùng chung `tools/compose/`.

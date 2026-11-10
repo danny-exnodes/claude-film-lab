@@ -451,7 +451,8 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `99_LuuTru/` theo bước 3, cập nhật `drive.files` và đẩy `PROJECT.md`.
 6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (`record` ở bước 2 thay đúng dòng của file đó trong
    `.pulled.sha256`; file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách – không chạy lại
-   `snapshot` sau khi đẩy). `plan` chạy lại phải in `Nothing to push.` (trừ file cố ý chưa đẩy); ghi giờ đẩy vào cột cuối dòng
+   `snapshot` sau khi đẩy). `plan` chạy lại phải in `Nothing to push.` (trừ file cố ý chưa đẩy; còn plate/clip chưa nằm trong gói nào thì
+   dòng đó là `Nothing to push (text). N plate/clip file(s) are in no bundle…` – media ấy chỉ có trong container); ghi giờ đẩy vào cột cuối dòng
    `## Nhật ký` của EPISODE.md.
 7. Mỗi lần tải lên người dùng duyệt: gom file của một khâu đẩy một lượt, báo trước danh sách.
 

@@ -72,7 +72,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
    theo §11.6 bước 5.
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy
-   lại phải in `Nothing to push.` trừ file cố ý chưa đẩy. Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+   lại phải in `Nothing to push.` trừ file cố ý chưa đẩy (`Nothing to push (text). N plate/clip file(s) are in no
+   bundle…` = chữ đã đẩy hết nhưng còn plate/clip chỉ có trong container: báo người dùng trước khi dừng). Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
 
 ## 1. Việc đầu tiên mỗi phiên
 

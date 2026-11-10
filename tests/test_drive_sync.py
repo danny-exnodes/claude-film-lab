@@ -446,6 +446,7 @@ class TestSnapshotGuard(DriveSyncCase):
 
     def test_pulled_updates_one_line(self):
         self.snapshot()
+        (self.pd / ".pulled.at").write_text("2026-11-01T00:00:00Z\n")     # an old pull: a rewrite would show
         at = (self.pd / ".pulled.at").read_bytes()
         self.write("ep01-bac-thi/script.md", "[00:05] them\n", append=True)
         research = self.write("ep01-bac-thi/research.md", "# keo sau\n")
@@ -711,6 +712,14 @@ class TestPlanHygiene(DriveSyncCase):
         self.assertIn("script.md.orig", out)
         self.assertNotIn("NEW", out)
         self.assertNotIn("UNMAPPED", out)
+
+    def test_old_snapshot_lines_of_temp_files_are_not_deleted(self):
+        self.snapshot("--include-out", "out/demo")
+        with open(self.pd / ".pulled.sha256", "a") as f:                 # lines written by an older snapshot
+            f.write("0" * 64 + "  projects/demo/ep01-bac-thi/script.md.b64\n")
+            f.write("0" * 64 + "  out/demo/ep01/ledger.drive-1.csv\n")
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual((code, plan["deleted"], plan["actions"]), (0, [], []))
 
     def test_changed_paragraph_only_with_a_changed_file(self):
         self.snapshot()

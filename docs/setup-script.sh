@@ -60,12 +60,29 @@ else
     && log "u2net: ok" || log "u2net: FAILED (downloads on first use)"
 fi
 
-# 4. The cinecode skill (fresh clone, or fast-forward when the container already has it)
-if [ -d /root/.claude/skills/cinecode/.git ]; then
-  timeout 60 git -C /root/.claude/skills/cinecode pull -q --ff-only 2>/dev/null && log "cinecode: updated" || log "cinecode: kept"
+# 4. The cinecode skill, pinned to the commit the repo's tools/compose/inline.py is tested against
+#    (tools/compose/cinecode.ref holds the same id; tests/test_compose.py fails when the two differ).
+#    Never `git pull`: a template change upstream would only show up in the middle of composing a shot.
+#    To move the pin: docs/RUNBOOK.md, "cinecode đổi template".
+CINECODE_REF="${CINECODE_REF:-67f9807112b97ae253d4a5f0eccaccc46c3b2633}"
+CINE=/root/.claude/skills/cinecode
+if [ "$(git -C "$CINE" rev-parse HEAD 2>/dev/null)" = "$CINECODE_REF" ]; then
+  log "cinecode: already at ${CINECODE_REF:0:7}"
 else
-  timeout 90 git clone -q --depth 1 https://github.com/sarpstar/cinecode /root/.claude/skills/cinecode 2>/dev/null \
-    && log "cinecode: ok" || log "cinecode: FAILED"
+  if [ ! -d "$CINE/.git" ]; then
+    mkdir -p "$CINE" && git -C "$CINE" init -q && git -C "$CINE" remote add origin https://github.com/sarpstar/cinecode
+  fi
+  if timeout 90 git -C "$CINE" fetch -q --depth 1 origin "$CINECODE_REF" 2>/tmp/setup-cinecode.log \
+     && git -C "$CINE" checkout -q -f --detach FETCH_HEAD 2>>/tmp/setup-cinecode.log; then
+    log "cinecode: ok (pinned ${CINECODE_REF:0:7})"
+  elif [ -f "$CINE/SKILL.md" ]; then
+    log "cinecode: pin fetch FAILED, kept $(git -C "$CINE" rev-parse --short HEAD 2>/dev/null) (doctor warns; see /tmp/setup-cinecode.log)"
+  else
+    # Last resort so the skill exists at all: upstream HEAD, unpinned. doctor.sh then warns and tests inline.py on it.
+    rm -rf "$CINE"
+    timeout 90 git clone -q --depth 1 https://github.com/sarpstar/cinecode "$CINE" 2>>/tmp/setup-cinecode.log \
+      && log "cinecode: UNPINNED upstream HEAD (pin fetch failed; doctor warns)" || log "cinecode: FAILED"
+  fi
 fi
 
 # 5. BytePlus ModelArk client. The real client is the repo's tools/ark.py (models, budget and ledger rules);

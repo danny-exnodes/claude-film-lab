@@ -18,7 +18,26 @@ n=$(fc-list 2>/dev/null | grep -ci "Noto Serif CJK"); [ "$n" -gt 0 ] && ok font-
 v=$(python3 -c "import importlib.metadata as m, importlib.util as u; assert u.find_spec('rembg'); print(m.version('rembg'))" 2>/dev/null) && ok rembg "$v" || bad rembg "missing: python3 -m pip install -r requirements.txt"
 v=$(python3 -c "import yaml; print(yaml.__version__)" 2>/dev/null) && ok pyyaml "$v" || bad pyyaml "missing: python3 -m pip install -r requirements.txt"
 { [ -f /root/.rembg/models/u2net/u2net.onnx ] || [ -f ~/.u2net/u2net.onnx ]; } && ok rembg-model "u2net cached" || warn rembg-model "u2net not cached (downloads on first use)"
-[ -f /root/.claude/skills/cinecode/SKILL.md ] && ok skill-cinecode "present" || bad skill-cinecode "/root/.claude/skills/cinecode/SKILL.md missing"
+# cinecode is pinned (tools/compose/cinecode.ref = CINECODE_REF in docs/setup-script.sh). A different HEAD is only a
+# warning; what decides is the compose-kit check below, which runs inline.py on the template that is installed.
+CINE=/root/.claude/skills/cinecode
+pin=$(tr -d '[:space:]' < "$LAB/tools/compose/cinecode.ref" 2>/dev/null)
+if [ -f "$CINE/SKILL.md" ]; then
+  head=$(git -C "$CINE" rev-parse HEAD 2>/dev/null)
+  if [ -n "$head" ] && [ "$head" = "$pin" ]; then ok skill-cinecode "pinned ${pin:0:7}"
+  elif [ -z "$head" ]; then warn skill-cinecode "present, not a git clone: cannot compare with pin ${pin:0:7}"
+  else warn skill-cinecode "HEAD ${head:0:7} differs from pin ${pin:0:7} (docs/RUNBOOK.md: cinecode đổi template)"; fi
+  # compose kit against the installed Quick template (free, no browser): lint, then --init on a temporary copy
+  tmpd=$(mktemp -d)
+  if ! out=$(python3 "$LAB/tools/compose/inline.py" --lint 2>&1); then bad compose-kit "$(echo "$out" | head -1 | cut -c1-120)"
+  elif ! cp "$CINE/templates/quick/film.html" "$tmpd/film.html" 2>/dev/null; then bad compose-kit "cinecode templates/quick/film.html missing"
+  elif ! out=$(python3 "$LAB/tools/compose/inline.py" "$tmpd/film.html" --init 2>&1); then bad compose-kit "inline.py --init fails on the installed cinecode template: $(echo "$out" | head -1 | cut -c1-90)"
+  elif echo "$out" | grep -q WARNING || ! echo "$out" | grep -q "1080x1920 -> 1920x1080"; then bad compose-kit "inline.py --init no longer rewrites the cinecode template as expected (run tests/test_compose.py)"
+  else ok compose-kit "$(python3 "$LAB/tools/compose/inline.py" --lint | cut -d: -f1), --init ok on installed template"; fi
+  rm -rf "$tmpd"
+else
+  bad skill-cinecode "$CINE/SKILL.md missing"
+fi
 if [ "$(readlink -f /opt/byteplus/ark.py 2>/dev/null)" = "$LAB/tools/ark.py" ]; then ok ark.py "/opt/byteplus/ark.py -> repo"; else bad ark.py "/opt/byteplus/ark.py is not the repo version (run .claude/hooks/session-start.sh)"; fi
 
 out=$(python3 "$LAB/tools/ark.py" ping 2>&1); rc=$?

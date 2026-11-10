@@ -6,18 +6,21 @@
 //   window.READY = loadType(TYPE).then(loadFormulas).then(loadPlates).then(...)       (inline.py patches this line)
 //
 // PLATES = { <id>: spec }, spec:
-//   src       'relative/path.png' (from film.html; plates live in out/<project>/ep<NN>/plates/, so '../../plates/<file>')
+//   src       'relative/path.png' (from film.html; plates live in out/<project>/ep<NN>/plates/, so '../../plates/<file>',
+//             or '../../plates/matte/<file>' for a layer whose matte method is not `none`)
 //   depth     parallax depth (COMPOSE.DEPTH: bg 0.12, mid 0.45, fg/char 1.0, mist 1.25, near 1.7)
 //   place     omitted: cover the 1920x1080 stage, centred (an opaque L1). Or { x, y, h | w | scale, pivot }: the plate
 //             point `pivot` ('center' | 'bottom' | 'top' | an anchor point name | [px, py]) goes to stage (x, y), sized
 //             to h (or w) stage px, or by scale (stage px per plate px)
 //   overscan  extra size on top of the cover fit (1.0 default); plates are larger than the frame so the camera can move
-//   cover     true: this plate must always fill the frame (default true when place is omitted); a camera move that would
-//             show its edge is caught by a small continuous extra zoom and a warning
+//   cover     true: this plate must always fill the frame (default true when place is omitted, except for a seq layer:
+//             a keyed clip has no edge to hide and must keep the transform of the plate it replaces); a camera move
+//             that would show its edge is caught by a small continuous extra zoom and a warning
 //   anchors   key into anchors.json (default: the file name of src)
 //   rig       { warp: { <name>: {...} }, eyes: { <name>: {...} }, breath: {...} } (strip-warp.js, eyelid.js, breath.js)
 //   seq       a frame sequence instead of src (a keyed Seedance clip): { pattern: '../../clips/<stem>/{n}.png',
 //             digits: 6, start: 1, count: 120, fps: 24, at: <film time of its first frame>, end: 'hold' | 'loop' | 'hide' }
+//             Before `at`: hold shows frame 0, loop wraps, hide draws nothing. Every frame must have frame 0's size.
 //
 // anchors.json (projects/<project>/ep<NN>-<slug>/anchors.json, written with tools/layers/anchors.py set; embedded by
 // inline.py --anchors): coordinates in the plate's own pixels, per plate file name; a box is two points <box>_tl and
@@ -111,13 +114,18 @@
   }
 
   async function loadPlate(id, spec) {
-    const plate = { id, spec, depth: spec.depth ?? C.DEPTH.fg, cover: spec.cover ?? !spec.place, rig: spec.rig || {} };
+    const plate = { id, spec, depth: spec.depth ?? C.DEPTH.fg, cover: spec.cover ?? (!spec.place && !spec.seq), rig: spec.rig || {} };
     if (spec.seq) {
       const seq = { start: 1, digits: 6, fps: 24, at: 0, end: 'hold', ...spec.seq };
       if (!seq.pattern || !(seq.count > 0)) throw new Error(`plate ${id}: seq needs pattern and count`);
       plate.frames = await Promise.all(Array.from({ length: seq.count }, (_, i) => loadImage(seqName(seq, i), `plate ${id} frame ${i}`)));
       plate.seq = seq;
       plate.w = plate.frames[0].naturalWidth; plate.h = plate.frames[0].naturalHeight;
+      plate.frames.forEach((f, i) => {           // one stray frame would jump in size and place for 1/24 s
+        if (f.naturalWidth !== plate.w || f.naturalHeight !== plate.h) {
+          throw new Error(`plate ${id}: frame ${i} is ${f.naturalWidth}x${f.naturalHeight}, frame 0 is ${plate.w}x${plate.h}`);
+        }
+      });
     } else {
       if (!spec.src) throw new Error(`plate ${id}: needs src or seq`);
       plate.img = await loadImage(spec.src, `plate ${id}`);
@@ -144,7 +152,7 @@
     for (const p of C.preparers) p.prepare(spec);          // textures: mist bands, ember and glow sprites
     for (const id of ids) for (const r of C.rigs) r.prepare(C.plates[id]);
     C.ready = true;
-    return { plates: ids.length, warnings: C.warnings.slice() };
+    return { plates: ids.length, warnings: C.warnings.slice() };   // READY's qc gets them through COMPOSE.report()
   };
 
   C.get = (id) => {
@@ -161,7 +169,7 @@
   C.frameOf = (plate, t) => {
     if (!plate.seq) return plate.body;
     const q = plate.seq, f = Math.floor((t - q.at) * q.fps + 1e-6);
-    if (f < 0) return q.end === 'loop' ? plate.frames[((f % q.count) + q.count) % q.count] : plate.frames[0];
+    if (f < 0) return q.end === 'loop' ? plate.frames[((f % q.count) + q.count) % q.count] : q.end === 'hide' ? null : plate.frames[0];
     if (f >= q.count) return q.end === 'loop' ? plate.frames[f % q.count] : q.end === 'hide' ? null : plate.frames[q.count - 1];
     return plate.frames[f];
   };

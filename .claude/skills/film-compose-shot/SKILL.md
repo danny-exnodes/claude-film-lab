@@ -44,7 +44,8 @@ python3 $FILM_LAB/tools/compose/inline.py film.html --init --anchors $FILM_LAB/p
 ```
 
 - Một tập = một phim cinecode (`out/<project>/ep<NN>/film/<slug>/film.html`), mỗi shot = một dòng `SCENES`.
-  Lớp tranh được tham chiếu tương đối: `'../../plates/<file>'`.
+  Lớp tranh được tham chiếu tương đối: `'../../plates/<file>'`; lớp có cách tách nền khác `none` (L2–L4, P, FX) dùng
+  bản đã tách: `'../../plates/matte/<file>'`.
 - `inline.py --init` làm một lần trên film.html mới: chèn bộ mã (một khối `<script>` giữa hai dấu `compose-kit`,
   không sửa tay), đổi kích thước mặc định 1080x1920 → **1920x1080**, nối `loadPlates` vào `window.READY`, thay các cảnh
   mẫu bằng `templates/plates-film-section.js`, thêm look `plates` và điền dòng Format của `STATE.md`
@@ -173,8 +174,8 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 |---|---|---|
 | `deterministic: NO` | ảnh nạp muộn, `Math.random`/`Date`, trạng thái giữa khung | nạp trong `loadPlates`; chỉ dùng `COMPOSE.rng/noise`, `rng()` của cinecode; `inline.py` để kiểm |
 | `Chrome did not start ... --no-sandbox` | container chạy bằng root | `CHROME_PATH=$FILM_LAB/tools/compose/chrome-root.sh` |
-| `page threw while loading ... plate L4: could not load` | sai đường dẫn tương đối | đường dẫn tính từ film.html: `../../plates/<file>` |
-| console `shows its edge` | L1 không đủ lớn cho chuyển động | tăng `overscan`, giảm `zoom`/`pan`, hoặc ảnh L1 lớn hơn |
+| `page threw while loading ... plate L4: could not load` | sai đường dẫn tương đối | đường dẫn tính từ film.html: `../../plates/<file>` (L1, matte `none`) hoặc `../../plates/matte/<file>` (lớp đã tách nền) |
+| dòng `compose: plate L1 shows its edge` | L1 không đủ lớn cho chuyển động | tăng `overscan`, giảm `zoom`/`pan`, hoặc ảnh L1 lớn hơn. Cảnh báo của bộ mã là các dòng `compose:` trong phần `qc` mà `make.py` in ra, không phải console của trình duyệt |
 | vạch dọc trên đuôi | hộp warp chứa cả phần thân xa gốc | thu hộp lại, đặt `tail_root` đúng chỗ nối |
 | `cliché: lens flare` | chữ "flare" trong phần FILM | đừng dùng từ đó trong mã/ghi chú của FILM, hoặc ghi lý do trên director card |
 | `anchors ... scaled` | `anchors.json` đo trên ảnh khác cỡ | cập nhật `size` hoặc đo lại trên ảnh đã duyệt |

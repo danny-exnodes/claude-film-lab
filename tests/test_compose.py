@@ -121,6 +121,167 @@ class TestInlineDeterminism(FilmCase):
         self.assertRegex(r.stdout, r"compose kit v\S+: 9 files, lint ok")
 
 
+class TestInlineQc(FilmCase):
+    """READY's qc list carries the kit's warnings: a headless capture never shows console.warn."""
+    PATCHED = "qc: COMPOSE.report().concat(qc.warnings),"
+
+    def test_ready_qc_patched_on_pinned_template_and_idempotent(self):
+        self.assertEqual(self.html().count("qc: qc.warnings"), 1)            # what the pin looks like
+        r = run(INLINE, self.film, "--init")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        html = self.html()
+        self.assertEqual(html.count(self.PATCHED), 1)
+        self.assertNotIn("qc: qc.warnings", html)
+        self.assertGreater(html.find(self.PATCHED), html.find("\nwindow.READY = "))
+        self.assertIn("C.report = ", html)                                   # the kit in the film has it
+        self.assertIn("READY qc", r.stdout)
+        self.assertNotIn("WARNING", r.stdout)
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.html(), html)
+        self.assertNotIn("READY qc", r.stdout)
+        self.assertNotIn("WARNING", r.stdout)
+
+    def test_film_inlined_before_the_patch_gets_it_on_refresh(self):
+        self.assertEqual(run(INLINE, self.film, "--init").returncode, 0)
+        self.film.write_text(self.html().replace(self.PATCHED, "qc: qc.warnings,"), encoding="utf-8")
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.html().count(self.PATCHED), 1)
+
+    def test_missing_qc_text_is_a_warning(self):
+        """A cinecode template whose READY no longer returns `qc: qc.warnings`: doctor's compose-kit check must fail."""
+        self.film.write_text(self.html().replace("qc: qc.warnings", "checks: qc.warnings"), encoding="utf-8")
+        r = run(INLINE, self.film, "--init")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertRegex(r.stdout, r"(?m)^WARNING")
+        self.assertNotIn("COMPOSE.report()", self.html().split("<!-- compose-kit end -->")[1])
+
+
+class TestInlineAnchors(FilmCase):
+    def setUp(self):
+        super().setUp()
+        self.anchors = self.tmp / "anchors.json"
+        self.write({"a.png": {"eye": [10, 20]}})
+
+    def write(self, data):
+        self.anchors.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_refresh_rereads_the_recorded_anchors_file(self):
+        r = run(INLINE, self.film, "--init", "--anchors", self.anchors)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('COMPOSE.ANCHORS = {"a.png":{"eye":[10,20]}};', self.html())
+        self.assertRegex(self.html(), r"<!-- compose-kit begin v\S+ anchors=%s sha=[0-9a-f]{8}: " % re.escape(str(self.anchors)))
+        self.write({"a.png": {"eye": [99, 99]}})
+        r = run(INLINE, self.film)                               # the refresh form of the docstring, no --anchors
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"anchors: refreshed from {self.anchors}", r.stdout)
+        self.assertIn('COMPOSE.ANCHORS = {"a.png":{"eye":[99,99]}};', self.html())
+        self.assertNotIn("[10,20]", self.html())
+        once = self.html()
+        self.assertEqual(run(INLINE, self.film).returncode, 0)
+        self.assertEqual(self.html(), once)
+
+    def test_removed_anchors_file_keeps_the_embed_and_says_so(self):
+        self.assertEqual(run(INLINE, self.film, "--init", "--anchors", self.anchors).returncode, 0)
+        once = self.html()
+        self.anchors.unlink()
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("anchors: kept from the earlier embed", r.stdout)
+        self.assertEqual(self.html(), once)                      # the source stays recorded for when it is back
+        self.write({"a.png": {"eye": [5, 6]}})
+        r = run(INLINE, self.film)
+        self.assertIn("anchors: refreshed from", r.stdout)
+        self.assertIn('{"a.png":{"eye":[5,6]}}', self.html())
+
+    def test_film_inlined_before_the_source_was_recorded_keeps_its_embed(self):
+        self.assertEqual(run(INLINE, self.film, "--init", "--anchors", self.anchors).returncode, 0)
+        old, n = re.subn(r"(<!-- compose-kit begin v\S+) anchors=.*? sha=[0-9a-f]{8}:", r"\1:", self.html())
+        self.assertEqual(n, 1)
+        self.film.write_text(old, encoding="utf-8")
+        self.write({"a.png": {"eye": [99, 99]}})
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("anchors: kept from the earlier embed", r.stdout)
+        self.assertIn('COMPOSE.ANCHORS = {"a.png":{"eye":[10,20]}};', self.html())
+
+    def test_refresh_fails_on_a_recorded_file_that_is_no_longer_json(self):
+        self.assertEqual(run(INLINE, self.film, "--init", "--anchors", self.anchors).returncode, 0)
+        once = self.html()
+        self.anchors.write_text("{ not json", encoding="utf-8")
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stderr, r"^FAILED: ")
+        self.assertEqual(self.html(), once)
+
+    def test_closing_script_tag_in_an_anchor_key_stays_inside_the_block(self):
+        self.assertEqual(run(INLINE, self.film, "--init").returncode, 0)
+        closing = self.html().count("</script>")
+        data = {"a</script><!--b.png": {"eye": [1, 2]}}
+        self.write(data)
+        r = run(INLINE, self.film, "--anchors", self.anchors)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        html = self.html()
+        self.assertEqual(html.count("</script>"), closing)
+        m = re.search(r"COMPOSE\.ANCHORS = (.*);\n", html)
+        self.assertNotIn("<!--", m[1])
+        # what JavaScript reads back is the original key: "\/" is "/" and "\!" is "!" in a string literal
+        self.assertEqual(json.loads(m[1].replace("<\\!--", "<!--")), data)
+        self.assertEqual(run(INLINE, self.film).returncode, 0)
+        self.assertEqual(self.html(), html)
+
+
+class TestInlineNoHalfWrites(FilmCase):
+    def both(self):
+        return self.film.read_bytes(), (self.tmp / "STATE.md").read_bytes()
+
+    def assert_fails_untouched(self, *args):
+        before = self.both()
+        r = run(INLINE, self.film, *args)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertRegex(r.stderr, r"^FAILED: ")
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(self.both(), before)
+        return r
+
+    def test_bad_anchors_argument(self):
+        self.assert_fails_untouched("--init", "--anchors", self.tmp / "nope.json")
+        bad = self.tmp / "bad.json"
+        bad.write_text("{ not json", encoding="utf-8")
+        self.assert_fails_untouched("--init", "--anchors", bad)
+        bad.write_text("[1, 2]", encoding="utf-8")
+        r = self.assert_fails_untouched("--init", "--anchors", bad)
+        self.assertIn("object", r.stderr)
+
+    def test_bad_size_argument(self):
+        for size in ("1920", "1920x", "x1080", "0x1080", "1920x1080x2", "wide"):
+            with self.subTest(size=size):
+                r = self.assert_fails_untouched("--init", "--size", size)
+                self.assertIn("--size", r.stderr)
+
+    def test_late_failure_leaves_state_md_alone(self):
+        html = self.html().replace("window.READY = loadType(TYPE)", "window.READY = loadKinds(TYPE)")
+        self.film.write_text(html, encoding="utf-8")
+        r = self.assert_fails_untouched("--init")
+        self.assertIn("READY line not found", r.stderr)
+
+    def test_missing_film(self):
+        r = run(INLINE, self.tmp / "nope" / "film.html")
+        self.assertEqual(r.returncode, 1)
+        self.assertRegex(r.stderr, r"^FAILED: ")
+
+    def test_refresh_keeps_what_follows_the_end_marker(self):
+        self.assertEqual(run(INLINE, self.film, "--init").returncode, 0)
+        once = self.html()
+        self.assertIn("<!-- compose-kit end -->\n<script>", once)
+        glued = once.replace("<!-- compose-kit end -->\n<script>", "<!-- compose-kit end --><script>")
+        self.film.write_text(glued, encoding="utf-8")
+        r = run(INLINE, self.film)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.html(), once)                      # `<script>` whole, the newline back
+
+
 class TestKeyframe(TmpDirCase, unittest.TestCase):
     KEY = (0, 255, 0)
     RED = (200, 30, 30)

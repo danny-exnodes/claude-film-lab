@@ -10,8 +10,8 @@ kiểu cover. Toạ độ **ảnh** là px của chính file lớp tranh (như t
 ```js
 const PLATES = {
   L1: { src: '../../plates/ep01_s03_L1_nui-co_v01.png', depth: 0.12, overscan: 1.03 },
-  L2: { src: '../../plates/ep01_s03_L2_rung_v01.png', depth: 0.45, overscan: 1.04, cover: false },
-  L4: { src: '../../plates/ep01_s03_L4_bac-thi_v02.png', depth: 1.0, place: { x: 860, y: 905, h: 640, pivot: 'feet' },
+  L2: { src: '../../plates/matte/ep01_s03_L2_rung_v01.png', depth: 0.45, overscan: 1.04, cover: false },
+  L4: { src: '../../plates/matte/ep01_s03_L4_bac-thi_v02.png', depth: 1.0, place: { x: 860, y: 905, h: 640, pivot: 'feet' },
         rig: { warp: { tail: { amp: 30 } }, eyes: { eye_back: {} }, breath: { pivot: 'feet' } } },
   L4b: { seq: { pattern: '../../clips/ep01_s03_seedance25_v01/{n}.png', count: 120, fps: 24, at: 4.0, end: 'hold' },
          depth: 1.0, cover: false },
@@ -25,14 +25,14 @@ async function loadPlates() {
 
 | Trường | Ý nghĩa |
 |---|---|
-| `src` | đường dẫn tương đối từ film.html |
+| `src` | đường dẫn tương đối từ film.html. Lớp đã tách nền (matte khác `none`: L2–L4, P, FX) nằm ở `../../plates/matte/<cùng tên file>`; L1 (matte `none`) vẫn ở `../../plates/` (`docs/CONVENTIONS.md` §3) |
 | `depth` | độ sâu parallax (`COMPOSE.DEPTH`: bg 0.12, mid 0.45, fg/char 1.0, mist 1.25, near 1.7) |
 | `place` | bỏ trống = phủ kín sân khấu, căn giữa. `{ x, y, h \| w \| scale, pivot }`: điểm `pivot` của ảnh (`'center'`, `'bottom'`, `'top'`, tên điểm neo, `[px, py]`) đặt tại (x, y) sân khấu, cao `h` px |
 | `overscan` | nhân thêm kích thước (≥ 1) để máy quay có chỗ di chuyển |
-| `cover` | lớp phải luôn phủ kín khung (mặc định `true` khi không có `place`); lộ mép → tự zoom thêm liên tục + cảnh báo |
+| `cover` | lớp phải luôn phủ kín khung (mặc định `true` khi không có `place`; lớp `seq` mặc định `false` vì clip đã tách nền không có mép để che và phải trùng khít lớp nó thay thế); lộ mép → tự zoom thêm liên tục + cảnh báo `compose: plate <id> shows its edge` |
 | `anchors` | khoá trong `anchors.json` (mặc định: tên file của `src`) |
 | `rig` | `warp`, `eyes`, `breath` (§4); bỏ qua với lớp `seq` |
-| `seq` | chuỗi PNG thay cho `src`: `pattern` (`{n}` = số khung), `digits` 6, `start` 1, `count`, `fps` 24, `at` (giây phim của khung đầu), `end`: `'hold'` \| `'loop'` \| `'hide'`. Không `place` = phủ sân khấu như khung đầu của `keyframe.py` |
+| `seq` | chuỗi PNG thay cho `src`: `pattern` (`{n}` = số khung), `digits` 6, `start` 1, `count`, `fps` 24, `at` (giây phim của khung đầu), `end`: `'hold'` \| `'loop'` \| `'hide'`. Trước `at`: `hold` hiện khung đầu, `loop` quay vòng, `hide` không vẽ gì; sau khung cuối: giữ khung cuối / quay vòng / ẩn. Mọi khung phải cùng kích thước với khung đầu (khác → `load` báo lỗi `plate <id>: frame <i> is WxH, frame 0 is WxH`). Không `place` = phủ sân khấu như khung đầu của `keyframe.py` |
 
 Mọi ảnh được `decode()` và chép sang canvas; mọi texture (sương, tàn lửa, quầng sáng, phần cắt của rig) dựng xong
 trước khi `load` trả về. Ảnh lỗi làm READY thất bại với tên lớp và đường dẫn.

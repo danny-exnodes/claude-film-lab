@@ -5,8 +5,9 @@ description: >-
   kéo dự án về projects/<project>/, đọc EPISODE.md, chạy khâu 0–11, giữ cổng duyệt G1–G4, giao việc cho các agent
   film-*, kiểm ngân sách qua ledger, cập nhật EPISODE.md và TienDo_SanXuat, đẩy chữ và gói shot lên Drive. Dùng khi
   người dùng nói "dự án mới", "mở dự án", "kéo dự án", "làm tập phim", "làm tập mới", "mở tập", "tiếp tục tập",
-  "làm tiếp ep01", "tập tiếp theo", "duyệt kịch bản", "qua cổng", "duyệt shot mẫu", "duyệt bản nháp", "bản cuối",
-  "lưu Drive", hoặc nhắc tới PROJECT.md, EPISODE.md, budget.yaml, ledger.csv, projects/<project>/ep<NN>-<slug>.
+  "làm tiếp ep01", "làm quyển 1 tập 1", "tiếp q01t01", "tập tiếp theo", "duyệt kịch bản", "qua cổng", "duyệt shot mẫu", "duyệt bản nháp", "bản cuối",
+  "lưu Drive", hoặc nhắc tới PROJECT.md, EPISODE.md, budget.yaml, ledger.csv, projects/<project>/ep<NN>-<slug> hoặc
+  projects/<project>/q<NN>-t<NN>-<slug>.
 ---
 
 # film-pipeline – đạo diễn một tập phim
@@ -18,6 +19,15 @@ file này). Bản cho người đọc: `docs/WORKFLOW.md`.
 Dữ liệu dự án **không nằm trong repo** và không bao giờ commit: nguồn gốc là Google Drive `ClaudeFilmLab/<ProjectName>/`
 (gốc lab ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`); bạn làm trên bản làm việc `projects/<project>/` (chữ) và
 `out/<project>/` (media), cả hai git bỏ qua. Cấu trúc, `PROJECT.md`, ánh xạ, quy tắc phiên bản: CONVENTIONS §11.
+
+**Mã tập (CONVENTIONS §2).** Dự án không chia quyển: `ep<NN>` – thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file
+`ep01_s03_L4_bac-thi_v02.png`, hiển thị "Tập 1". Dự án chia quyển (mỗi quyển nhiều tập, đánh số tập trong quyển):
+`q<NN>t<NN>` – thư mục `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip
+`q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`, `EPISODE.md` có `book: 1`, hiển thị (YouTube, tiến độ)
+"Quyển 1 · Tập 1". Bên dưới viết `ep<NN>` cho gọn: với dự án chia quyển thay bằng mã `q<NN>t<NN>` và thư mục
+`q<NN>-t<NN>-<slug>`. Chuyển một tập đang làm sang cách chia quyển: `python3 tools/rename_episode.py ep01 q01t01
+--project-dir projects/<p>/ep01-<slug> --media out/<p>/ep01` (chạy thử) → báo người dùng → `--apply`, rồi đổi tên ba thư
+mục tập trên Drive (`update_file` title) và đẩy file chữ đã đổi.
 
 ## 0. Mở dự án / Kéo về / Đẩy lên Drive
 
@@ -110,9 +120,10 @@ Quy tắc cổng:
 
 ## 3. Mở tập (khâu 0)
 
-1. Tạo `projects/<project>/ep<NN>-<slug>/`, chép `templates/episode/EPISODE.md` và `budget.yaml` (không có mẫu thì theo
-   CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`), `length_s`, `media`
-   (`out/<project>/ep<NN>`), `drive` (`ClaudeFilmLab/<ProjectName>/03_KichBan/ep<NN>-<slug>`).
+1. Tạo `projects/<project>/ep<NN>-<slug>/` (chia quyển: `q<NN>-t<NN>-<slug>/`), chép `templates/episode/EPISODE.md` và
+   `budget.yaml` (không có mẫu thì theo CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`),
+   `book` (chỉ khi chia quyển; không thì xoá dòng), `length_s`, `media` (`out/<project>/ep<NN>` hoặc `out/<project>/q<NN>t<NN>`),
+   `drive` (`ClaudeFilmLab/<ProjectName>/03_KichBan/<thư mục tập>`).
 2. Hỏi người dùng một lần: độ dài, style (mặc định của series), trần ảnh và giây video. Ghi câu trả lời nguyên văn vào
    `## Ghi chú người dùng (nguyên văn)`.
 3. Trên Drive tạo `03_KichBan/ep<NN>-<slug>/` (+ `prompts/`, `review/`), `04_SanXuat/ep<NN>-<slug>/`,
@@ -124,7 +135,7 @@ Quy tắc cổng:
 Mỗi lần gọi agent, viết **hợp đồng giao việc** đủ 6 mục (agent không thấy lịch sử chat):
 
 ```
-Tập: projects/<project>/ep<NN>-<slug>/   (media: out/<project>/ep<NN>/)
+Tập: projects/<project>/ep<NN>-<slug>/   (media: out/<project>/ep<NN>/)   # hoặc q<NN>-t<NN>-<slug>/ (media q<NN>t<NN>/)
 Khâu: <số> – <tên khâu>
 Đầu vào: <danh sách file đọc>; đã khóa (chỉ đọc, không làm lại): <file/shot>
 Đầu ra: <danh sách file tạo/sửa, tên theo CONVENTIONS §2>

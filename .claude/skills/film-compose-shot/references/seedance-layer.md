@@ -1,5 +1,7 @@
 # Clip Seedance thành một lớp
 
+**Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
+
 Dùng khi shot cần cử động mà code không làm được trên ảnh phẳng (quay đầu, đứng dậy, vỗ cánh, bước đi). Mỗi clip
 **tính phí**: chỉ tạo khi shot cần (cột `ai_motion` của `shots.csv` không trống) và trong ngân sách của tập.
 

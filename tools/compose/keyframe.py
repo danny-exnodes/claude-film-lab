@@ -4,6 +4,7 @@ and size it has on the 1920x1080 stage (camera at rest). Free (Pillow); no API c
 
   python3 tools/compose/keyframe.py out/<p>/ep01/plates/ep01_s03_L4_bac-thi_v02.png out/<p>/ep01/clips/ep01_s03_start_v01.png \
       --x 860 --y 905 --h 640 --pivot feet --anchors projects/<p>/ep01-<slug>/anchors.json --key "#00FF00"
+  # project split into books: out/<p>/q01t01/plates/q01t01_s03_L4_bac-di_v02.png, projects/<p>/q01-t01-<slug>/anchors.json
 
 --x/--y/--h/--pivot are the plate's `place` in PLATES (pivot: center | bottom | top | an anchor point name).
 --key: style.yaml matte.key_bg (a colour far from the character's own: green for ink, magenta for green creatures).

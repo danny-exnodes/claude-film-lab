@@ -1,15 +1,18 @@
 ---
-# Mẫu trạng thái tập – docs/CONVENTIONS.md §5. Chép vào projects/<project>/ep<NN>-<slug>/EPISODE.md và điền.
+# Mẫu trạng thái tập – docs/CONVENTIONS.md §5. Chép vào projects/<project>/<thư mục tập>/EPISODE.md và điền.
+# Mã tập (§2): dự án không chia quyển → ep<NN> (thư mục ep01-<slug>, media out/<project>/ep01, bỏ dòng book:);
+# dự án chia quyển → q<NN>t<NN> (thư mục q01-t01-<slug>, media out/<project>/q01t01, giữ book:).
 # KHÔNG đặt tên STATE.md (tên đó thuộc cinecode).
 series: <project>            # slug dự án, trùng tên thư mục projects/<project>/
-episode: 1                   # số tập (số nguyên)
-slug: <slug>                 # slug tập, thư mục là ep<NN>-<slug>
+book: 1                      # (tuỳ chọn) số quyển; có book → mã tập q<book>t<episode>; không chia quyển thì xoá dòng này
+episode: 1                   # số tập (số nguyên; chia quyển thì đánh số trong quyển)
+slug: <slug>                 # slug tập, thư mục là ep<NN>-<slug> hoặc q<NN>-t<NN>-<slug>
 style: <style-id>            # thường bằng style trong SERIES.md; thư mục styles/<style-id>/
 length_s: 60                 # thời lượng đích (giây); shot cuối trong shots.csv kết thúc đúng số này
 stage: 0                     # khâu hiện tại 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày người dùng duyệt YYYY-MM-DD, hoặc null
-media: out/<project>/ep01    # thư mục media (git bỏ qua)
-drive: "ClaudeFilmLab/<ProjectName>/03_KichBan/ep01-<slug>"   # thư mục chữ của tập trên Drive
+media: out/<project>/q01t01  # thư mục media (git bỏ qua): out/<project>/<mã tập> (ep01 nếu không chia quyển)
+drive: "ClaudeFilmLab/<ProjectName>/03_KichBan/q01-t01-<slug>"   # thư mục chữ trên Drive (ep01-<slug> nếu không chia quyển)
 ---
 
 # <Tên tập>

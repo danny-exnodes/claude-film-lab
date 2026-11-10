@@ -73,7 +73,7 @@ Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-m
 
 - `budget.yaml` trong thư mục tập: `images`, `video_seconds`, `models` (trần riêng theo model).
 - Mọi lần tạo ảnh/video:
-  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<project>/ep<NN>/ledger.csv --budget <tập>/budget.yaml`.
+  `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<project>/<id>/ledger.csv --budget <tập>/budget.yaml`.
   `ark.py` bắt buộc có `--budget` và `--ledger` (thiếu → thoát mã 2), cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Kiểm ngân sách và ghi dòng `pending` nằm trong cùng
@@ -90,21 +90,23 @@ ClaudeFilmLab/<ProjectName>/
 ├── 00_QuanLy/      PROJECT.md (manifest ID) · README_CauTruc (Doc) · TienDo_SanXuat (Sheet)
 ├── 01_TaiLieuGoc/  _ChoPhanLoai/ · SachThamKhao/ · NguyenVan/ · HinhAnhThamKhao/
 ├── 02_KinhThu/     SERIES.md · NhanVat/ · BoiCanh/ · PhongCach/
-├── 03_KichBan/ep<NN>-<slug>/            chữ của tập (= projects/<project>/ep<NN>-<slug>/)
-├── 04_SanXuat/ep<NN>-<slug>/<ngày>/     gói shot, bản nháp; ledger.csv
-├── 05_ThanhPham/ep<NN>-<slug>/          bản cuối, xuất bản
+├── 03_KichBan/<thư mục tập>/           chữ của tập (= projects/<project>/<thư mục tập>/)
+├── 04_SanXuat/<thư mục tập>/<ngày>/    gói shot, bản nháp; ledger.csv
+├── 05_ThanhPham/<thư mục tập>/         bản cuối, xuất bản
 └── 99_LuuTru/      bản cũ (không xoá gì)
 ```
+`<thư mục tập>` = `ep<NN>-<slug>`, hoặc `q<NN>-t<NN>-<slug>` khi dự án chia quyển; `<id>` = mã tập `ep<NN>` / `q<NN>t<NN>`
+(tiền tố mọi file media, `docs/CONVENTIONS.md` §2).
 
 - **Đầu phiên – kéo:** `00_QuanLy/PROJECT.md` trước, rồi kinh thư, tập đang làm và `ledger.csv` về `projects/<project>/`
-  và `out/<project>/ep<NN>/` (git bỏ qua). Không có bản làm việc thì không làm tiếp.
+  và `out/<project>/<id>/` (git bỏ qua). Không có bản làm việc thì không làm tiếp.
 - **Cuối mỗi khâu – đẩy:** file chữ đã đổi lên thư mục tương ứng (file mới; bản cũ chuyển vào `99_LuuTru/` với tên có
   giờ), `ledger.csv` nếu có tạo ảnh/video, cập nhật dòng của tập trong `TienDo_SanXuat`. Trước khi dừng phiên cũng đẩy:
   container bị thu hồi khi rảnh → chữ và media chưa đẩy là mất.
-- Media: `out/<project>/ep<NN>/{plates,clips,renders}/` (git bỏ qua). Sau khi duyệt:
-  `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → một zip mỗi shot, tải lên Drive
-  `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản nháp
-  duyệt cũng vào đó; bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`. Link ghi vào cột `drive_link` của `prompts.csv`.
+- Media: `out/<project>/<id>/{plates,clips,renders}/` (git bỏ qua). Sau khi duyệt:
+  `python3 tools/bundle.py out/<project>/<id> --shot s03` → một zip mỗi shot, tải lên Drive
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản nháp
+  duyệt cũng vào đó; bản cuối vào `05_ThanhPham/<thư mục tập>/`. Link ghi vào cột `drive_link` của `prompts.csv`.
 - Thay đổi lõi (công cụ, skill, style pack) mới commit + push vào repo; dữ liệu dự án không bao giờ commit.
 
 ## 6. Chuyển giao giữa phiên

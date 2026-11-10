@@ -33,6 +33,9 @@ import argparse, datetime, hashlib, json, mimetypes, os, re, sys
 
 import yaml
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import episode_id  # noqa: E402  ep<NN> | q<NN>t<NN> (docs/CONVENTIONS.md §2)
+
 SNAPSHOT, PULLED_AT, PUSHED_LOG = ".pulled.sha256", ".pulled.at", ".pushed.log"
 ARCHIVE = "99_LuuTru"
 IF_EXISTS = "if a file with this title already exists in the folder (first push), archive it"
@@ -47,8 +50,8 @@ MIME = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
     ".pdf": "application/pdf", ".wav": "audio/wav", ".mp3": "audio/mpeg", ".html": "text/html",
 }
-RE_EP_DIR = re.compile(r"^ep(\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$")
-RE_MEDIA_EP = re.compile(r"^ep(\d{2})$")
+RE_EP_DIR = episode_id.RE_DIR          # ep<NN>-<slug> | q<NN>-t<NN>-<slug>
+RE_MEDIA_EP = episode_id.RE_ID         # ep<NN> | q<NN>t<NN>
 RE_BUNDLE_DATE = re.compile(r"_(\d{4})(\d{2})(\d{2})\.zip$")
 RE_NOW = re.compile(r"^\d{8}-\d{4}$")
 RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -217,14 +220,16 @@ def map_project(rel):
     return None
 
 
-def episode_dirs(project_dir, man, nn):
-    """ep<NN>-<slug> names known for episode NN (working copy folders, then manifest keys)."""
+def episode_dirs(project_dir, man, eid):
+    """Episode folder names (ep<NN>-<slug> or q<NN>-t<NN>-<slug>) known for episode id `eid` (ep01, q01t01):
+    working copy folders first, then manifest keys."""
+    same = lambda d: (episode_id.parse_dir(d) or ("",))[0] == eid
     names = sorted(d for d in os.listdir(project_dir)
-                   if os.path.isdir(os.path.join(project_dir, d)) and RE_EP_DIR.match(d) and d[2:4] == nn)
+                   if os.path.isdir(os.path.join(project_dir, d)) and same(d))
     if not names:
         names = sorted({k.split("/")[1] for k in man["folders"]
                         if k.count("/") >= 1 and k.split("/")[0] in ("03_KichBan", "04_SanXuat", "05_ThanhPham")
-                        and RE_EP_DIR.match(k.split("/")[1]) and k.split("/")[1][2:4] == nn})
+                        and same(k.split("/")[1])})
     return names
 
 
@@ -252,10 +257,10 @@ def map_out(rel, project_dir, man, day):
         kind = "final"
     if not kind:
         return None, "skip"      # plates/, clips/, frames...: they travel inside the shot bundles (§9)
-    eps = episode_dirs(project_dir, man, m.group(1))
+    eps = episode_dirs(project_dir, man, head)
     if len(eps) != 1:
         why = "no" if not eps else "several"
-        return None, (f"{why} episode folder ep{m.group(1)}-<slug> in the working copy or drive.folders: "
+        return None, (f"{why} episode folder {episode_id.dir_prefix(head)}-<slug> in the working copy or drive.folders: "
                       "cannot tell the Drive episode folder")
     ep = eps[0]
     if kind == "ledger":

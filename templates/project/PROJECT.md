@@ -25,8 +25,8 @@ drive:
     04_SanXuat: <id>
     05_ThanhPham: <id>
     99_LuuTru: <id>
-    # Mỗi tập thêm: 03_KichBan/ep<NN>-<slug>, .../prompts, .../review, 04_SanXuat/ep<NN>-<slug>,
-    # 04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>, 05_ThanhPham/ep<NN>-<slug>
+    # Mỗi tập thêm: 03_KichBan/<tập>, .../prompts, .../review, 04_SanXuat/<tập>, 04_SanXuat/<tập>/<YYYY-MM-DD>,
+    # 05_ThanhPham/<tập>; <tập> = ep<NN>-<slug>, hoặc q<NN>-t<NN>-<slug> nếu dự án chia quyển (CONVENTIONS §2)
     # Mỗi nhân vật/bối cảnh thêm: 02_KinhThu/NhanVat/<slug>, 02_KinhThu/BoiCanh/<slug>
   files:                         # chỉ file Google cố định (file chữ đổi ID mỗi lần đẩy, §11.6)
     00_QuanLy/README_CauTruc: <id>

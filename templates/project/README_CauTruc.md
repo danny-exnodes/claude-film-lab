@@ -17,10 +17,12 @@ Kho mã (GitHub `claude-film-lab`) chỉ chứa công cụ và quy trình dùng 
 | `01_TaiLieuGoc/NguyenVan/` | nguyên văn, chú giải, bản dịch (kèm link nguồn) | – |
 | `01_TaiLieuGoc/HinhAnhThamKhao/` | ảnh tham khảo không khí – **không** dùng để tạo ảnh, không đưa vào phim | – |
 | `02_KinhThu/` | `SERIES.md` (quy ước chung), `pronunciation.csv` (bảng phát âm Hán Việt cho lồng tiếng), `NhanVat/` và `BoiCanh/` (mô tả + ảnh khóa đã duyệt), `PhongCach/` | duyệt ảnh khóa |
-| `03_KichBan/ep<NN>-<slug>/` | trạng thái tập `EPISODE.md`, ngân sách, nghiên cứu, kịch bản, shot list, prompt, kiểm tra | duyệt kịch bản (G1) |
-| `04_SanXuat/ep<NN>-<slug>/<ngày>/` | gói ảnh/clip theo shot, bản nháp, sổ chi phí `ledger.csv` | duyệt shot mẫu (G2), bản nháp (G3) |
-| `05_ThanhPham/ep<NN>-<slug>/` | bản cuối, thumbnail, nội dung đăng | duyệt bản cuối (G4), tự đăng |
+| `03_KichBan/<tập>/` | trạng thái tập `EPISODE.md`, ngân sách, nghiên cứu, kịch bản, shot list, prompt, kiểm tra | duyệt kịch bản (G1) |
+| `04_SanXuat/<tập>/<ngày>/` | gói ảnh/clip theo shot, bản nháp, sổ chi phí `ledger.csv` | duyệt shot mẫu (G2), bản nháp (G3) |
+| `05_ThanhPham/<tập>/` | bản cuối, thumbnail, nội dung đăng | duyệt bản cuối (G4), tự đăng |
 | `99_LuuTru/` | bản cũ và thứ bỏ đi | không xoá gì: mọi thứ cũ nằm ở đây |
+
+`<tập>` = `ep01-<tên>` (Tập 1), hoặc `q01-t01-<tên>` (Quyển 1 · Tập 1) nếu dự án chia quyển.
 
 ## Quy tắc
 

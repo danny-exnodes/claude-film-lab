@@ -13,3 +13,8 @@ Lỗi hay gặp khi kiểm sản phẩm. Mỗi mục: ngày · lỗi · dấu hi
 
 ## Kịch bản
 - Dấu gạch ngang trong lời; câu không có mốc; câu cách nhau < 3 s; câu trích không có trong `research.md` nguyên văn.
+
+## Kịch bản
+- 2026-11-10 · Câu dịch thơ tán/nguyên văn trùng gần hết chữ với bản dịch sách người dùng gửi · so từng câu với sources/*/chep-noi-dung.md · khâu 2. Thơ tán: đọc Hán Việt rồi dịch lại.
+- 2026-11-10 · Tên Hán Việt trùng từ thông dụng khi đọc TTS ("con ngu", "tên nó là loại/lục") · thêm danh từ loại ("con", "cá").
+- 2026-11-10 · Prompt Seedance không nhắc lại đặc điểm giải phẫu; bàn tay viết chữ sinh chữ giả · cột ai_motion.

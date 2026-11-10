@@ -227,7 +227,8 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
 - **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
   `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
-  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX` (`OUT` được phép là một trong các đầu vào). Dùng mỗi khi có hai bản ledger
+  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
+  không (gộp không bao giờ làm mất dòng đã tính phí). Dùng mỗi khi có hai bản ledger
   của một tập (hai phiên, hai file trên Drive, bản Drive + bản trong container): **không bao giờ** "lấy bản mới nhất"
   cho ledger, vì bản kia chứa các request đã tính phí (§11.6).
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5

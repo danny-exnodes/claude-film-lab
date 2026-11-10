@@ -152,6 +152,35 @@ class TestFinish(LambdaCase):
         self.assertEqual(code, 2)
 
 
+class TestLedgerWithoutTrailingNewline(LambdaCase):
+    """A hand-edited ledger often ends without a newline: the next row must not be glued onto the last line."""
+
+    def setUp(self):
+        super().setUp()
+        self.seed_ledger({"ts": "2026-11-10T01:00:00Z", "kind": "image", "model": PRO, "count": 1, "status": "ok",
+                          "note": "req=aa"})
+        text = Path(self.ledger).read_text()
+        Path(self.ledger).write_text(text.rstrip("\n"))        # as Write/Edit/printf leave it
+
+    def test_image_rows_stay_separate_and_count(self):
+        self.write_budget("images: 2\n")
+        f = self.fake()
+        self.assertEqual(self.run_ark("image", "x", str(self.tmp / "a.png"), *self.cost)[0], 0)
+        rows = self.rows()
+        self.assertEqual([r["status"] for r in rows], ["ok", "pending", "ok"])
+        self.assertEqual(ark.req_id(rows[0]), "aa")            # not 'aa2026...' from a glued line
+        self.assertEqual(self.run_ark("image", "x", str(self.tmp / "b.png"), *self.cost)[0], 3)   # cap 2 is full
+
+    def test_lambda_prepare_counts_against_the_model_cap_and_finish_finds_it(self):
+        self.write_budget(f"images: 10\nmodels:\n  {PRO}: 2\n")
+        code, out, _ = self.prepare()
+        self.assertEqual(code, 0)
+        job = json.loads(out)["job_id"]
+        self.assertEqual(self.prepare()[0], 3)                 # 1 seeded + 1 pending = cap 2
+        st = self.status_file(job, status="succeeded", keys=[f"images/{job}.jpg"], seconds=40)
+        self.assertEqual(self.run_ark("lambda-job", "finish", "--status-json", st, "--ledger", self.ledger)[0], 0)
+
+
 class TestLedgerRequired(ArkCase):
     def test_missing_ledger_refused_before_any_call(self):
         self.write_budget("images: 5\nledger_required: true\n")
@@ -231,6 +260,33 @@ class TestLedgerMerge(ArkCase):
         self.run_ark("ledger-merge", a, b, "-o", self.ledger)
         self.assertEqual(Path(self.ledger).read_text(), first)
         self.assertEqual(len(self.rows()), 2)
+
+    def test_rows_only_in_out_are_kept_when_out_is_not_an_input(self):
+        """The documented pull command: ledger-merge ledger.drive-*.csv -o ledger.csv, with local-only rows in -o."""
+        self.seed_ledger(self.row("aa", "pending", "2026-11-10T01:00:00Z"), self.row("aa", "ok", "2026-11-10T01:00:30Z"),
+                         self.row("10ca1", "pending", "2026-11-10T03:00:00Z"),
+                         self.row("10ca1", "ok", "2026-11-10T03:00:20Z"))
+        drive = self.ledger_file("ledger.drive-1.csv", self.row("aa", "pending", "2026-11-10T01:00:00Z"),
+                                 self.row("aa", "ok", "2026-11-10T01:00:30Z"),
+                                 self.row("d21fe", "pending", "2026-11-10T02:00:00Z"))
+        code, out, _ = self.run_ark("ledger-merge", drive, "-o", self.ledger)
+        self.assertEqual(code, 0)
+        rows = self.rows()
+        self.assertEqual(sorted({ark.req_id(r) for r in rows}), ["10ca1", "aa", "d21fe"])
+        self.assertEqual(len(ark.billed_requests(rows)), 3)
+        self.assertIn("4 row(s) already in ledger.csv", out)
+
+    def test_bom_ledger_is_read_and_survives_a_merge(self):
+        self.seed_ledger(self.row("aa", "pending", "2026-11-10T01:00:00Z"), self.row("aa", "ok", "2026-11-10T01:00:30Z"))
+        raw = Path(self.ledger).read_bytes()
+        Path(self.ledger).write_bytes(b"\xef\xbb\xbf" + raw)
+        self.assertEqual(len(ark.billed_requests(ark.ledger_rows(self.ledger))), 1)
+        self.write_budget("images: 1\n")
+        f = self.fake()
+        code, _, _ = self.run_ark("image", "x", str(self.tmp / "a.png"), *self.cost)
+        self.assertEqual((code, f.calls), (3, []))             # the BOM ledger still fills the cap
+        self.assertEqual(self.run_ark("ledger-merge", self.ledger, "-o", self.ledger)[0], 0)
+        self.assertEqual(len(ark.billed_requests(self.rows())), 1)
 
     def test_refused_rows_survive_but_do_not_count(self):
         a = self.ledger_file("a.csv", {"ts": "2026-11-10T01:00:00Z", "kind": "image", "model": "m",

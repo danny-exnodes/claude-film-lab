@@ -173,12 +173,17 @@ def _ledger_record(row):
 
 
 def _write_locked(f, row):
-    """Append one row to an open ledger whose LOCK_EX the caller holds; header when the file is empty."""
+    """Append one row to an open ledger whose LOCK_EX the caller holds; header when the file is empty.
+    A ledger whose last line has no newline (hand edit, torn write) gets one first: otherwise the new row is glued
+    onto that line, the new request vanishes from the count and the previous one gets a wrong req id."""
     f.seek(0, os.SEEK_END)
     buf = io.StringIO()
     w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
-    if f.tell() == 0:
+    size = os.fstat(f.fileno()).st_size
+    if size == 0:
         w.writeheader()
+    elif os.pread(f.fileno(), 1, size - 1) not in (b"\n", b"\r"):
+        buf.write("\n")
     w.writerow(_ledger_record(row))
     f.write(buf.getvalue())
     f.flush()
@@ -186,6 +191,7 @@ def _write_locked(f, row):
 
 
 def _parse_rows(path, text):
+    text = text.lstrip("\ufeff")     # a UTF-8 BOM (saved from a spreadsheet) would turn the 'ts' column into '\ufeffts'
     rows = list(csv.DictReader(io.StringIO(text)))
     if rows and list(rows[0].keys()) != LEDGER_FIELDS:
         print(f"warning: {path} header differs from {','.join(LEDGER_FIELDS)}", file=sys.stderr)
@@ -630,7 +636,8 @@ def merge_rows(row_lists):
 
 
 def ledger_merge(a):
-    """Write the union of the input ledgers to --out under its exclusive lock (it may be one of the inputs).
+    """Write the union of the input ledgers and of --out's own rows to --out, under its exclusive lock.
+    --out's existing rows are always kept, listed as an input or not: a merge never drops a billed row.
     With no input: an empty ledger with the header (first generation of an episode with ledger_required)."""
     missing = [p for p in a.ledgers if not os.path.exists(p)]
     if missing:
@@ -643,13 +650,15 @@ def ledger_merge(a):
             current = f.read()
             if not a.ledgers and _parse_rows(a.out, current):
                 usage_error(f"{a.out} already has rows; pass the ledgers to merge (it was left untouched)")
-            lists = []
+            lists, out_listed = [], False
             for path in a.ledgers:
                 if os.path.exists(a.out) and os.path.samefile(path, a.out):
                     lists.append(_parse_rows(path, current))
+                    out_listed = True
                 else:
                     lists.append(ledger_rows(path))
-            rows = merge_rows(lists)
+            own = [] if out_listed else _parse_rows(a.out, current)   # rows only this copy has must survive
+            rows = merge_rows([own] + lists)
             buf = io.StringIO()
             w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
             w.writeheader()
@@ -662,6 +671,8 @@ def ledger_merge(a):
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
     counts = ", ".join(f"{os.path.basename(p)}: {len(l)}" for p, l in zip(a.ledgers, lists)) or "no input"
+    if own:
+        counts += f" + {len(own)} row(s) already in {os.path.basename(a.out)}"
     billed = billed_requests(rows)
     print(f"{a.out}: {len(rows)} row(s) from {counts} · billed requests: "
           f"{sum(units(r) for r in billed if r.get('kind') == 'image'):g} image(s), "

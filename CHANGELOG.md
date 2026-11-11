@@ -4,7 +4,12 @@
 
 ## [Unreleased]
 
-Dữ liệu dự án phim chuyển lên Google Drive; repo chỉ còn là lõi dùng lại.
+## [1.1.0] - 2026-11-11
+
+Dữ liệu dự án phim chuyển lên Google Drive, repo chỉ còn là lõi dùng lại; mỗi tập chọn một trong hai phương pháp dựng
+(`layers` hoặc `seedance`); công cụ được gia cố sau một đợt kiểm toán. **Bản này có thay đổi phá vỡ** so với 1.0.0
+(đường dẫn `series/` → `projects/`, mã thoát và mặc định của `ark.py`, `budget.yaml` chặt hơn, nơi ghi của `matte.py`):
+xem mục "Cần làm khi nâng cấp" trong `docs/releases/v1.1.0.md`. Số phiên bản 1.1.0 do chủ dự án chọn.
 
 ### Hai phương pháp dựng: `layers` và `seedance` (#28, 2026-11-11)
 Mỗi tập chọn một phương pháp trong `EPISODE.md`. `layers` chỉ dùng model ảnh (tạo theo lô), tách lớp và chuyển động bằng
@@ -281,5 +286,6 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danny-exnodes/claude-film-lab/releases/tag/v1.0.0

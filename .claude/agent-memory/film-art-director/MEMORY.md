@@ -21,6 +21,17 @@ Bài học về prompt và lớp tranh, theo style. Mỗi mục: ngày · bài h
   "an interior scene, not a landscape", nháp `--fast` trước; đề nghị đạo diễn thêm `closeup.txt` vào style pack.
 - 2026-11-10 · `mid.txt` có "no animals": lớp bóng thú (rùa dưới nước) gọi là "dark soft oval shadows shaped like…".
 
+## Bài học G3 v01 Nam Sơn Kinh (2026-11-11)
+- Người dùng loại: thú trượt/xoay cắt dán, bộ phận P hiện rời (cánh, đuôi trôi một mình), thú nhỏ chìm cùng tông mực.
+  → Thú di chuyển = Seedance; shot bộ phận = zoom code trên L4 thân đầy đủ (ghi điểm x,y, phóng ≤ 2,2×); P chỉ chồng
+  khít lên L4. Thú giới thiệu ≥ 40 % cao khung, nền L1/L2 nhạt 40–60 % + mờ, chân chạm L3.
+- Seedance (lục) tự cho cánh mọc từ vai, dựng trên lưng, đuôi có chùm lông → prompt: "wings grow from the flanks below
+  the ribs, low along the belly, never rise above the back, never from the shoulders; thin scaly snake tail, no tuft".
+- Seedance (tinh tinh) "rise and run" → nhảy chồm bốn chân ra khỏi khung: ghi "never leaps, never on all fours, stays
+  inside the frame". Thêm "Keep the pale background unchanged", "--no-audio", khung đầu 16:9.
+- Clip 5 s + giữ khung tĩnh 6 s bị chê "đứng yên": đặt thời lượng clip ≈ thời lượng shot (≤ 1 s giữ).
+- Plate L4 có thể nướng sẵn vầng cam `sun-glow` (toàn quy, lục): thêm "no glow, no sunlight halo" vào prompt L4.
+
 ## Ngân sách lớp (2026-11-10, ep01 Nam Sơn Kinh, 87 shot → 58 ảnh lần đầu)
 - Một bộ L1/L2/L3 cho mỗi núi, dùng lại 3–7 shot; thẻ chữ và cận bàn viết chung một L1 giấy; bản đồ L1+L2 cho 10 shot.
 - Đàn thú phụ = 1 con, nhân bản bằng code (mẫu `character.txt` chỉ cho "one single figure").

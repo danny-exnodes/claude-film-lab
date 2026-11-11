@@ -8,7 +8,7 @@
 //           clipping to white). Its opacity never exceeds `intensity`, and never MAX_GLOW.
 // Both are pure functions of (t, seed): any frame renders alone.
 //
-// A fire is four calls, far to near, sharing one base line (embers.js gives the sparks, smoke.js the smoke):
+// A fire is five calls, far to near, sharing one base line (embers.js gives the sparks, smoke.js the smoke):
 //   COMPOSE.smoke.plume(st, { x: 900, y: 800, depth: 1 });                          // behind the flames
 //   st.plate('L4');                                                                 // whatever the fire lights
 //   COMPOSE.fire.glow(st, { x: 900, y: 880, r: 320, intensity: 0.3 });              // after the layers it lights
@@ -88,7 +88,8 @@
     C.warn(`fire palette ${name} was not prebuilt (spec.fire.palettes): default used`);
     return C.fire.sets.default;
   }
-  const saltOf = (o, x, y) => o.salt ?? 1 + (((Math.round(x) * 73 + Math.round(y) * 19) % 9973) + 9973) % 9973;
+  // one salt per origin (to the px, +-8192 px around the stage): no two origins share it
+  const saltOf = (o, x, y) => o.salt ?? 1 + (Math.round(x) & 16383) * 16384 + (Math.round(y) & 16383);
 
   C.fire = C.fire || {};
   Object.assign(C.fire, {
@@ -99,8 +100,13 @@
       const line = Array.isArray(b) && b.length === 4 && b.every(num);
       const dots = Array.isArray(pts) && pts.length > 0 && pts.every((p) => Array.isArray(p) && num(p[0]) && num(p[1]));
       let h = o.h ?? 140, w = o.w ?? 60;
-      if (!(line || dots) || !(num(h) && h > 0 && num(w) && w > 0)) {
-        C.warn('fire flames: needs base [x0, y0, x1, y1] or points [[x, y], ...], and h, w > 0: not drawn', 'fire:spec');
+      const t = o.t ?? st.t, seed = C.seed, speed = o.speed ?? 1, flick = o.flicker ?? 0.45, depth = o.depth ?? 1;
+      const sway = o.sway ?? 0.18, lean = o.lean ?? 0, solid = o.body ?? 0.8, alpha = o.alpha ?? 0.9;
+      // a NaN that reached the canvas would not fail: the browser ignores that call, so a tongue would be painted
+      // with the opacity or the transform left over from the call before it
+      if (!(line || dots) || !(num(h) && h > 0 && num(w) && w > 0)
+          || ![t, speed, flick, depth, sway, lean, solid, alpha].every(num) || !(o.count == null || num(o.count))) {
+        C.warn('fire flames: needs base [x0, y0, x1, y1] or points [[x, y], ...], and h, w > 0 (every other field a finite number): not drawn', 'fire:spec');
         return;
       }
       const maxH = C.STAGE.H * 0.5, maxW = C.STAGE.W * 0.25;
@@ -108,11 +114,10 @@
         C.warn(`fire flames: a tongue of ${Math.round(w)}x${Math.round(h)} px is capped at ${maxW}x${maxH} (a fire, not a flash)`, 'fire:size', Math.max(h / maxH, w / maxW));
         h = Math.min(h, maxH); w = Math.min(w, maxW);
       }
-      const t = o.t ?? st.t, seed = C.seed, speed = o.speed ?? 1, flicker = C.clamp(o.flicker ?? 0.45);
-      const sway = o.sway ?? 0.18, lean = o.lean ?? 0, body = C.clamp(o.body ?? 0.8);
+      const flicker = C.clamp(flick), body = C.clamp(solid);
       const salt = line ? saltOf(o, b[0] + b[2], b[1] + b[3]) : saltOf(o, pts[0][0], pts[0][1]);
-      const gain = C.clamp(o.alpha ?? 0.9) * (o.fade ? C.clamp(C.track(o.fade, t)) : 1);
-      if (gain <= 0.001) return;
+      const gain = C.clamp(alpha) * (o.fade ? C.clamp(C.track(o.fade, t)) : 1);
+      if (!(gain > 0.001)) return;
       const len = line ? Math.hypot(b[2] - b[0], b[3] - b[1]) : 0;
       let count = Math.round(o.count ?? (line ? Math.max(3, len / (w * 0.5)) : pts.length * 3));
       if (!(count >= 1)) return;
@@ -120,7 +125,7 @@
         C.warn(`fire flames: ${count} tongues asked, drawn ${C.fire.MAX_TONGUES}`, 'fire:count', count);
         count = C.fire.MAX_TONGUES;
       }
-      st.layer(o.depth ?? 1, (g) => {
+      st.layer(depth, (g) => {
         for (let i = 0; i < count; i++) {
           const r = C.rng(seed, salt * 7919 + i);
           const along = (i + 0.15 + 0.7 * r()) / count, hs = 0.5 + 0.5 * r(), ws = 0.7 + 0.6 * r(), off = r() - 0.5;
@@ -149,9 +154,9 @@
       });
     },
     glow(st, o = {}) {
-      const set = setOf(o), x = o.x, y = o.y, r = o.r ?? 280;
-      if (!(num(x) && num(y) && num(r) && r > 0)) {
-        C.warn('fire glow: x, y must be numbers and r > 0: not drawn', 'fire:glow');
+      const set = setOf(o), x = o.x, y = o.y, r = o.r ?? 280, depth = o.depth ?? 1;
+      if (!(num(x) && num(y) && num(r) && r > 0 && num(depth))) {
+        C.warn('fire glow: x, y, depth must be numbers and r > 0: not drawn', 'fire:glow');
         return;
       }
       const t = o.t ?? st.t, pulse = C.clamp(o.pulse ?? 0.3), salt = saltOf(o, x, y);
@@ -160,7 +165,7 @@
       if (o.fade) k *= C.clamp(C.track(o.fade, t));
       k = Math.min(C.fire.MAX_GLOW, k);
       if (!(k > 0.001)) return;
-      st.layer(o.depth ?? 1, (g) => {
+      st.layer(depth, (g) => {
         g.globalCompositeOperation = o.blend || 'screen';
         g.globalAlpha = k;
         g.drawImage(set.halo, x - r, y - r, r * 2, r * 2);

@@ -110,7 +110,8 @@ mặc định + cảnh báo. Không khai `smoke` / `fire` thì dùng màu mặc 
 
 Ba module dưới đây làm khói, lửa, cây cử động **hoàn toàn bằng code** (phương pháp `layers`: không gọi Seedance). Cũng như
 mọi thứ trong bộ ghép: hàm thuần của `(t, SEED)`, khung nào cũng render độc lập được; tham số sai (NaN, kích thước ≤ 0,
-thiếu hộp neo) → một dòng `compose: ...` trong `qc` và phần đó không vẽ / đứng yên, không làm hỏng READY. Lời gọi nhận
+thiếu hộp neo; với khói và lửa: mọi trường số, kể cả `alpha`, `depth`, `t`) → một dòng `compose: ...` trong `qc` và phần
+đó không vẽ / đứng yên, không làm hỏng READY. Lời gọi nhận
 `st` như các module không khí khác (thời gian lấy từ `st.t`; truyền `t:` để vẽ ở thời điểm khác, vd. bước đôi 12 fps).
 
 ### 5.1 Khói: `COMPOSE.smoke.plume(st, o)` (id `smoke`)
@@ -179,7 +180,7 @@ là ngọn lửa, không bao giờ là chớp sáng toàn khung (vượt → b�
 | `speed`, `palette`, `fade`, `salt` | 1, mặc định, –, suy từ `(x, y)` | – | như `flames` |
 | `blend` | `'screen'` | – | trên giấy sáng `'screen'` gần như không thấy: dùng `'soft-light'` để nhuộm ấm vùng giấy quanh lửa |
 
-**Ghép với tàn lửa và khói** – một đống lửa là năm lời gọi, từ xa đến gần, dùng chung một đường chân (`embers` sinh ra ở
+**Ghép với tàn lửa và khói** – một đống lửa là năm lời gọi đầu dưới đây, từ xa đến gần, dùng chung một đường chân (`embers` sinh ra ở
 nơi lưỡi lửa kết thúc; màu tàn lửa khai ở `embers` của `COMPOSE.load`):
 
 ```js
@@ -219,6 +220,8 @@ nền trong suốt quanh nó; tuỳ chọn điểm `<tên>_root` nếu đường
   được trùng tên vùng `warp` trên cùng lớp (trùng → vùng `sway` bị bỏ + cảnh báo).
 - Hộp thiếu trong `anchors.json`, hộp nhỏ hơn 8 px, đường gốc nằm sát đầu ngọn → cảnh báo
   `compose: plate <id>: sway <tên> ...` và vùng đó đứng yên (lớp vẫn vẽ bình thường).
+- `period`, `gust`, `power`, `lag`, `strip`, `salt` không phải số hữu hạn (hoặc `power` ≤ 0) → cảnh báo và dùng giá trị
+  mặc định; giá trị ghi đè theo shot cũng được xử lý như vậy (không cảnh báo), nên độ lệch luôn ≤ `amp` · chiều cao.
 - Kiểm: `make.py stills` ở hai thời điểm cách nhau nửa `period`; mép tán không được lộ răng cưa, gốc không được hở.
 
 ## 6. Tiện ích (thuần, có seed)

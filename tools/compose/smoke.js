@@ -69,28 +69,31 @@
       if (!C.smoke.sprites) throw new Error('COMPOSE.smoke: sprites not prepared (COMPOSE.load in READY\'s chain)');
       const x0 = o.x, y0 = o.y, rate = o.rate ?? 4, rise = o.rise ?? 70, height = o.height ?? 560;
       const size = o.size ?? 30, spread = o.spread ?? 0.3, wind = o.wind ?? 12, curl = o.curl ?? 36;
+      const t = o.t ?? st.t, seed = C.seed, alpha = o.alpha ?? 0.5, depth = o.depth ?? 1;
+      // a NaN that reached the canvas would not fail: the browser ignores that call, so a puff would be painted
+      // with the opacity or the transform left over from the call before it
       if (!(num(x0) && num(y0) && num(wind) && num(curl) && num(spread) && spread >= 0
-            && [rate, rise, height, size].every((v) => num(v) && v > 0))) {
-        C.warn('smoke plume: x, y must be numbers and rate, rise, height, size > 0: not drawn', 'smoke:spec');
+            && [rate, rise, height, size].every((v) => num(v) && v > 0) && num(alpha) && num(depth) && num(t))) {
+        C.warn('smoke plume: x, y must be numbers and rate, rise, height, size > 0 (every other field a finite number): not drawn', 'smoke:spec');
         return;
       }
-      const t = o.t ?? st.t, seed = C.seed;
-      const salt = o.salt ?? 1 + (((Math.round(x0) * 73 + Math.round(y0) * 19) % 9973) + 9973) % 9973;
+      // one salt per origin (to the px, +-8192 px around the stage): no two origins share it
+      const salt = o.salt ?? 1 + (Math.round(x0) & 16383) * 16384 + (Math.round(y0) & 16383);
       const want = o.color || (o.light ? C.smoke.lightColor : C.smoke.defaultColor);
       let spr = C.smoke.sprites[want];
       if (!spr) {
         C.warn(`smoke colour ${want} was not prebuilt (spec.smoke.colors): default used`);
         spr = C.smoke.sprites[o.light ? C.smoke.lightColor : C.smoke.defaultColor];
       }
-      const gain = C.clamp(o.alpha ?? 0.5) * (o.fade ? C.clamp(C.track(o.fade, t)) : 1);
-      if (gain <= 0.001) return;
+      const gain = C.clamp(alpha) * (o.fade ? C.clamp(C.track(o.fade, t)) : 1);
+      if (!(gain > 0.001)) return;
       const life = height / rise;
       let count = Math.ceil(rate * life);
       if (count > C.smoke.MAX_PUFFS) {
         C.warn(`smoke plume: ${count} puffs asked (rate * height / rise), drawn ${C.smoke.MAX_PUFFS}`, 'smoke:count', count);
         count = C.smoke.MAX_PUFFS;
       }
-      st.layer(o.depth ?? 1, (g) => {
+      st.layer(depth, (g) => {
         g.globalCompositeOperation = o.blend || (o.light ? 'screen' : 'source-over');
         for (let i = 0; i < count; i++) {
           const r = C.rng(seed, salt * 7919 + i);

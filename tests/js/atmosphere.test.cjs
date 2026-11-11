@@ -402,3 +402,70 @@ test('smoke, fire, embers and a swaying tree in one shot: pure in t under a movi
   assert.equal(g.stack.length, 0);
   assert.deepEqual(C.report(), []);
 });
+
+// ---------------------------------------------------------------- values that are not numbers
+
+// A canvas ignores a call that gets NaN: nothing fails, the mark is painted with whatever opacity and transform were
+// left from the call before (or not at all). So no NaN may reach it.
+test('smoke and fire: a field that is not a finite number is a warning, never a NaN on the canvas', async () => {
+  const { C, shot } = await ready();
+  const B = [100, 900, 400, 900];
+  const smoke = [{ alpha: NaN }, { alpha: 'x' }, { t: NaN }, { depth: NaN }, { depth: 'near' }, { fade: 'x' }];
+  for (const o of smoke) assert.equal(shot(1, (st) => C.smoke.plume(st, { x: 900, y: 800, ...o })).length, 0, JSON.stringify(o));
+  assert.ok(C.report().some((l) => /^compose: smoke plume/.test(l)));
+  const fire = [{ alpha: NaN }, { flicker: NaN }, { speed: NaN }, { sway: NaN }, { lean: NaN }, { body: NaN }, { t: NaN },
+                { depth: NaN }, { count: 'x' }, { count: NaN }, { fade: 'x' }];
+  for (const o of fire) assert.equal(shot(1, (st) => C.fire.flames(st, { base: B, ...o })).length, 0, Object.keys(o)[0]);
+  assert.ok(C.report().some((l) => /^compose: fire flames/.test(l)));
+  for (const o of [{ depth: NaN }, { intensity: NaN }, { pulse: NaN }, { speed: NaN }, { t: NaN }]) {
+    assert.equal(shot(1, (st) => C.fire.glow(st, { x: 900, y: 800, ...o })).length, 0, Object.keys(o)[0]);
+  }
+  // numbers out of range still draw, clamped
+  const wild = shot(1, (st) => C.fire.flames(st, { base: B, lean: 1e9, sway: 50, flicker: 7, body: -2, alpha: 9 }));
+  assert.ok(draws(wild).length > 0);
+  finite(wild, 'wild flames');
+  finite(shot(1, (st) => C.smoke.plume(st, { x: 900, y: 800, alpha: 9, wind: 1e6 })), 'wild smoke');
+});
+
+test('smoke and fire: no two origins on the stage share a default salt', async () => {
+  const { C, shot } = await ready();
+  const r4 = (v) => Math.round(v * 1e4) / 1e4;
+  const plume = (x, y) => JSON.stringify(draws(shot(3, (st) => C.smoke.plume(st, { x, y }))).map((c) => [r4(c.m[4] - x), r4(c.m[5] - y), c.alpha]));
+  const torch = (x, y) => JSON.stringify(draws(shot(3, (st) => C.fire.flames(st, { points: [[x, y]] }))).map((c) => [r4(c.m[4] - x), c.args[3], c.alpha]));
+  // among them the offsets that a linear hash of (x, y) folded to a small modulus maps to one salt
+  for (const [dx, dy] of [[19, -73], [-19, 73], [38, -146], [1, 0], [0, 1], [-900, -700], [136, 2]]) {
+    assert.notEqual(plume(900, 700), plume(900 + dx, 700 + dy), `plumes ${dx}, ${dy} apart`);
+    assert.notEqual(torch(900, 700), torch(900 + dx, 700 + dy), `torches ${dx}, ${dy} apart`);
+  }
+  assert.equal(plume(900, 700), plume(900, 700));
+});
+
+test('foliage: a value that is not a number, or a negative power, cannot break the bound or hide the crown', async () => {
+  const f = await forest({ sway: { crown: { period: 'slow', gust: NaN, lag: Infinity, strip: 'x', salt: 'a' }, bush: { power: -2 } } });
+  const rep = f.C.report();
+  for (const key of ['period', 'gust', 'lag', 'strip', 'salt']) {
+    assert.ok(rep.some((l) => new RegExp(`plate L2: sway crown ${key} .* is not a number: the default is used`).test(l)), key + ' ' + JSON.stringify(rep));
+  }
+  assert.ok(rep.some((l) => /plate L2: sway bush power -2 is not a number above 0: the default is used/.test(l)), JSON.stringify(rep));
+  const [crown, bush] = f.C.plates.L2.warps;
+  assert.ok(crown.sp >= 1, 'strips have a width');
+  // the bad values fell back to the defaults: the crown moves exactly as with a plain rig
+  const plain = await forest({ sway: { crown: {} } });
+  assert.deepEqual(strips(f.shot(2.5), crown).map((k) => k.dx), strips(plain.shot(2.5), plain.C.plates.L2.warps[0]).map((k) => k.dx));
+  const overs = [{}, { amp: NaN }, { amp: 'x' }, { period: NaN }, { period: 0 }, { period: 'x' }, { power: -3 }, { power: 0 },
+                 { lag: NaN }, { gust: 9 }, { gust: NaN }, { salt: 'a' }, { height: Infinity }, { height: NaN }];
+  for (const over of overs) for (const t of [0, 2, 1e7]) {
+    const what = `${Object.keys(over)[0]}=${Object.values(over)[0]} t=${t}`;
+    const calls = f.shot(t, { warp: { crown: over, bush: over } });
+    finite(calls, what);
+    for (const w of [crown, bush]) {
+      const s = strips(calls, w);
+      assert.ok(s.length > 10, 'every strip is drawn');
+      const worst = Math.max(...s.map((k) => Math.abs(k.dx)));
+      assert.ok(worst <= f.C.foliage.MAX_AMP * w.cfg.height + 1e-9, `${w.name} ${what}: ${worst}`);
+      const root = s.reduce((a, b) => (b.y > a.y ? b : a));
+      assert.ok(Math.abs(root.dx) < 0.05, `${w.name} ${what}: the root line moved ${root.dx}`);
+    }
+  }
+  assert.equal(f.C.foliage.offset(1, NaN, crown.cfg), 0);
+});

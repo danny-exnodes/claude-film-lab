@@ -22,6 +22,8 @@
   const C = root.COMPOSE = root.COMPOSE || {};
   const wobble = (seed, x, salt) => C.clamp((C.fbm(seed, x, salt, 2) - 0.5) * 2.6, -1, 1);
   const SIDES = ['left', 'right', 'top', 'bottom'];
+  const fin = (v) => typeof v === 'number' && Number.isFinite(v);
+  const or = (v, d) => (fin(v) ? v : d);
 
   function prepare(p) {
     if (p.seq || !p.rig || !p.rig.sway) return;
@@ -56,6 +58,14 @@
         C.warn(`plate ${p.id}: sway ${name} amp ${cfg.amp} is capped at ${C.foliage.MAX_AMP} (a share of the height, not px)`);
         cfg.amp = cfg.amp > C.foliage.MAX_AMP ? C.foliage.MAX_AMP : 0.015;
       }
+      // a value that is not a finite number would end as a NaN offset, and the browser does not draw a strip at NaN:
+      // the crown would vanish from the frame. The default is used instead (offset() does the same per shot).
+      for (const key of ['period', 'gust', 'power', 'lag', 'strip', 'salt']) {
+        if (cfg[key] != null && !(fin(cfg[key]) && (key !== 'power' || cfg[key] > 0))) {
+          C.warn(`plate ${p.id}: sway ${name} ${key} ${cfg[key]} is not a ${key === 'power' ? 'number above 0' : 'number'}: the default is used`);
+          delete cfg[key];
+        }
+      }
       let idSum = 0;
       for (const ch of String(p.id)) idSum += ch.charCodeAt(0);
       regions[name] = { ...cfg, box: [x0, y0, x1, y1], foliage: true, height,
@@ -78,10 +88,13 @@
     MAX_AMP: 0.04,
     // Sideways offset (plate px) at u (0 root line .. 1 far end) at time t. |offset| <= amp * height, always.
     offset(u, t, cfg, seed = C.seed) {
-      const amp = C.clamp(cfg.amp ?? 0.015, 0, C.foliage.MAX_AMP), period = Math.max(0.2, cfg.period ?? 5.5);
-      const gust = C.clamp(cfg.gust ?? 0.6), power = cfg.power ?? 1.6, lag = cfg.lag ?? 0.5, salt = cfg.salt ?? 29;
+      // every value is made finite here too: a per-shot override ({ warp: { crown: {...} } }) comes straight to this
+      // function. A power that is not above 0 is the default: with 0 the root line itself would move, below 0 there is no bound.
+      const amp = C.clamp(or(cfg.amp, 0.015), 0, C.foliage.MAX_AMP), period = Math.max(0.2, or(cfg.period, 5.5));
+      const gust = C.clamp(or(cfg.gust, 0.6)), power = cfg.power > 0 ? or(cfg.power, 1.6) : 1.6, lag = or(cfg.lag, 0.5);
+      const salt = or(cfg.salt, 29);
       const k = Math.pow(C.clamp(u), power);
-      if (!k || !(cfg.height > 0)) return 0;
+      if (!(k > 0) || !(fin(cfg.height) && cfg.height > 0) || !fin(t)) return 0;
       const tt = t - u * lag;                                            // the far end trails the root
       const env = 1 - gust + gust * C.smooth(C.fbm(seed, tt / (period * 2.2), salt + 3, 2) * 1.8 - 0.4);
       const swing = 0.6 * Math.sin(C.TAU * tt / period + C.hash(seed, 5, salt) * C.TAU)

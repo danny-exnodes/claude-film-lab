@@ -219,7 +219,7 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 `budget.yaml`:
 ```yaml
 images: 40               # tổng số ảnh tối đa (mọi model)
-video_seconds: 60        # tổng giây video tối đa
+video_seconds: 60        # tổng giây video tối đa; tập `method: layers` (§5) phải ghi 0
 models:                  # (tuỳ chọn) trần riêng theo model, đơn vị ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6
 ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có: buộc kéo ledger từ Drive trước; bật từ khâu 4

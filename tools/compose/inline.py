@@ -38,8 +38,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 TEMPLATE = REPO / ".claude" / "skills" / "film-compose-shot" / "templates" / "plates-film-section.js"
-ORDER = ["core.js", "plates.js", "stage.js", "breath.js", "strip-warp.js", "cloth.js", "pose.js", "foliage.js",
-         "eyelid.js", "mist.js", "embers.js", "glow.js", "smoke.js", "fire.js"]
+# cloth.js cuts its region out of the plate at load, so it comes after strip-warp.js and eyelid.js, which sample the
+# whole plate in their own prepare step.
+ORDER = ["core.js", "plates.js", "stage.js", "breath.js", "strip-warp.js", "foliage.js", "eyelid.js", "cloth.js",
+         "pose.js", "mist.js", "embers.js", "glow.js", "smoke.js", "fire.js"]
 # Registered in ORDER and in motions.json ahead of their files: skipped while the file is not there. Any other file
 # of ORDER that is missing fails the run.
 OPTIONAL = {"cloth.js", "pose.js"}

@@ -175,7 +175,8 @@ class TestInlineKitFiles(FilmCase):
         self.assertEqual(run(self.kit / "inline.py", self.film).returncode, 0)
         html = self.html()
         self.assertLess(html.find("// ---- tools/compose/strip-warp.js"), html.find("// ---- tools/compose/cloth.js"))
-        self.assertLess(html.find("// ---- tools/compose/cloth.js"), html.find("// ---- tools/compose/foliage.js"))
+        # cloth cuts its region out of the plate at load: it must come after the rigs that sample the whole plate
+        self.assertLess(html.find("// ---- tools/compose/eyelid.js"), html.find("// ---- tools/compose/cloth.js"))
         (self.kit / "pose.js").write_text("// COMPOSE pose (stub)\n", encoding="utf-8")
         n3, out = self.count()
         self.assertEqual(n3, n + 2)

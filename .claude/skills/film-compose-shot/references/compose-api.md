@@ -3,9 +3,9 @@
 **Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
 
 Mã JS thuần (không ES module, không thư viện), gắn vào `window.COMPOSE`. `inline.py` chèn các file theo thứ tự
-`core → plates → stage → breath → strip-warp → (cloth) → (pose) → foliage → eyelid → mist → embers → glow → smoke → fire`
-thành một khối `<script>` trước script của film.html (`cloth.js`, `pose.js` là file tuỳ chọn: chưa có thì bỏ qua;
-`inline.py --lint` in số file thực sự được chèn). Toạ độ **sân khấu** luôn là 1920x1080 px; khung render khác cỡ (nháp 960x540, biến thể 1:1) được co theo
+`core → plates → stage → breath → strip-warp → foliage → eyelid → cloth → pose → mist → embers → glow → smoke → fire`
+thành một khối `<script>` trước script của film.html (`inline.py --lint` in số file được chèn; rig `cloth` và `poses`:
+`references/layers-character.md`). Toạ độ **sân khấu** luôn là 1920x1080 px; khung render khác cỡ (nháp 960x540, biến thể 1:1) được co theo
 kiểu cover. Toạ độ **ảnh** là px của chính file lớp tranh (như trong `anchors.json`).
 
 ## 1. Nạp lớp: `COMPOSE.load(spec)` (trong `loadPlates`, trước READY)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One read-only screen for an episode: stage, gates, budget, open paid requests, layers, media, next gate.
+"""One read-only screen for an episode: stage, method, gates, budget, open paid requests, layers, forecast, gate.
 
   python3 tools/status.py <episode dir> [--media DIR] [--gate G1|G2|G3|G4] [--json]
   python3 tools/status.py --ledger L.csv [--budget budget.yaml] [--json]      # BUDGET section only
@@ -7,17 +7,20 @@
 Run it at session start and before a gate instead of reading EPISODE.md, budget.yaml, ledger.csv, prompts.csv
 and the media tree by hand. It writes nothing and makes no network call.
 
-Sections: STAGE (stage, gates, BLOCKED lines), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used
-against each cap, counted exactly like tools/ark.py does, then ATTENTION: OPEN / CUT-502 / FAILED / MISSING
-requests), SHOTS (state of every layer of every shot, clips, orphan plates), MEDIA (files in no bundle, renders),
-GATE (checklist for the first undated gate, or the one named by --gate).
+Sections: STAGE (stage, gates, BLOCKED lines), METHOD (`method:` of EPISODE.md: layers | seedance, missing =
+seedance), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used against each cap, counted exactly like
+tools/ark.py does, then ATTENTION: OPEN / CUT-502 / FAILED / MISSING requests), SHOTS (state of every layer of
+every shot, clips, orphan plates), FORECAST (what the episode will still cost, from shots.csv and prompts.csv
+alone: images to make, Seedance seconds planned, each against what is left under budget.yaml: `fits` or
+`OVER by N`; CONFLICT lines for ai_motion shots in a `method: layers` episode), MEDIA (files in no bundle,
+renders), GATE (checklist for the first undated gate, or the one named by --gate).
 
 Exit codes: 0 nothing blocks; 1 something needs action (a BLOCKED line, an OPEN request, a MISSING paid file, or
 --gate given and that gate is not ready); 2 usage (no EPISODE.md, unreadable front matter).
 The media folder comes from `media:` in EPISODE.md (relative to the repo root) or --media; the episode folder name
 is never parsed.
 """
-import argparse, csv, datetime, io, json, os, re, shlex, subprocess, sys, zipfile
+import argparse, csv, datetime, io, json, math, os, re, shlex, subprocess, sys, zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(HERE)
@@ -38,6 +41,10 @@ RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 STATUSES = ["ok", "cut-502", "failed", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
+METHODS = ("layers", "seedance")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
+DEFAULT_METHOD = "seedance"
+MIN_CLIP_S = 4                     # shortest clip Seedance accepts (docs/MODELS.md): a shorter shot still bills 4 s
+TO_MAKE = ("no-prompt", "todo", "rejected")   # layer states that still need a paid image
 
 
 class Usage(Exception):
@@ -67,6 +74,27 @@ def load_episode(ep_dir):
     if not isinstance(stage, int) or isinstance(stage, bool):
         raise Usage(f"{path}: unreadable front matter: stage must be a number 0-11 (got {stage!r})")
     return meta, body
+
+
+def read_method(meta, notes):
+    """The production method of the episode: {name: the method the forecast uses, source: episode | default |
+    invalid, raw: the value as written}. Only the exact words layers / seedance are a method."""
+    raw = meta.get("method")
+    if "method" not in meta:
+        return {"name": DEFAULT_METHOD, "source": "default", "raw": None}
+    if isinstance(raw, str) and raw.strip() in METHODS:
+        return {"name": raw.strip(), "source": "episode", "raw": raw}
+    notes.append(f"EPISODE.md: method = {raw!r} is not layers | seedance: the forecast counts the episode as "
+                 f"{DEFAULT_METHOD}")
+    return {"name": DEFAULT_METHOD, "source": "invalid", "raw": raw}
+
+
+def method_text(m):
+    if m["source"] == "default":
+        return f"{m['name']} (default, no method: in EPISODE.md)"
+    if m["source"] == "invalid":
+        return f"invalid ({m['raw']!r}; counted as {m['name']})"
+    return m["name"]
 
 
 def gate_dates(meta, notes):
@@ -311,10 +339,92 @@ def shots_section(ep_dir, media, notes):
             rows = [r for r in prompts or [] if r.get("shot") == shot and r.get("layer") == code]
             layers.append(dict({"layer": code}, **layer_state(rows, plates, on_disk)))
         out.append({"shot": shot, "reuse_of": s.get("reuse_of") or None, "layers": layers,
-                    "clip": (shot in clip_shots) if s.get("ai_motion") else None})
+                    "clip": (shot in clip_shots) if s.get("ai_motion") else None,
+                    "from_s": s.get("from_s", ""), "to_s": s.get("to_s", "")})
     listed = {r.get("file") for r in prompts or []}
     return {"present": {"shots.csv": shots is not None, "prompts.csv": prompts is not None},
             "shots": out, "orphans": [n for n in plates if n not in listed]}
+
+
+# ----------------------------------------------------------------- forecast ---
+def clip_seconds(shot):
+    """(whole seconds one Seedance clip for this shot would bill, None), or (None, why) when from_s/to_s are
+    unusable."""
+    try:
+        a, b = float(shot["from_s"]), float(shot["to_s"])
+    except (TypeError, ValueError):
+        return None, f"from_s={shot['from_s']!r} to_s={shot['to_s']!r} are not numbers"
+    if not (math.isfinite(a) and math.isfinite(b)) or b <= a:
+        return None, f"from_s={shot['from_s']} to_s={shot['to_s']} is not a positive duration"
+    return max(MIN_CLIP_S, math.ceil(round(b - a, 6))), None
+
+
+def forecast_section(shots, method, caps, notes):
+    """What is still to pay for, from the SHOTS data alone (no network), against what is left under each cap.
+    Images: one per layer code of a non-reuse shot that is neither approved, made nor lost (a lost file was paid
+    for: it is pulled back from Drive, see MISSING). Video: one clip per ai_motion shot without a clip, the shot
+    length rounded up to whole seconds and never under MIN_CLIP_S; a `layers` episode plans none and lists every
+    ai_motion shot as a conflict. Returns None when there is no shots.csv."""
+    if not shots["present"]["shots.csv"]:
+        return None
+    states = [l["state"] for s in shots["shots"] if not s["reuse_of"] for l in s["layers"]]
+    clips, conflicts, skipped = [], [], []
+    for s in shots["shots"]:
+        if s["clip"] is None:                       # no ai_motion: code motion only
+            continue
+        if method == "layers":
+            conflicts.append(f"method layers but {s['shot']} has ai_motion")
+        elif s["clip"] is False:
+            seconds, why = clip_seconds(s)
+            if seconds is None:
+                skipped.append(s["shot"])
+                notes.append(f"shots.csv: {s['shot']} {why}: its clip is not counted in the forecast")
+            else:
+                clips.append({"shot": s["shot"], "seconds": seconds})
+    left = {c["name"]: c["left"] for c in caps}
+
+    def against(need, cap):
+        rest = left.get(cap)
+        over = 0 if rest is None or need <= max(rest, 0) else need - rest
+        return {"left": rest, "over": over,
+                "verdict": "no cap" if rest is None else f"OVER by {over:g}" if over else "fits"}
+
+    images = {"layers": len(states), "approved": states.count("approved"), "made": states.count("made"),
+              "lost": states.count("lost"), "to_make": sum(1 for x in states if x in TO_MAKE)}
+    images.update(against(images["to_make"], "images"))
+    video = {"planned": sum(c["seconds"] for c in clips), "clips": clips}
+    video.update(against(video["planned"], "video_seconds"))
+    return {"method": method, "images": images, "video_seconds": video, "conflicts": conflicts, "skipped": skipped,
+            "fits": not images["over"] and not video["over"]}
+
+
+def forecast_text(f, notes):
+    def tail(x):
+        return "no cap" if x["left"] is None else f"{x['left']:g} left · {x['verdict']}"
+
+    i, v = f["images"], f["video_seconds"]
+    had = [f"{i[k]} {k}" for k in ("approved", "made", "lost") if i[k]]
+    each = ", ".join(f"{c['shot']} {c['seconds']}" for c in v["clips"])
+    out = [f"FORECAST (method {f['method']})",
+           f"  images: {i['to_make']} to make of {i['layers']} layers" + (f" ({', '.join(had)})" if had else "")
+           + f" · {tail(i)}",
+           f"  video_seconds: {v['planned']} planned" + (f" in {len(v['clips'])} clip(s) ({each})" if each else "")
+           + f" · {tail(v)}"]
+    out += [f"  CONFLICT: {c}" for c in f["conflicts"]]
+    return out + notes_text(notes)
+
+
+def forecast_brief(f):
+    """The forecast on one line, for the gate checklist."""
+    if f is None:
+        return "no shots.csv"
+
+    def one(name, need, word, x):
+        return (f"{name} {need} {word}" + ("" if x["left"] is None else f", {x['left']:g} left")
+                + (f": {x['verdict']}" if x["over"] else ""))
+
+    return "; ".join([one("images", f["images"]["to_make"], "to make", f["images"]),
+                      one("video_seconds", f["video_seconds"]["planned"], "planned", f["video_seconds"])])
 
 
 # -------------------------------------------------------------------- media ---
@@ -409,6 +519,7 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
                 if s["layers"] and all(l["state"] in ("made", "approved") for l in s["layers"])]
         need(done, "one shot with every layer made or approved" + (f" ({', '.join(done)})" if done else " (none)"))
         need(ledger and os.path.isfile(ledger), "ledger.csv present")
+        need(d["forecast"] and d["forecast"]["fits"], f"forecast fits the budget ({forecast_brief(d['forecast'])})")
     elif gate == "G3":
         bad = [f"{s['shot']} {l['layer']}:{l['state']}" for s in shots for l in s["layers"]
                if l["state"] != "approved"]
@@ -473,6 +584,8 @@ def episode_text(d, notes):
     out = [f"STAGE  {st['n']} {st['name']} · " + " · ".join(f"{g} {d['gates'][g] or '-'}" for g in GATES)]
     out += [f"  BLOCKED: {b['text']}" for b in d["blocked"]]
     out += notes_text(notes["stage"])
+    out.append(f"METHOD {method_text(d['method'])}")
+    out += notes_text(notes["method"])
     out.append("NEXT")
     out += d["next"] or ["  (nothing under '## Việc tiếp theo')"]
     out += budget_text(d, notes["budget"])
@@ -486,6 +599,8 @@ def episode_text(d, notes):
     if d["shots"]["orphans"]:
         out.append(f"  orphans (in plates/, no prompts.csv row): {', '.join(d['shots']['orphans'])}")
     out += notes_text(notes["shots"])
+    if d["forecast"]:
+        out += forecast_text(d["forecast"], notes["forecast"])
     m = d["media"]
     out.append(f"MEDIA  {show(m['dir']) if m['dir'] else '-'}")
     out += [f"  {shot}: {n} file(s) only in this container" for shot, n in m["unbundled"].items()]
@@ -545,7 +660,7 @@ def main(argv=None):
     except Usage as e:
         print(f"error: {e}", file=sys.stderr)
         return USAGE_EXIT
-    notes = {"stage": [], "budget": [], "shots": [], "media": []}
+    notes = {"stage": [], "method": [], "budget": [], "shots": [], "forecast": [], "media": []}
     if not isinstance(meta.get("gates"), dict):
         notes["stage"].append("EPISODE.md: gates is not a mapping {G1: ..., G4: ...}: every gate counts as not passed")
     media = media_dir(meta, a.media)
@@ -555,11 +670,13 @@ def main(argv=None):
     d = {"stage": {"n": stage, "name": STAGES.get(stage, "?"), "length_s": meta.get("length_s")},
          "gates": gate_dates(meta, notes["stage"])}
     d["blocked"] = blocked_gates(stage, d["gates"])
+    d["method"] = read_method(meta, notes["method"])
     d["next"] = next_lines(body)
     led, budget_state = collect_ledger(ledger, a.budget or os.path.join(a.episode, "budget.yaml"), media, bundled,
                                        notes["budget"])
     d.update(led)
     d["shots"] = shots_section(a.episode, media, notes["shots"])
+    d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"])
     d["media"] = media_section(media, bundled, notes["media"])
     gate = a.gate or next((g for g in GATES if not d["gates"][g]), None)
     d["gate"] = gate_section(gate, a.episode, media, d, budget_state, ledger) if gate else None

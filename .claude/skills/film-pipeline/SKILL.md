@@ -98,7 +98,13 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    ngắt giữa chừng: đã tính vào ngân sách, báo người dùng, không tự tạo lại; `MISSING` = file đã trả tiền không còn
    trong container (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu
    là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
-4. Báo người dùng các dòng `STAGE` / `BUDGET` / `NEXT` (3–5 dòng). Rồi làm `## Việc tiếp theo`.
+4. Báo người dùng các dòng `STAGE` / `METHOD` / `BUDGET` / `FORECAST` / `NEXT` (3–6 dòng). Rồi làm `## Việc tiếp theo`.
+   `METHOD` = phương pháp dựng của tập (`method:` trong EPISODE.md: `layers` | `seedance`; thiếu khóa = `seedance`).
+   `FORECAST` = dự báo phần còn phải trả, tính từ `shots.csv` + `prompts.csv`, không gọi mạng: số ảnh còn phải tạo
+   (lớp chưa có ảnh hoặc bị từ chối) và số giây Seedance dự kiến (shot có `ai_motion` chưa có clip, làm tròn lên, tối
+   thiểu 4 s mỗi clip), so với phần còn lại của `budget.yaml`: `fits` hoặc `OVER by N`. `OVER` → báo người dùng trước
+   khi tạo gì (bớt lớp/shot hoặc người dùng nâng trần; agent không tự đổi trần). Dòng `CONFLICT: method layers but
+   sNN has ai_motion` → tập `layers` không gọi Seedance: giao `film-writer` đổi shot đó sang `code_motion`.
 
 Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở khâu 0 (mục 3).
 
@@ -132,7 +138,8 @@ Quy tắc cổng:
 - Khi trình cổng: chạy `python3 tools/status.py projects/<project>/ep<NN>-<slug> --gate <G>` (mã thoát 1 = còn dòng
   `[MISSING]`: chưa trình; hoặc còn `BLOCKED` / `OPEN` / `MISSING` như mục 1 bước 3: xử lý, cái không xử lý được thì
   nêu cho người dùng); rồi đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần lấy từ dòng `BUDGET`,
-  và đúng một câu hỏi duyệt.
+  và đúng một câu hỏi duyệt. Ở G2 có thêm dòng `forecast fits the budget`: `[MISSING]` = phần còn phải tạo vượt phần
+  còn lại của trần (xem `FORECAST`), nêu con số cho người dùng quyết trước khi tạo hàng loạt ở khâu 5.
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.

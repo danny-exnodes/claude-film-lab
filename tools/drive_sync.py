@@ -37,7 +37,7 @@ lock on projects/<project>/.drive_sync.lock and replaced atomically, so parallel
   .pushed.log     one line per upload this session: `<UTC ISO> <path> <new Drive ID>`.
 
 Ignored everywhere: dotfiles and dot-directories, __pycache__. Never planned or snapshotted: temp files
-(*.b64, *.orig, *.bak, *.tmp, *.part, *~; the plan lists them once) and ledger.drive-*.csv (Drive copies to merge).
+(*.b64, *.orig, *.bak, *.tmp, *.part, *~, *.lock, *.swp; the plan lists them once) and ledger.drive-*.csv (Drive copies to merge).
 Exit: 0 ok, 1 plan has blockers (folders to create, unmapped files) or snapshot refused, 2 cannot plan or record
 (no PROJECT.md, bad manifest, a path outside the project...).
 """
@@ -55,7 +55,7 @@ import episode_id  # noqa: E402  ep<NN> | q<NN>t<NN> (docs/CONVENTIONS.md §2)
 
 SNAPSHOT, PULLED_AT, PUSHED_LOG = ".pulled.sha256", ".pulled.at", ".pushed.log"
 LOCK = ".drive_sync.lock"
-TEMP_PATTERNS = ("*.b64", "*.orig", "*.bak", "*.tmp", "*.part", "*~")     # pull / editor / bundle leftovers
+TEMP_PATTERNS = ("*.b64", "*.orig", "*.bak", "*.tmp", "*.part", "*~", "*.lock", "*.swp")     # pull / editor / bundle leftovers
 LEDGER, LEDGER_COPIES = "ledger.csv", "ledger.drive-*.csv"                # copies: downloaded for ledger-merge
 RE_SHOT_TAG = re.compile(r"_s\d{2}_")                                     # as tools/bundle.py picks shot media
 SNIPPETS_OFF = "  excludeContentSnippets=true"       # search_files returns long content snippets by default

@@ -3,25 +3,38 @@
 
   python3 tools/tts/vieneu_tts.py --script projects/<p>/ep<NN>-<slug>/script.md --out out/<p>/ep<NN>/vo --voice "Thái Sơn"
   python3 tools/tts/vieneu_tts.py --lines audio/vo-lines.json --out out/<p>/ep<NN>/vo --voice "Thái Sơn" [--only VO3 VO7]
-  python3 tools/tts/vieneu_tts.py --script .../script.md --out ... --dry-run          # parse + normalise only, no model
+  python3 tools/tts/vieneu_tts.py --script .../script.md [--out ...] --dry-run [--strict]   # no model: parse, normalise, estimate
+  python3 tools/tts/vieneu_tts.py --script .../script.md --out ... --voice "Thái Sơn" --check   # no model: is the render done?
   python3 tools/tts/vieneu_tts.py --list-voices [--gender male] [--region nam]
   python3 tools/tts/vieneu_tts.py --audition "Thái Sơn,Đức Trí" --text "Câu một." --text "Câu hai." --out .../audition
 
 Input
-  --lines   cinecode vo-lines.json: {"lines": [{"id": "VO1", "text": "..."}]} (optional per line: "start_s", "slot_s")
+  --lines   cinecode vo-lines.json: {"lines": [{"id": "VO1", "text": "..."}]} (optional per line: "start_s", "slot_s").
+            Ids become file names: letters, digits, _ and -, at most 32 characters, unique.
   --script  script.md: narration lines "[mm:ss] text" (same rules as tools/check_episode.py: headings, blockquotes,
             HTML comments, code fences, front matter and rules are not narration). Ids VO1, VO2, ... in order.
+            A narration line without a valid mark, a mark without text, marks out of order or an episode length
+            before the last mark are errors (script.md:<n>: <reason>, exit 2): no line is ever skipped.
   --text    one line given on the command line (repeatable; ids T1, T2, ...)
 Output (in --out)
   <id>.wav (mono, 24-bit PCM, the model's native rate: 48 kHz for v3 Turbo, 24 kHz for v3 Nano) and tts-log.json
-  (a list, one entry per id: id, text, spoken, file, duration_s, voice, model, version, licence, ...). Audition mode
-  writes <voice-slug>_<id>.wav and audition-log.json with per-file stats (RMS, peak, clipping) and render speed.
-  A table of real durations vs the script's time slots is printed; a line longer than its slot is flagged OVER.
+  (a list in script order, one entry per id, written after every line: id, text, text_sha, spoken, file,
+  duration_s, status, rms_dbfs, voice, model, version, licence, ...). Audition mode writes <voice-slug>_<id>.wav
+  and audition-log.json with per-file stats (RMS, peak, clipping) and render speed.
+  A table of real durations vs the script's time slots is printed. Each take is ok, OVER (longer than its slot),
+  EMPTY (under 0.2 s or below -50 dBFS), CLIPPED or NOSLOT (no slot known).
+Stale takes (--script/--lines)
+  STALE <id> = the line's text changed since its take; ORPHAN <id> = the take's id left the script. A render
+  without --only moves orphan wavs to <out>/_stale/; --only refuses to leave another line stale (--allow-stale).
+Exit codes
+  0 ok · 1 a take or a check failed (EMPTY always; with --strict also OVER, CLIPPED, an unread token, NOSLOT for
+  --script; --check) · 2 input error, nothing rendered · 3 vieneu is not installed
 
 Text normalisation (Vietnamese): pronunciation map first (--pron CSV "term,doc", e.g. Hán Việt names), then
 abbreviations (TCN, SCN), Roman numerals and ordinals (thế kỷ IV -> thế kỷ thứ tư), dates, times, percentages, units
 (km, m, kg, °C, ...), decimals (3,5), thousands (3.000) and plain numbers/years, read the Southern way
-(ngàn, lẻ) with --numbers nam (default) or the Northern way (nghìn, linh) with --numbers bac.
+(ngàn, lẻ) with --numbers nam (default) or the Northern way (nghìn, linh) with --numbers bac. A token that still
+holds a digit, a Han character, 《 》 or one of & + = ^ $ / ° after that is reported: WARN <id>: unread token.
 
 Licence rule (tools/tts/README.md): only Apache-2.0 models whose preset voices allow commercial use are wired in:
 v3 Turbo (final) and v3 Nano (fast draft). VieNeu-TTS 0.3B and the legacy 0.5B presets (voices.json says
@@ -29,7 +42,7 @@ CC BY-NC 4.0) are not offered. The library's audio watermark (resemble-perth) is
 
 Not installed? pip install vieneu==3.8.3 (see tools/tts/README.md); the tool prints the hint and exits 3.
 """
-import argparse, csv, json, os, re, shutil, subprocess, sys, time, unicodedata, wave
+import argparse, csv, hashlib, json, math, os, re, shutil, subprocess, sys, time, unicodedata, wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(os.path.dirname(HERE))
@@ -49,13 +62,70 @@ MODES = {
     "v3nano": {"repo": "pnnbao-ump/VieNeu-TTS-v3-Nano", "licence": "Apache-2.0", "rate": 24000,
                "codec": "", "use": "draft (preview model, lower quality)"},
 }
-EXIT_MISSING = 3
+EXIT_INPUT = 2                  # bad script, lines file, arguments or stale takes: nothing was rendered
+EXIT_MISSING = 3                # vieneu is not installed
 OVER_MARGIN_S = 0.0
+EMPTY_MAX_S = 0.2               # a take shorter than this, or quieter than EMPTY_RMS_DBFS, is EMPTY
+EMPTY_RMS_DBFS = -50.0
+EST_SYLLABLES_PER_S = 4.0       # --dry-run estimate (flag --rate)
+EST_OVER_TOLERANCE = 0.15       # --dry-run --strict fails when an estimate overruns its slot by more than this
+SPEED_MIN, SPEED_MAX = 0.9, 1.1
+RE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
+LOG_NAME = "tts-log.json"
+STALE_DIR = "_stale"
+
+
+class InputError(ValueError):
+    """A problem with what the user gave the tool: one line on stderr, exit EXIT_INPUT."""
+
+
+def fail(msg, code=EXIT_INPUT):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
 
 
 # --- input ------------------------------------------------------------------------------------------------------
 def nfc(s):
     return unicodedata.normalize("NFC", s)
+
+
+def text_sha(text):
+    """First 12 hex of sha256 of the NFC text: tells whether a take still speaks its script line."""
+    return hashlib.sha256(nfc(text).encode("utf-8")).hexdigest()[:12]
+
+
+def fmt_mark(t):
+    return f"[{int(t) // 60:02d}:{int(t) % 60:02d}]"
+
+
+def script_problems(text, length_s=None):
+    """[(line number, reason)] for everything in a script.md that would make the narration differ from the script:
+    a narration line without a mark, a malformed mark, seconds > 59, a mark without text, a mark that is not after
+    the previous one, and an episode length that does not leave room for the last line."""
+    out, prev, last = [], None, None
+    for n, line in check_episode.narration_lines(nfc(text)):
+        m = check_episode.RE_MARK.match(line)
+        if not m:
+            bad = re.match(r"^\s*(?:[-*]\s+)?(\[[^\]]*\])", line)
+            if bad:
+                out.append((n, f"malformed mark {bad.group(1)}: write [mm:ss] with two digits each"))
+            else:
+                out.append((n, f"narration line without a [mm:ss] mark: {line.strip()[:40]!r}"))
+            continue
+        mm, ss = int(m.group(1)), int(m.group(2))
+        if ss > 59:
+            out.append((n, f"mark [{m.group(1)}:{m.group(2)}]: seconds must be 00-59"))
+            continue
+        t = mm * 60 + ss
+        if not m.group(3).strip():
+            out.append((n, f"mark {fmt_mark(t)} without text"))
+        if prev is not None and t <= prev[0]:
+            out.append((n, f"mark {fmt_mark(t)} is not after the previous mark {fmt_mark(prev[0])} (line {prev[1]})"))
+        prev = last = (t, n)
+    if length_s is not None and last is not None and float(length_s) <= last[0]:
+        out.append((last[1], f"episode length {float(length_s):g} s leaves no time for the last line at "
+                             f"{fmt_mark(last[0])} (--length or length_s in EPISODE.md)"))
+    return out
 
 
 def parse_script(text):
@@ -82,15 +152,39 @@ def episode_length(script_path):
 
 
 def load_lines(path):
-    with open(path, encoding="utf-8-sig") as f:
-        data = json.load(f)
-    lines = data["lines"] if isinstance(data, dict) else data
-    out = []
-    for i, ln in enumerate(lines, 1):
-        if not isinstance(ln, dict) or not str(ln.get("text", "")).strip():
-            raise ValueError(f"{path}: line {i} has no text")
-        out.append({"id": str(ln.get("id") or f"VO{i}"), "text": nfc(str(ln["text"]).strip()),
-                    **{k: float(ln[k]) for k in ("start_s", "slot_s") if ln.get(k) not in (None, "")}})
+    """vo-lines.json -> [{"id", "text", optional "start_s", "slot_s"}]. Raises InputError on any shape problem:
+    the ids become file names, so they are checked before anything is written."""
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            data = json.load(f)
+    except (OSError, ValueError, RecursionError) as e:
+        raise InputError(f"{path}: cannot read: {e}") from None
+    if not isinstance(data, dict) or not isinstance(data.get("lines"), list):
+        raise InputError(f'{path}: expected an object {{"lines": [{{"id": "VO1", "text": "..."}}]}}')
+    if not data["lines"]:
+        raise InputError(f"{path}: no lines")
+    out, seen = [], set()
+    for i, ln in enumerate(data["lines"], 1):
+        if not isinstance(ln, dict):
+            raise InputError(f"{path}: line {i} is not an object")
+        lid = ln.get("id", f"VO{i}")
+        if not isinstance(lid, str) or not RE_ID.match(lid):
+            raise InputError(f"{path}: line {i}: id {lid!r} must match {RE_ID.pattern} (it becomes a file name)")
+        if lid in seen:
+            raise InputError(f"{path}: line {i}: duplicate id {lid!r}")
+        seen.add(lid)
+        text = ln.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise InputError(f"{path}: line {i} ({lid}): text is missing or empty")
+        row = {"id": lid, "text": nfc(text.strip())}
+        for k in ("start_s", "slot_s"):
+            v = ln.get(k)
+            if v is None:
+                continue
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 <= v < 1e9:   # nan, inf: False
+                raise InputError(f"{path}: line {i} ({lid}): {k} must be a number of seconds, got {str(v)[:40]}")
+            row[k] = float(v)
+        out.append(row)
     return out
 
 
@@ -258,6 +352,26 @@ def normalize_vi(text, pron=(), dialect="nam"):
     return re.sub(r"[ \t]+", " ", t).strip()
 
 
+RE_RESIDUE = re.compile(r"[\d㐀-鿿豈-﫿《》&+=^$/°]")
+RESIDUE_STRIP = ".,;:!?…\"'“”‘’()[]"
+
+
+def residue(spoken):
+    """Tokens of normalised text the model cannot be trusted to read: anything still holding a digit, a Han
+    character, 《 》 or one of & + = ^ $ / °. Each token once, in order, without surrounding punctuation."""
+    out = []
+    for tok in nfc(spoken).split():
+        tok = tok.strip(RESIDUE_STRIP)
+        if tok and RE_RESIDUE.search(tok) and tok not in out:
+            out.append(tok)
+    return out
+
+
+def syllables(spoken):
+    """Vietnamese writes one syllable per word: count whitespace tokens that hold a letter or a digit."""
+    return sum(1 for tok in spoken.split() if any(c.isalnum() for c in tok))
+
+
 # --- audio helpers (numpy only) ----------------------------------------------------------------------------------
 def write_wav24(path, wav, rate):
     import numpy as np
@@ -301,6 +415,12 @@ def audio_stats(wav, rate):
             "peak_dbfs": db(float(np.max(np.abs(x)))), "clipped": int(np.sum(np.abs(x) >= 0.999)),
             "lead_silence_s": round(loud[0] / rate, 3) if len(loud) else None,
             "tail_silence_s": round((len(x) - 1 - loud[-1]) / rate, 3) if len(loud) else None}
+
+
+def need_ffmpeg(a):
+    """v3 Turbo has no native speed: --speed != 1 is an ffmpeg pass. Checked before the model is loaded."""
+    if a.speed != 1.0 and a.mode != "v3nano" and not shutil.which("ffmpeg"):
+        fail(f"--speed {a.speed:g} needs ffmpeg on PATH for --mode {a.mode} (or drop --speed)")
 
 
 def atempo(path, speed):
@@ -395,28 +515,47 @@ class VieneuEngine:
 
 # --- CLI ---------------------------------------------------------------------------------------------------------
 def collect_lines(a):
+    """-> (every line of the input, the lines selected by --only). Any input problem ends the run with exit 2."""
     length = a.length
     if a.script:
-        with open(a.script, encoding="utf-8-sig") as f:
-            lines = parse_script(f.read())
+        try:
+            text = check_episode.read_text(a.script)
+        except (OSError, ValueError, check_episode.CheckError) as e:
+            fail(f"{a.script}: cannot read: {e}")
         if length is None:
-            length = episode_length(a.script)
+            try:
+                length = episode_length(a.script)
+            except (ValueError, check_episode.CheckError) as e:   # not UTF-8, or a length_s that is not a number
+                fail(f"{os.path.join(os.path.dirname(os.path.abspath(a.script)), 'EPISODE.md')}: cannot read"
+                     f" length_s: {e}")
+        problems = script_problems(text, length)
+        if problems:
+            fail("\n".join(f"{a.script}:{n}: {why}" for n, why in problems))
+        lines = parse_script(text)
         if not lines:
-            sys.exit(f"{a.script}: no narration lines with a [mm:ss] mark")
+            fail(f"{a.script}: no narration lines with a [mm:ss] mark")
     elif a.lines:
-        lines = load_lines(a.lines)
+        try:
+            lines = load_lines(a.lines)
+        except InputError as e:
+            fail(str(e))
     elif a.text:
-        lines = [{"id": f"T{i}", "text": nfc(t)} for i, t in enumerate(a.text, 1)]
+        if not all(t.strip() for t in a.text):
+            fail("--text: empty line")
+        lines = [{"id": f"T{i}", "text": nfc(t.strip())} for i, t in enumerate(a.text, 1)]
     else:
-        sys.exit("give --script, --lines or --text")
+        fail("give --script, --lines or --text")
     add_slots(lines, length)
+    selected = lines
     if a.only:
         keep = {x for o in a.only for x in o.split(",") if x}
+        if not keep:
+            fail("--only: no id given")
         unknown = keep - {ln["id"] for ln in lines}
         if unknown:
-            sys.exit(f"--only: unknown id(s) {', '.join(sorted(unknown))}")
-        lines = [ln for ln in lines if ln["id"] in keep]
-    return lines
+            fail(f"--only: unknown id(s) {', '.join(sorted(unknown))}")
+        selected = [ln for ln in lines if ln["id"] in keep]
+    return lines, selected
 
 
 def fit_label(dur, slot):
@@ -427,24 +566,63 @@ def fit_label(dur, slot):
     return f"ok ({slot - dur:.1f} s spare)"
 
 
-def print_table(rows):
-    print(f"{'id':<6} {'mark':>6} {'slot':>6} {'dur':>6}  fit")
+def take_flags(stats, slot):
+    """Everything wrong with one take, worst first: EMPTY, OVER, CLIPPED, NOSLOT. [] = ok."""
+    flags = []
+    rms = stats.get("rms_dbfs")
+    if stats["duration_s"] < EMPTY_MAX_S or rms is None or rms < EMPTY_RMS_DBFS:
+        flags.append("EMPTY")
+    if slot is not None and stats["duration_s"] > slot + OVER_MARGIN_S:
+        flags.append("OVER")
+    if stats.get("clipped"):
+        flags.append("CLIPPED")
+    if slot is None:
+        flags.append("NOSLOT")
+    return flags
+
+
+def print_table(rows, dur_key="duration_s", dur_head="dur"):
+    print(f"{'id':<6} {'mark':>6} {'slot':>6} {dur_head:>6}  fit")
     for r in rows:
-        mark = f"{int(r['start_s']) // 60:02d}:{int(r['start_s']) % 60:02d}" if r.get("start_s") is not None else "-"
+        mark = fmt_mark(r["start_s"])[1:-1] if r.get("start_s") is not None else "-"
         slot = f"{r['slot_s']:.1f}" if r.get("slot_s") is not None else "-"
-        dur = f"{r['duration_s']:.2f}" if r.get("duration_s") is not None else "-"
+        dur = f"{r[dur_key]:.2f}" if r.get(dur_key) is not None else "-"
         print(f"{r['id']:<6} {mark:>6} {slot:>6} {dur:>6}  {r.get('fit', '')}")
 
 
-def merge_log(path, entries):
-    log = []
-    if os.path.exists(path):
+# --- tts-log.json: one entry per id, in script order ----------------------------------------------------------------
+def read_log(path):
+    """-> (entries, error). Entries are the dicts of a valid log (a list of objects with a string id); error is
+    None, or why the file cannot be used."""
+    if not os.path.exists(path):
+        return [], None
+    try:
         with open(path, encoding="utf-8") as f:
             log = json.load(f)
-        if not isinstance(log, list):
-            log = []
-    ids = {e["id"] for e in entries}
-    log = [e for e in log if e.get("id") not in ids] + entries
+    except (OSError, ValueError) as e:
+        return [], f"cannot read: {e}"
+    if not isinstance(log, list) or not all(isinstance(e, dict) and isinstance(e.get("id"), str) for e in log):
+        return [], "not a list of entries with an id"
+    return log, None
+
+
+def open_log(path):
+    """The log a render will add to. An unusable file is set aside as tts-log.json.bad-<UTC time>, never lost."""
+    log, err = read_log(path)
+    if err:
+        stem = f"{path}.bad-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}"
+        bad, n = stem, 1
+        while os.path.exists(bad):
+            n += 1
+            bad = f"{stem}-{n}"
+        os.replace(path, bad)
+        print(f"{path}: {err}; kept as {os.path.basename(bad)}, starting an empty log", file=sys.stderr)
+    return log
+
+
+def write_log(path, by_id, order):
+    """Entries in script order (`order` = ids of the current script); ids the script does not know come last."""
+    log = [by_id[i] for i in order if i in by_id] + [e for i, e in by_id.items() if i not in set(order)]
     tmp = path + ".part"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(log, f, ensure_ascii=False, indent=1)
@@ -452,10 +630,58 @@ def merge_log(path, entries):
     return log
 
 
-def entry_for(ln, spoken, path, dur, eng, voice, seed, speed):
-    return {"id": ln["id"], "text": ln["text"], "spoken": spoken, "file": path, "duration_s": round(dur, 3),
-            "seconds": round(dur, 2), "start_s": ln.get("start_s"), "slot_s": ln.get("slot_s"),
-            "fit": fit_label(dur, ln.get("slot_s")), "engine": "vieneu", "mode": eng.mode, "voice": voice,
+def is_stale(entry, line):
+    """True when the take was rendered from another text than the script line has now."""
+    if entry.get("text_sha"):
+        return entry["text_sha"] != text_sha(line["text"])
+    return nfc(str(entry.get("text", ""))) != line["text"]          # entry from before text_sha existed
+
+
+def compare_log(lines, log):
+    """-> (stale ids, orphan ids): takes whose text changed, and takes whose id left the script."""
+    by_id = {e["id"]: e for e in log}
+    ids = {ln["id"] for ln in lines}
+    stale = [ln["id"] for ln in lines if ln["id"] in by_id and is_stale(by_id[ln["id"]], ln)]
+    return stale, [i for i in by_id if i not in ids]
+
+
+def report_stale(stale, orphans, skip=()):
+    for i in stale:
+        if i not in skip:
+            print(f"STALE {i}: text changed since render")
+    for i in orphans:
+        print(f"ORPHAN {i}: not in script")
+
+
+def retire_orphans(out, by_id, orphans):
+    """Move the wavs of takes that left the script to <out>/_stale/ and drop their entries. Audio is never deleted;
+    an id that is not a safe file name (a log from before ids were checked) only loses its entry."""
+    for i in orphans:
+        by_id.pop(i, None)
+        src = os.path.join(out, f"{i}.wav")
+        if not RE_ID.match(i) or not os.path.isfile(src):
+            continue
+        os.makedirs(os.path.join(out, STALE_DIR), exist_ok=True)
+        dst = os.path.join(out, STALE_DIR, f"{i}.wav")
+        if os.path.exists(dst):
+            stem = os.path.join(out, STALE_DIR, f"{i}.{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
+            dst, n = f"{stem}.wav", 1
+            while os.path.exists(dst):              # never replace a retired take
+                n += 1
+                dst = f"{stem}-{n}.wav"
+        os.replace(src, dst)
+        print(f"moved {i}.wav to {os.path.join(STALE_DIR, os.path.basename(dst))}")
+
+
+def entry_for(ln, spoken, path, stats, eng, voice, seed, speed):
+    dur, flags = stats["duration_s"], take_flags(stats, ln.get("slot_s"))
+    return {"id": ln["id"], "text": ln["text"], "text_sha": text_sha(ln["text"]), "spoken": spoken, "file": path,
+            "duration_s": round(dur, 3), "seconds": round(dur, 2), "start_s": ln.get("start_s"),
+            "slot_s": ln.get("slot_s"), "fit": fit_label(dur, ln.get("slot_s")),
+            "status": flags[0] if flags else "ok", "flags": flags,
+            "rms_dbfs": stats.get("rms_dbfs"), "peak_dbfs": stats.get("peak_dbfs"), "clipped": stats.get("clipped", 0),
+            "lead_silence_s": stats.get("lead_silence_s"), "tail_silence_s": stats.get("tail_silence_s"),
+            "engine": "vieneu", "mode": eng.mode, "voice": voice,
             "model": eng.repo, "model_revision": eng.revision,
             "precision": eng.precision if eng.mode == "v3turbo" else "",
             "version": f"vieneu {eng.version}", "licence": MODES[eng.mode]["licence"],
@@ -463,18 +689,89 @@ def entry_for(ln, spoken, path, dur, eng, voice, seed, speed):
             "seed": seed, "speed": speed, "chars": len(spoken)}
 
 
-def run_lines(a, lines, pron, make_engine):
+NOSLOT_HINT = "give --length or add length_s to EPISODE.md"
+
+
+def warn_residue(lines):
+    """Print one WARN per unread token; -> number of warnings."""
+    n = 0
+    for ln in lines:
+        for tok in residue(ln["spoken"]):
+            n += 1
+            print(f"WARN {ln['id']}: unread token '{tok}': add it to pronunciation.csv or rewrite the line",
+                  file=sys.stderr)
+    return n
+
+
+def dry_run(a, lines, all_lines, unread):
+    """Parse + normalise + estimate; no model, nothing written."""
+    over, noslot = [], []
+    for ln in lines:
+        ln["est_s"] = round(syllables(ln["spoken"]) / a.rate, 2)
+        slot = ln.get("slot_s")
+        if slot is None:
+            ln["fit"] = "NOSLOT" if a.script else ""
+            noslot.append(ln["id"])
+        elif ln["est_s"] > slot:
+            ln["fit"] = f"OVER? (est.) +{ln['est_s'] - slot:.1f} s"
+            if ln["est_s"] > slot * (1 + EST_OVER_TOLERANCE):
+                over.append(ln["id"])
+        else:
+            ln["fit"] = f"ok (est., {slot - ln['est_s']:.1f} s spare)"
+        print(f"{ln['id']}: {ln['spoken']}")
+    print(f"dry run: {len(lines)} line(s), mode {a.mode}, voice {a.voice or '(model default)'}; nothing rendered;"
+          f" durations estimated at {a.rate:g} syllables per second")
+    print_table(lines, "est_s", "est")
+    if a.out and (a.script or a.lines):
+        log, err = read_log(os.path.join(a.out, LOG_NAME))
+        if err:
+            print(f"{os.path.join(a.out, LOG_NAME)}: {err} (a render will set it aside)", file=sys.stderr)
+        report_stale(*compare_log(all_lines, log))
+    if not a.strict:
+        return 0
+    bad = 0
+    if unread:
+        print(f"--strict: {unread} unread token(s)", file=sys.stderr)
+        bad = 1
+    if over:
+        print(f"--strict: estimate over the slot by more than {EST_OVER_TOLERANCE:.0%}: {', '.join(over)}"
+              f" -> shorten the line or move the next mark", file=sys.stderr)
+        bad = 1
+    if noslot and a.script:
+        print(f"--strict: NOSLOT {', '.join(noslot)}: {NOSLOT_HINT}", file=sys.stderr)
+        bad = 1
+    return bad
+
+
+def run_lines(a, lines, pron, make_engine, all_lines=None):
+    all_lines = all_lines or lines
     for ln in lines:
         ln["spoken"] = normalize_vi(ln["text"], pron, a.numbers)
+    unread = warn_residue(lines)
     if a.dry_run:
-        for ln in lines:
-            print(f"{ln['id']}: {ln['spoken']}")
-        print(f"dry run: {len(lines)} line(s), mode {a.mode}, voice {a.voice or '(model default)'}; nothing rendered")
-        print_table(lines)
-        return 0
+        return dry_run(a, lines, all_lines, unread)
+    # Everything that can refuse the run happens before the model is loaded.
+    if unread and a.strict:
+        print(f"--strict: {unread} unread token(s); nothing rendered", file=sys.stderr)
+        return 1
+    need_ffmpeg(a)
+    try:
+        os.makedirs(a.out, exist_ok=True)
+    except OSError as e:
+        fail(f"--out {a.out}: cannot create the folder: {e}")
+    tracked = bool(a.script or a.lines)             # --text takes are one-offs: no stale/orphan bookkeeping
+    log_path = os.path.join(a.out, LOG_NAME)
+    by_id = {e["id"]: e for e in open_log(log_path)}
+    order = [ln["id"] for ln in all_lines]
+    selected = {ln["id"] for ln in lines}
+    stale, orphans = compare_log(all_lines, list(by_id.values())) if tracked else ([], [])
+    report_stale(stale, orphans, skip=selected)
+    left_stale = [i for i in stale if i not in selected]
+    if left_stale and not a.allow_stale:
+        fail(f"--only: {', '.join(left_stale)} would stay stale (text changed since render): render them too, or"
+             f" pass --allow-stale")
     eng = make_engine(a)
     voice = a.voice or eng.default_voice()
-    os.makedirs(a.out, exist_ok=True)
     entries, total_audio, total_cpu = [], 0.0, 0.0
     for ln in lines:
         path = os.path.join(a.out, f"{ln['id']}.wav")
@@ -485,20 +782,95 @@ def run_lines(a, lines, pron, make_engine):
         if a.speed != 1.0 and not eng.native_speed():
             atempo(path, a.speed)
             wav, rate = read_wav(path)
-        dur = len(wav) / rate
-        total_audio += dur
-        e = entry_for(ln, ln["spoken"], path, dur, eng, voice, a.seed, a.speed)
+        stats = audio_stats(wav, rate)
+        total_audio += stats["duration_s"]
+        e = entry_for(ln, ln["spoken"], path, stats, eng, voice, a.seed, a.speed)
         entries.append(e)
-        print(f"{ln['id']}: {path}  {dur:.2f} s  {e['fit']}", flush=True)
-    merge_log(os.path.join(a.out, "tts-log.json"), entries)
+        by_id[e["id"]] = e
+        write_log(log_path, by_id, order)           # after every line: an interrupted run keeps what it rendered
+        print(f"{ln['id']}: {path}  {stats['duration_s']:.2f} s  {e['fit'] or e['status']}", flush=True)
+    if tracked and not a.only and orphans:
+        retire_orphans(a.out, by_id, orphans)
+        write_log(log_path, by_id, order)
     print_table(entries)
-    over = [e["id"] for e in entries if e["fit"].startswith("OVER")]
     speed_x = total_audio / total_cpu if total_cpu else 0
     print(f"total {total_audio:.1f} s of audio in {total_cpu:.1f} s compute ({speed_x:.2f} s audio per s) · voice {voice}"
-          f" · {eng.repo} ({MODES[eng.mode]['licence']}) · watermark {'on' if eng.watermark else 'OFF (resemble-perth not installed)'}")
+          f" · {eng.repo} ({MODES[eng.mode]['licence']}) · vieneu {eng.version}"
+          f" · watermark {'on' if eng.watermark else 'OFF (resemble-perth not installed)'}")
+    with_flag = lambda f: [e["id"] for e in entries if f in e["flags"]]  # noqa: E731
+    empty, over, clipped, noslot = (with_flag(f) for f in ("EMPTY", "OVER", "CLIPPED", "NOSLOT"))
+    if empty:
+        print(f"EMPTY take: {', '.join(empty)} -> shorter than {EMPTY_MAX_S} s or below {EMPTY_RMS_DBFS:g} dBFS:"
+              f" the model did not read the line; rewrite it or add its words to pronunciation.csv")
     if over:
         print(f"OVER slot: {', '.join(over)} -> shorten the line or move the next mark")
-    return 1 if over and a.strict else 0
+    if clipped:
+        print(f"CLIPPED: {', '.join(clipped)} -> the take has full-scale samples; render it again with another --seed")
+    if noslot and a.script:
+        print(f"NOSLOT: {', '.join(noslot)} -> no slot to check against: {NOSLOT_HINT}")
+    if empty:
+        return 1
+    return 1 if a.strict and (over or clipped or (noslot and a.script)) else 0
+
+
+def wav_seconds(path):
+    with wave.open(path, "rb") as w:
+        return w.getnframes() / float(w.getframerate() or 1)
+
+
+def run_check(a, all_lines):
+    """No model: exit 0 only when every script line has a take that matches the script and the given settings."""
+    log_path = os.path.join(a.out, LOG_NAME)
+    log, err = read_log(log_path)
+    problems = []
+    if err:
+        problems.append(f"{log_path}: {err}")
+    by_id = {e["id"]: e for e in log}
+    voices = []
+    for ln in all_lines:
+        e, why = by_id.get(ln["id"]), []
+        wav = os.path.join(a.out, f"{ln['id']}.wav")
+        if e is None:
+            problems.append(f"{ln['id']}: " + (f"{ln['id']}.wav has no log entry" if os.path.exists(wav)
+                                               else "not rendered"))
+            continue
+        if is_stale(e, ln):
+            why.append("text changed since render")
+        if a.voice and nfc(str(e.get("voice", ""))) != nfc(a.voice):
+            why.append(f"voice is {e.get('voice')!r}, not {a.voice!r}")
+        if e.get("mode") != a.mode:
+            why.append(f"mode is {e.get('mode')!r}, not {a.mode!r}")
+        if e.get("seed") != a.seed:
+            why.append(f"seed is {e.get('seed')!r}, not {a.seed!r}")
+        dur = e.get("duration_s")
+        if isinstance(dur, bool) or not isinstance(dur, (int, float)) or dur <= 0 or e.get("status") == "EMPTY":
+            why.append("empty take")
+        if e.get("voice") not in voices:
+            voices.append(e.get("voice"))
+        try:
+            secs = wav_seconds(wav)
+        except (OSError, EOFError, wave.Error):
+            why.append(f"{ln['id']}.wav is missing or unreadable")
+        else:
+            dur = e.get("duration_s")
+            if secs <= 0:
+                why.append(f"{ln['id']}.wav holds no audio")
+            elif isinstance(dur, (int, float)) and dur > 0 and abs(secs - dur) > 0.05:
+                why.append(f"{ln['id']}.wav is {secs:.2f} s, the log says {dur:.2f} s")
+        if why:
+            problems.append(f"{ln['id']}: {'; '.join(why)}")
+    if not a.voice and len(voices) > 1:
+        problems.append(f"voice: takes use {len(voices)} voices ({', '.join(map(str, voices))}); render with one --voice")
+    _, orphans = compare_log(all_lines, log)
+    problems += [f"ORPHAN {i}: not in script (a render without --only moves it to {STALE_DIR}/)" for i in orphans]
+    for p in problems:
+        print(p)
+    if problems:
+        print(f"check: FAILED, {len(problems)} problem(s) in {a.out}")
+        return 1
+    print(f"check: ok, {len(all_lines)} line(s) in {a.out} match the script · voice {a.voice or voices[0]}"
+          f" · mode {a.mode} · seed {a.seed}")
+    return 0
 
 
 def pick_voices(spec, eng):
@@ -513,17 +885,25 @@ def pick_voices(spec, eng):
         return [v["name"] for v in sorted(sel, key=lambda v: order.get(v["region"], 3))]
     bad = [w for w in want if w not in names and not eng.resolve(w)]
     if bad:
-        sys.exit(f"unknown voice(s): {', '.join(bad)}. --list-voices shows the presets")
+        fail(f"unknown voice(s): {', '.join(bad)}. --list-voices shows the presets")
     return want
 
 
 def run_audition(a, lines, pron, make_engine):
+    for ln in lines:
+        ln["spoken"] = normalize_vi(ln["text"], pron, a.numbers)
+    unread = warn_residue(lines)
+    if unread and a.strict:
+        print(f"--strict: {unread} unread token(s); nothing rendered", file=sys.stderr)
+        return 1
+    need_ffmpeg(a)
+    try:
+        os.makedirs(a.out, exist_ok=True)
+    except OSError as e:
+        fail(f"--out {a.out}: cannot create the folder: {e}")
     eng = make_engine(a)
     voices = pick_voices(a.audition, eng)
     meta = {v["name"]: v for v in eng.voices()}
-    for ln in lines:
-        ln["spoken"] = normalize_vi(ln["text"], pron, a.numbers)
-    os.makedirs(a.out, exist_ok=True)
     rows = []
     print(f"{'voice':<16} {'g':<6} {'reg':<5} {'id':<4} {'dur':>6} {'rms':>6} {'peak':>6} {'clip':>5} {'x rt':>5}")
     for v in voices:
@@ -563,6 +943,37 @@ def list_voices(a, make_engine):
     return 0
 
 
+def speed_arg(s):
+    try:
+        v = float(s)
+    except ValueError:
+        v = math.nan
+    if not SPEED_MIN <= v <= SPEED_MAX:             # also false for nan
+        raise argparse.ArgumentTypeError(f"must be {SPEED_MIN}-{SPEED_MAX}, got {s!r}: an overrun is fixed in the"
+                                         f" script, not by speeding the voice up")
+    return v
+
+
+def length_arg(s):
+    try:
+        v = float(s)
+    except ValueError:
+        v = math.nan
+    if not 0 < v < 1e9:                             # also false for nan and inf
+        raise argparse.ArgumentTypeError(f"must be the episode length in seconds, got {s!r}")
+    return v
+
+
+def rate_arg(s):
+    try:
+        v = float(s)
+    except ValueError:
+        v = math.nan
+    if not 1.0 <= v <= 10.0:
+        raise argparse.ArgumentTypeError(f"must be 1-10 syllables per second, got {s!r}")
+    return v
+
+
 def build_parser():
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
@@ -573,19 +984,29 @@ def build_parser():
     p.add_argument("--out", help="output folder, e.g. out/<project>/ep<NN>/vo")
     p.add_argument("--voice", help="preset voice name (see --list-voices); default: the model's default")
     p.add_argument("--only", nargs="+", help="ids to (re)render, e.g. --only VO3 VO7 (or VO3,VO7)")
-    p.add_argument("--speed", type=float, default=1.0,
-                   help="v3nano: native; v3turbo: ffmpeg atempo after synthesis (0.8-1.2 recommended)")
+    p.add_argument("--allow-stale", action="store_true",
+                   help="with --only: render although another line's text changed since its take (it stays STALE)")
+    p.add_argument("--check", action="store_true",
+                   help="no model: exit 0 only when every line of --script/--lines has a take in --out that matches"
+                        " its text, --voice, --mode and --seed; else list the lines and exit 1")
+    p.add_argument("--speed", type=speed_arg, default=1.0,
+                   help="0.9-1.1 only (default 1). v3nano: native; v3turbo: ffmpeg atempo after synthesis")
     p.add_argument("--seed", type=int, default=1234, help="same seed + text + voice = same take (default 1234)")
     p.add_argument("--pron", help="pronunciation map CSV 'term,doc' (Hán Việt names), applied before normalisation")
     p.add_argument("--numbers", choices=["nam", "bac"], default="nam",
                    help="read numbers the Southern way (ngàn, lẻ; default) or Northern way (nghìn, linh)")
-    p.add_argument("--length", type=float, help="episode length in s (slot of the last line); default from EPISODE.md")
+    p.add_argument("--length", type=length_arg, help="episode length in s (slot of the last line); default from EPISODE.md")
     p.add_argument("--mode", choices=sorted(MODES), default="v3turbo", help="v3turbo = final (default), v3nano = draft")
     p.add_argument("--precision", choices=["int8", "fp32"], default="int8",
                    help="v3turbo CPU backbone: int8 (default, needs a VNNI CPU) or fp32 (slower)")
     p.add_argument("--threads", type=int, default=0, help="ONNX intra-op threads (0 = library default)")
-    p.add_argument("--dry-run", action="store_true", help="parse + normalise + print; no model is loaded")
-    p.add_argument("--strict", action="store_true", help="exit 1 when a line is longer than its slot")
+    p.add_argument("--dry-run", action="store_true",
+                   help="parse + normalise + estimate the duration of each line; no model is loaded")
+    p.add_argument("--rate", type=rate_arg, default=EST_SYLLABLES_PER_S,
+                   help=f"--dry-run estimate: syllables per second (default {EST_SYLLABLES_PER_S:g})")
+    p.add_argument("--strict", action="store_true",
+                   help="exit 1 on a take longer than its slot (OVER), a clipped take, an unread token, or a --script"
+                        " line whose slot is unknown (NOSLOT); with --dry-run: an estimate more than 15%% over its slot")
     p.add_argument("--list-voices", action="store_true")
     p.add_argument("--gender", choices=["male", "female"], help="--list-voices filter")
     p.add_argument("--region", choices=["bac", "trung", "nam"], help="--list-voices filter")
@@ -596,22 +1017,27 @@ def build_parser():
 def main(argv=None, make_engine=None):
     a = build_parser().parse_args(argv)
     make_engine = make_engine or (lambda args: VieneuEngine(args.mode, args.precision, args.threads))
-    if a.speed <= 0:
-        sys.exit("--speed must be > 0")
     if a.list_voices:
         return list_voices(a, make_engine)
+    if a.check:
+        if not a.out or not (a.script or a.lines):
+            fail("--check needs --out and --script or --lines")
+        if a.only or a.dry_run or a.audition:
+            fail("--check looks at the whole script: drop --only, --dry-run and --audition")
     try:
         pron = read_pron(a.pron)
     except (OSError, ValueError) as e:
-        sys.exit(f"--pron: {e}")
-    lines = collect_lines(a)
+        fail(f"--pron: {e}")
+    all_lines, lines = collect_lines(a)
+    if a.check:
+        return run_check(a, all_lines)
     if not a.out and not a.dry_run:
-        sys.exit("--out is required")
+        fail("--out is required")
     if a.audition:
         if a.dry_run:
-            sys.exit("--audition renders audio; drop --dry-run")
+            fail("--audition renders audio; drop --dry-run")
         return run_audition(a, lines, pron, make_engine)
-    return run_lines(a, lines, pron, make_engine)
+    return run_lines(a, lines, pron, make_engine, all_lines)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """tools/check_episode.py: a valid episode/style fixture passes; broken variants (made in tmp dirs) fail."""
 import os, re, shutil, subprocess, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
 from helpers import EPISODE_FIX, STYLE_FIX, TmpDirCase, load, run_main
 
@@ -210,13 +211,24 @@ class TestEpisodePrompts(EpisodeCase):
             (self.media / "plates" / n).unlink()                # approved=no / empty, no usage
         code, out, _ = self.check()
         self.assertEqual(code, 0, out)
-        self.assertIn("INFO  prompts.csv: 2 file(s) not generated yet", out)
-        self.assertIn(PLATES[1], out)
+        self.assertIn("INFO  prompts.csv: 1 file(s) not generated yet", out)
+        self.assertIn(PLATES[2], out)
+        self.assertIn(f"INFO  prompts.csv: 1 rejected file(s) not on disk (approved=no): {PLATES[1]}", out)
 
     def test_pending_row_missing_is_error_from_stage_7(self):
-        (self.media / "plates" / PLATES[1]).unlink()
+        (self.media / "plates" / PLATES[2]).unlink()            # approved empty, no usage
         self.edit("EPISODE.md", "stage: 5", "stage: 7")
-        self.assert_error(r"ep01_s02_L4_bac-thi_v02.png listed but not found .*episode is at stage 7")
+        self.assert_error(r"ep01_s02_P1-duoi_bac-thi_v01.png listed but not found .*episode is at stage 7")
+
+    def test_rejected_row_missing_is_info_at_stage_7(self):
+        # a rejected plate that is gone must not block the later gates (its row is the only record of it)
+        (self.media / "plates" / PLATES[1]).unlink()            # approved=no
+        self.edit("EPISODE.md", "stage: 5", "stage: 7")
+        self.edit("prompts.csv", "ep01_s01_L1_nui-co_v01.png,,,no,", 'ep01_s01_L1_nui-co_v01.png,,"{""generated_images"":1}",no,')
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("INFO  prompts.csv: 1 rejected file(s) not on disk", out)
+        self.assertNotIn("listed but not found", out)
 
     def test_generated_row_missing_is_error(self):
         (self.media / "plates" / PLATES[2]).unlink()
@@ -299,14 +311,16 @@ class TestEpisodeDot(EpisodeCase):
         self.assertNotIn("folder '.'", out)
 
 
-def ffmpeg(out, size="160x90", seconds=1, audio_db=None):
-    """Tiny test video (lavfi testsrc; optional 1 kHz sine: mono, 0 dB gain = -21 LUFS)."""
-    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=24:duration={seconds}"]
+def ffmpeg(out, size="160x90", seconds=1, audio_db=None, src="testsrc"):
+    """Tiny test video (lavfi testsrc, or a flat colour for big frames; optional 1 kHz sine: mono, 0 dB gain = -21 LUFS)."""
+    video = f"color=c=gray:size={size}:rate=24:duration={seconds}" if src == "color" else \
+        f"testsrc=size={size}:rate=24:duration={seconds}"
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", video]
     if audio_db is not None:
         cmd += ["-f", "lavfi", "-i", f"sine=frequency=1000:duration={seconds}", "-af", f"volume={audio_db}dB",
                 "-c:a", "aac", "-shortest"]
     cmd += ["-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(out)]
-    subprocess.run(cmd, check=True, timeout=60)
+    subprocess.run(cmd, check=True, timeout=120)
 
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg/ffprobe not installed")
@@ -318,13 +332,24 @@ class TestEpisodeProbe(EpisodeCase):
         ffmpeg(v / "clip.mp4", "160x90", 1)
         ffmpeg(v / "square.mp4", "96x96", 1)
         ffmpeg(v / "draft.mp4", "160x90", 2, audio_db=0)
-        ffmpeg(v / "final_ok.mp4", "320x180", 2, audio_db=7.07)     # -14.0 LUFS
-        ffmpeg(v / "final_quiet.mp4", "320x180", 2, audio_db=0)     # -21 LUFS
-        ffmpeg(v / "final_43.mp4", "160x120", 2, audio_db=7.07)
+        ffmpeg(v / "draft_ok.mp4", "960x540", 30, audio_db=0, src="color")
+        ffmpeg(v / "draft_silent.mp4", "960x540", 30, src="color")
+        ffmpeg(v / "final_ok.mp4", "1920x1080", 30, audio_db=7.07, src="color")      # -14.0 LUFS, the fixture's length_s
+        ffmpeg(v / "final_quiet.mp4", "1920x1080", 30, audio_db=0, src="color")      # -21 LUFS
+        ffmpeg(v / "final_silent.mp4", "1920x1080", 30, src="color")
+        ffmpeg(v / "final_12s.mp4", "1920x1080", 12, audio_db=7.07, src="color")
+        ffmpeg(v / "final_small.mp4", "320x180", 30, audio_db=7.07, src="color")
+        ffmpeg(v / "final_43.mp4", "160x120", 30, audio_db=7.07, src="color")
+        ffmpeg(v / "final_vertical.mp4", "1080x1920", 30, audio_db=7.07, src="color")
 
     @classmethod
     def tearDownClass(cls):
         shutil.rmtree(cls._vids, ignore_errors=True)
+
+    def setUp(self):
+        super().setUp()                                   # the placeholder mp4 files are not videos:
+        self.put("clip.mp4", "clips/ep01_s02_seedance25_v01.mp4")
+        self.put("draft_ok.mp4", "renders/ep01_draft_v01.mp4")
 
     def put(self, src, rel):
         shutil.copy(Path(self._vids) / src, self.media / rel)
@@ -336,32 +361,472 @@ class TestEpisodeProbe(EpisodeCase):
         code, out, _ = self.check("--probe", "--out", "review/check-v1.txt")
         self.assertEqual(code, 0, out)
         self.assertRegex(out, r"INFO  probe media/clips/ep01_s02_seedance25_v01.mp4: 160x90 \(16:9\), 24 fps, 1.0\d s, audio no")
-        self.assertRegex(out, r"INFO  probe media/renders/ep01_final_v01.mp4: 320x180 \(16:9\), 24 fps, "
-                              r"2.0\d s \(length_s 30 s, -2[78].\d\d s\), audio yes, "
+        self.assertRegex(out, r"INFO  probe media/renders/ep01_final_v01.mp4: 1920x1080 \(16:9\), 24 fps, "
+                              r"30.0\d s \(length_s 30 s, [+-]0.0\d s\), audio yes, "
                               r"integrated -1[34].\d LUFS, true peak -?\d+.\d dBTP")
         self.assertRegex(out, r"WARN  media/renders/ep01_draft_v01.mp4: duration .* differs from length_s 30 s")
+        self.assertRegex(out, r"WARN  media/renders/ep01_draft_v01.mp4: 160x90 is not the draft size 960x540")
         rep = (self.ep / "review" / "check-v1.txt").read_text()
         self.assertIn("integrated", rep)
         self.assertIn("160x90 (16:9)", rep)
 
+    def test_good_draft_and_final_have_no_findings(self):
+        self.put("draft_ok.mp4", "renders/ep01_draft_v01.mp4")
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
+        self.assertNotRegex(out, r"(WARN|ERROR)\s+media/renders")
+
     def test_probe_errors(self):
+        # the newest final (v03) is judged; a broken draft and an odd clip are still reported
         self.put("square.mp4", "clips/ep01_s02_seedance25_v01.mp4")
         self.put("final_quiet.mp4", "renders/ep01_final_v01.mp4")
         self.put("final_43.mp4", "renders/ep01_final_v02.mp4")
-        self.put("clip.mp4", "renders/ep01_final_v03.mp4")          # no audio
+        self.put("final_silent.mp4", "renders/ep01_final_v03.mp4")
         (self.media / "renders" / "ep01_draft_v01.mp4").write_bytes(b"not a video")
         code, out, _ = self.check("--probe")
         self.assertEqual(code, 1, out)
         self.assertRegex(out, r"WARN  media/clips/ep01_s02_seedance25_v01.mp4: 96x96 is not 16:9")
-        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: integrated loudness -2[01].\d LUFS outside -14 \+-1")
-        self.assertRegex(out, r"ERROR media/renders/ep01_final_v02.mp4: 160x120 is not 16:9")
         self.assertRegex(out, r"ERROR media/renders/ep01_final_v03.mp4: final render has no audio")
         self.assertRegex(out, r"ERROR media/renders/ep01_draft_v01.mp4: ffprobe failed")
+        for old in ("v01", "v02"):
+            self.assertRegex(out, rf"INFO  probe media/renders/ep01_final_{old}.mp4: superseded by v03, not measured")
+            self.assertNotRegex(out, rf"(ERROR|WARN)\s+media/renders/ep01_final_{old}.mp4")
+
+    def test_newest_final_loudness(self):
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        self.put("final_quiet.mp4", "renders/ep01_final_v02.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v02.mp4: integrated loudness -2[01].\d LUFS outside -14 \+-1")
+
+    def test_superseded_bad_final_does_not_block(self):
+        self.put("draft_ok.mp4", "renders/ep01_draft_v01.mp4")
+        self.put("final_quiet.mp4", "renders/ep01_final_v01.mp4")      # -21 LUFS, kept on disk by convention
+        self.put("final_ok.mp4", "renders/ep01_final_v02.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"INFO  probe media/renders/ep01_final_v01.mp4: superseded by v02")
+        self.assertNotIn("-21", out)
+
+    def test_superseded_draft_is_not_measured(self):
+        (self.media / "renders" / "ep01_draft_v01.mp4").write_bytes(b"not a video")
+        self.put("draft_ok.mp4", "renders/ep01_draft_v02.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"INFO  probe media/renders/ep01_draft_v01.mp4: superseded by v02")
+
+    def test_newest_final_wrong_size(self):
+        self.put("final_small.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: 320x180 at 24 fps is not the series format 1920x1080 at 24 fps")
+
+    def test_newest_final_not_16_9(self):
+        self.put("final_43.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: 160x120 at 24 fps is not the series format")
+
+    def test_final_fps_just_off_shows_the_difference(self):
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        real = ce.ffprobe
+        with mock.patch.object(ce, "ffprobe", lambda path: dict(real(path), fps=24000 / 1001)):
+            code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: 1920x1080 at 23.976 fps is not the series "
+                              r"format 1920x1080 at 24 fps")
+
+    def test_final_duration_is_error(self):
+        self.put("final_12s.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v01.mp4: duration 12.0\d s differs from length_s 30 s by -1[78].\d\d s")
+
+    def test_silent_draft_is_warn(self):
+        self.put("draft_silent.mp4", "renders/ep01_draft_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"WARN  media/renders/ep01_draft_v01.mp4: draft render has no audio")
+
+    def test_series_format_vertical(self):
+        (self.ep.parent / "SERIES.md").write_text(
+            "---\nseries: test-series\nformat: {width: 1080, height: 1920, fps: 24}\n---\n# Test\n", encoding="utf-8")
+        self.put("final_vertical.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
+        self.assertNotRegex(out, r"(WARN|ERROR)\s+media/renders/ep01_final_v01.mp4")
+        self.put("final_ok.mp4", "renders/ep01_final_v02.mp4")       # 1920x1080 is now the wrong size
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR media/renders/ep01_final_v02.mp4: 1920x1080 at 24 fps is not the series format 1080x1920")
+
+    def test_unreadable_series_md_falls_back_to_default_format(self):
+        (self.ep.parent / "SERIES.md").write_text("---\nformat: [1, 2\n---\n", encoding="utf-8")
+        self.put("final_ok.mp4", "renders/ep01_final_v01.mp4")
+        code, out, _ = self.check("--probe")
+        self.assertEqual(code, 0, out)
 
     def test_without_probe_measures_nothing(self):
         code, out, _ = self.check()
         self.assertEqual(code, 0, out)
         self.assertNotIn("probe", out)
+
+
+class TestEpisodeBudget(EpisodeCase):
+    def budget(self, text):
+        (self.ep / "budget.yaml").write_text(text, encoding="utf-8")
+
+    def test_fixture_budget_is_valid(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("budget.yaml", out)
+
+    def test_template_budget_is_valid(self):
+        shutil.copy(ce.LAB + "/templates/episode/budget.yaml", self.ep / "budget.yaml")
+        self.edit("EPISODE.md", "stage: 5", "stage: 3")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("budget.yaml", out)
+
+    def test_typo_key(self):
+        self.budget("imagez: 40\nvideo_seconds: 30\n")
+        out = self.assert_error(r"budget.yaml: unknown key imagez \(a misspelled cap is no cap\)")
+        self.assertRegex(out, r"ERROR budget.yaml: required key 'images' missing")
+
+    def test_string_cap(self):
+        self.budget('images: "40"\nvideo_seconds: lots\n')
+        out = self.assert_error(r"budget.yaml: images = '40' must be a number >= 0")
+        self.assertRegex(out, r"ERROR budget.yaml: video_seconds = 'lots' must be a number >= 0")
+
+    def test_negative_bool_and_nan_caps(self):
+        self.budget("images: -4\nvideo_seconds: true\n")
+        out = self.assert_error(r"budget.yaml: images = -4 must be a number >= 0")
+        self.assertRegex(out, r"ERROR budget.yaml: video_seconds = True must be a number >= 0")
+        self.budget("images: .nan\nvideo_seconds: .inf\n")
+        out = self.assert_error(r"budget.yaml: images = nan must be a number >= 0")
+        self.assertRegex(out, r"ERROR budget.yaml: video_seconds = inf must be a number >= 0")
+
+    def test_empty_file(self):
+        self.budget("")
+        out = self.assert_error(r"budget.yaml: required key 'images' missing")
+        self.assertRegex(out, r"ERROR budget.yaml: required key 'video_seconds' missing")
+
+    def test_missing_file_is_error_even_at_stage_0(self):
+        (self.ep / "budget.yaml").unlink()
+        self.assert_error(r"budget.yaml: missing")
+        self.edit("EPISODE.md", "stage: 5", "stage: 0")
+        self.assert_error(r"budget.yaml: missing")
+
+    def test_not_a_mapping_and_invalid_yaml(self):
+        self.budget("- images\n- 40\n")
+        self.assert_error(r"budget.yaml: must be a mapping")
+        self.budget("images: [40\n")
+        self.assert_error(r"budget.yaml: not valid YAML")
+        (self.ep / "budget.yaml").write_bytes(b"images: 40\nvideo_seconds: 30 # tr\xe2n\n")
+        self.assert_error(r"budget.yaml: not valid UTF-8")
+
+    def test_models(self):
+        self.budget("images: 40\nvideo_seconds: 30\nmodels: [a, b]\n")
+        self.assert_error(r"budget.yaml: models must be a mapping model id -> number >= 0")
+        self.budget("images: 40\nvideo_seconds: 30\nmodels: {pro: six, lite: -1, ok: 3}\n")
+        out = self.assert_error(r"budget.yaml: models.pro = 'six' must be a number >= 0")
+        self.assertRegex(out, r"ERROR budget.yaml: models.lite = -1 must be a number >= 0")
+        self.assertNotIn("models.ok", out)
+        self.budget("images: 40\nvideo_seconds: 30\nmodels:\n")          # key with nothing under it: same as absent
+        code, out, _ = self.check()
+        self.assertNotIn("ERROR budget.yaml", out)
+
+    def test_ledger_required(self):
+        self.budget("images: 40\nvideo_seconds: 30\nledger_required: yes please\n")
+        self.assert_error(r"budget.yaml: ledger_required = 'yes please' must be true or false")
+        self.budget("images: 40\nvideo_seconds: 30\nledger_required: false\n")
+        self.edit("EPISODE.md", "stage: 5", "stage: 4")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"WARN  budget.yaml: ledger_required is not true at stage 4")
+        self.budget("images: 40\nvideo_seconds: 30\n")                    # absent = not true
+        code, out, _ = self.check()
+        self.assertRegex(out, r"WARN  budget.yaml: ledger_required is not true at stage 4")
+        self.edit("EPISODE.md", "stage: 4", "stage: 3")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ledger_required", out)
+
+
+class TestEpisodeStageGates(EpisodeCase):
+    def gates(self, stage, g1="null", g2="null", g3="null", g4="null"):
+        self.edit("EPISODE.md", "stage: 5", f"stage: {stage}")
+        self.edit("EPISODE.md", "gates: {G1: 2026-11-01, G2: 2026-11-05, G3: null, G4: null}",
+                  f"gates: {{G1: {g1}, G2: {g2}, G3: {g3}, G4: {g4}}}")
+
+    def test_fixture_has_no_gate_finding(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("gate", out.lower())
+
+    def test_stage_10_with_g1_null(self):
+        self.gates(10, "null", "2026-11-05", "2026-11-08")
+        out = self.assert_error(r"EPISODE.md: stage 10 is past gate G1 \(stage 2\) but gates.G1 is null")
+        self.assertEqual(len([l for l in out.splitlines() if "G1" in l and l.startswith("ERROR")]), 1, out)
+
+    def test_stage_5_with_g2_null(self):
+        self.gates(5, "2026-11-01")
+        self.assert_error(r"EPISODE.md: stage 5 is past gate G2 \(stage 4\) but gates.G2 is null")
+
+    def test_stage_at_the_gate_is_fine(self):
+        self.gates(4, "2026-11-01")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ERROR", out)
+
+    def test_later_gate_dated_while_earlier_null(self):
+        self.gates(2, "null", "2026-11-05")
+        self.assert_error(r"EPISODE.md: gates.G2 is dated but the earlier gate G1 is null")
+
+    def test_decreasing_dates(self):
+        self.gates(5, "2026-11-05", "2026-11-01")
+        self.assert_error(r"EPISODE.md: gates.G2 2026-11-01 is before gates.G1 2026-11-05")
+
+    def test_future_date_is_warn(self):
+        self.gates(5, "2026-11-01", "2099-01-01")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"WARN  EPISODE.md: gates.G2 2099-01-01 is in the future")
+
+    def test_quoted_impossible_date(self):
+        self.gates(5, "2026-11-01", '"2026-11-31"')
+        self.assert_error(r"EPISODE.md: gates.G2 = '2026-11-31' is not a calendar date")
+
+    def test_unusable_stage_or_gates_is_skipped(self):
+        self.edit("EPISODE.md", "gates: {G1: 2026-11-01, G2: 2026-11-05, G3: null, G4: null}", "gates: [G1]")
+        out = self.assert_error(r"gates must be a mapping")
+        self.assertEqual(out.count("ERROR"), 1, out)
+
+    def test_no_shots_below_stage_3_is_warn(self):
+        # a freshly filled template: header-only shots.csv, no prompts.csv yet
+        self.gates(0)
+        (self.ep / "shots.csv").write_text(",".join(ce.SHOTS_HEADER) + "\n", encoding="utf-8")
+        (self.ep / "prompts.csv").unlink()
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("WARN  shots.csv: no shots", out)
+
+    def test_no_shots_from_stage_3_is_error(self):
+        self.gates(3, "2026-11-01")
+        (self.ep / "shots.csv").write_text(",".join(ce.SHOTS_HEADER) + "\n", encoding="utf-8")
+        (self.ep / "prompts.csv").unlink()
+        self.assert_error(r"shots.csv: no shots")
+
+
+class TestEpisodeMediaMissing(EpisodeCase):
+    def test_folder_missing_at_stage_8_is_error(self):
+        shutil.rmtree(self.media)
+        self.edit("EPISODE.md", "stage: 5", "stage: 8")
+        out = self.assert_error(r"media: media folder missing but 2 approved/generated file\(s\) are required: "
+                                r"pull the shot bundles from Drive \(drive_link\)")
+        self.assertRegex(out, r"WARN  media: media folder .* not found")
+
+    def test_folder_missing_at_stage_5_is_info_with_count(self):
+        shutil.rmtree(self.media)
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"INFO  media: 1 approved/generated file\(s\) of prompts.csv not checked")
+
+    def test_folder_missing_with_only_rejected_rows_at_stage_8(self):
+        shutil.rmtree(self.media)
+        self.edit("EPISODE.md", "stage: 5", "stage: 8")
+        rows = (self.ep / "prompts.csv").read_text(encoding="utf-8").splitlines()
+        (self.ep / "prompts.csv").write_text("\n".join([rows[0], rows[2]]) + "\n", encoding="utf-8")   # approved=no only
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+
+    def test_required_rows(self):
+        rows = [{"file": "a", "approved": "yes", "usage": ""}, {"file": "b", "approved": "", "usage": "{}"},
+                {"file": "c", "approved": "no", "usage": "{}"}, {"file": "d", "approved": "", "usage": ""}]
+        self.assertEqual([r["file"] for r in ce.required_rows(rows, 5)], ["a", "b"])
+        self.assertEqual([r["file"] for r in ce.required_rows(rows, 7)], ["a", "b", "d"])
+        self.assertEqual([r["file"] for r in ce.required_rows(rows, None)], ["a", "b"])
+        self.assertEqual(ce.required_rows(None, 9), [])
+
+
+class TestNarrationLines(EpisodeCase):
+    def lines(self, text):
+        return list(ce.narration_lines(text))
+
+    def test_comment_then_mark_on_one_line(self):
+        got = self.lines("# T\n<!-- sửa 11/10 --> [00:05] Trên núi có loài thú lạ.\n")
+        self.assertEqual([n for n, _ in got], [2])
+        m = ce.RE_MARK.match(got[0][1])
+        self.assertEqual(m.group(3).strip(), "Trên núi có loài thú lạ.")
+
+    def test_trailing_comment_removed(self):
+        got = self.lines("[00:26] Hết. <!-- đọc chậm -->\n")
+        self.assertEqual(ce.RE_MARK.match(got[0][1]).group(3).strip(), "Hết.")
+
+    def test_comment_only_line_and_multi_line_comment(self):
+        got = self.lines("<!-- a --> <!-- b -->\n[00:00] Một.\n<!-- mở\n[00:03] trong chú thích\nđóng --> [00:06] Hai.\n"
+                         "[00:09] Ba. <!-- mở tiếp\nvẫn chú thích -->\n[00:12] Bốn.\n")
+        self.assertEqual([(n, ce.RE_MARK.match(l).group(3).strip()) for n, l in got],
+                         [(2, "Một."), (5, "Hai."), (6, "Ba."), (8, "Bốn.")])
+
+    def test_untouched_lines_keep_their_text(self):
+        text = (self.ep / "script.md").read_text(encoding="utf-8")
+        for n, line in self.lines(text):
+            self.assertEqual(line, text.splitlines()[n - 1])
+
+    def test_checker_sees_the_line_after_a_comment(self):
+        self.edit("script.md", "[00:05] Trên núi", "<!-- sửa --> [00:02] Trên núi")
+        self.assert_error(r"script.md:5: only 2 s after the previous line")
+
+    def test_tts_gets_the_same_lines(self):
+        import sys
+        sys.path.insert(0, ce.LAB + "/tools")
+        tts = load("tts/vieneu_tts.py", "film_vieneu_tts_narr")
+        self.edit("script.md", "[00:05] Trên núi", "<!-- sửa 11/10 --> [00:05] Trên núi")
+        self.edit("script.md", "[00:26] Hết.", "[00:26] Hết. <!-- đọc chậm -->")
+        got = tts.parse_script((self.ep / "script.md").read_text(encoding="utf-8"))
+        self.assertEqual(len(got), 5)
+        self.assertEqual(got[1]["text"], "Trên núi có loài thú lạ.")
+        self.assertEqual(got[4]["text"], "Hết.")
+
+    def test_double_hyphen_in_narration_is_error(self):
+        self.edit("script.md", "loài thú lạ.", "loài thú -- lạ.")
+        self.assert_error(r"script.md:5: double hyphen '--' in narration")
+
+    def test_double_hyphen_in_blockquote_is_warn(self):
+        self.edit("script.md", "nhịp chậm – không", "nhịp chậm -- không")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"WARN  script.md:9: double hyphen '--' outside narration")
+
+    def test_rules_comments_and_front_matter_are_not_double_hyphens(self):
+        self.edit("script.md", "# Lời bình tập 1\n", "---\ntitle: x -- y\n---\n# Lời bình tập 1\n\n-----\n")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("double hyphen", out)
+
+    def test_cjk_in_narration_is_warn(self):
+        self.edit("script.md", "Người xưa gọi nó là Bắc Thị.", "Người xưa gọi nó là 猼訑.")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"WARN  script.md:11: not speakable: .*CJK")
+
+    def test_markup_in_narration_is_warn(self):
+        for bad, what in (("a | b", r"\|"), ("`code`", "`"), ("[link](http://x.y)", r"\]\("), ("<b>đậm</b>", "<")):
+            with self.subTest(bad=bad):
+                p = self.ep / "script.md"
+                keep = p.read_text(encoding="utf-8")
+                self.edit("script.md", "Người xưa gọi nó là Bắc Thị.", f"Người xưa gọi {bad}.")
+                code, out, _ = self.check()
+                self.assertEqual(code, 0, out)
+                self.assertRegex(out, rf"WARN  script.md:11: not speakable: .*{what}")
+                p.write_text(keep, encoding="utf-8")
+
+
+class TestEpisodeNoCrash(EpisodeCase):
+    """Malformed input gives an ERROR line and a written report, never a traceback."""
+    OUT = "review/check-v9.txt"
+
+    def assert_reported(self, pattern, *extra):
+        code, out, err = self.check("--out", self.OUT, *extra)
+        self.assertEqual(code, 1, out)
+        self.assertNotIn("Traceback", err + out)
+        self.assertTrue(any(l.startswith("ERROR") and re.search(pattern, l) for l in out.splitlines()),
+                        f"no ERROR matching {pattern!r} in:\n{out}")
+        rep = self.ep / self.OUT
+        self.assertTrue(rep.is_file(), "report file not written")
+        self.assertRegex(rep.read_text(encoding="utf-8"), pattern)
+        self.assertIn("Summary:", rep.read_text(encoding="utf-8"))
+        return out
+
+    def corrupt(self, path):
+        path.write_bytes(path.read_bytes().replace(b"\n", b" \xff\xfe\n", 1))
+
+    def test_non_utf8_episode_md(self):
+        self.corrupt(self.ep / "EPISODE.md")
+        self.assert_reported(r"EPISODE.md: not valid UTF-8")
+
+    def test_non_utf8_script_md(self):
+        self.corrupt(self.ep / "script.md")
+        out = self.assert_reported(r"script.md: not valid UTF-8")
+        self.assertIn("4 shot(s), 30 s", out)            # the other checks still ran
+
+    def test_non_utf8_csv(self):
+        self.corrupt(self.ep / "shots.csv")
+        self.assert_reported(r"shots.csv: not valid RFC 4180 UTF-8 CSV")
+
+    def test_utf16_ledger(self):
+        (self.media / "ledger.csv").write_text(",".join(ce.LEDGER_HEADER) + "\n", encoding="utf-16")
+        self.assert_reported(r"media/ledger.csv: not valid UTF-8")
+
+    def test_ledger_with_bom_is_fine(self):
+        (self.media / "ledger.csv").write_text(",".join(ce.LEDGER_HEADER) + "\n", encoding="utf-8-sig")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("ledger.csv", out)
+
+    def test_bad_ledger_header_still_reported(self):
+        (self.media / "ledger.csv").write_text("ts,kind\n", encoding="utf-8")
+        self.assert_reported(r"media/ledger.csv: header is 'ts,kind'")
+
+    def test_impossible_gate_date(self):
+        self.edit("EPISODE.md", "G1: 2026-11-01", "G1: 2026-11-31")
+        self.assert_reported(r"EPISODE.md: front matter is not valid YAML: day is out of range for month")
+
+    def test_nan_and_inf_timings_rejected(self):
+        self.edit("shots.csv", "s02,8,15", "s02,8,nan")
+        self.assert_reported(r"shots.csv:3: from_s/to_s must be numbers \(got '8', 'nan'\)")
+        self.edit("shots.csv", "s02,8,nan", "s02,8,inf")
+        self.assert_reported(r"shots.csv:3: from_s/to_s must be numbers \(got '8', 'inf'\)")
+
+    def test_nan_end_does_not_hide_the_length(self):
+        self.edit("shots.csv", "s04,24.5,30", "s04,24.5,nan")
+        self.assert_reported(r"shots.csv:5: from_s/to_s must be numbers")
+
+    def test_unexpected_exception_still_writes_the_report(self):
+        from unittest import mock
+        with mock.patch.object(ce, "check_script", side_effect=RuntimeError("boom")):
+            out = self.assert_reported(r"internal: RuntimeError: boom")
+        self.assertRegex(out, r"Summary: 1 error\(s\)")
+
+    def test_unexpected_exception_in_style_check(self):
+        from unittest import mock
+        with mock.patch.object(ce, "check_style", side_effect=KeyError("k")):
+            code, out, err = run_main(ce.main, ["style", str(STYLE_FIX)])
+        self.assertEqual(code, 1, out)
+        self.assertRegex(out, r"ERROR internal: KeyError: ")
+        self.assertIn("Summary: 1 error(s)", out)
+        self.assertNotIn("Traceback", err + out)
+
+
+class TestRenamedEpisodeCopy(TmpDirCase, unittest.TestCase):
+    """The new rules read no episode prefix: a copy with another folder name and file prefix still passes."""
+
+    def test_renamed_copy_passes(self):
+        ep = self.tmp / "projects" / "other-series" / "ep07-doi-ten"
+        shutil.copytree(EPISODE_FIX, ep)
+        for name in ("EPISODE.md", "prompts.csv", "anchors.json"):
+            p = ep / name
+            s = p.read_text(encoding="utf-8")
+            s = s.replace("ep01-test-ep", "ep07-doi-ten").replace("ep01", "ep07").replace("test-series", "other-series")
+            s = s.replace("TestSeries", "OtherSeries").replace("episode: 1", "episode: 7").replace("slug: test-ep", "slug: doi-ten")
+            p.write_text(s, encoding="utf-8")
+        media = self.tmp / "out" / "other-series" / "ep07"
+        (media / "plates").mkdir(parents=True)
+        (media / "renders").mkdir()
+        for n in PLATES:
+            (media / "plates" / n.replace("ep01", "ep07")).write_bytes(b"x")
+        (media / "renders" / "ep07_final_v01.mp4").write_bytes(b"x")
+        code, out, _ = run_main(ce.main, ["episode", str(ep), "--media", str(media)])
+        self.assertEqual(code, 0, out)
+        self.assertIn("Summary: 0 error(s)", out)
+
+    def test_plain_fixture_copy_passes_without_media(self):
+        ep = self.tmp / "projects" / "test-series" / "ep01-test-ep"
+        shutil.copytree(EPISODE_FIX, ep)
+        code, out, _ = run_main(ce.main, ["episode", str(ep), "--media", str(self.tmp / "nowhere")])
+        self.assertEqual(code, 0, out)
 
 
 class TestStyle(TmpDirCase, unittest.TestCase):
@@ -439,6 +904,30 @@ class TestStyle(TmpDirCase, unittest.TestCase):
     def test_no_prompts(self):
         shutil.rmtree(self.st / "prompts")
         self.assert_error(r"no prompt templates")
+
+    def test_non_scalar_values_do_not_crash(self):
+        for old, new, pattern in (("status: draft", "status: [draft]", r"status \['draft'\] must be stable or draft"),
+                                  ("motion: [mist-bands]", "motion: [{a: 1}]", r"motion entry \{'a': 1\} must be a module id"),
+                                  ("L3: {method: chroma", "L3: {method: [chroma]", r"matte.per_layer.L3.method \['chroma'\] not in")):
+            with self.subTest(new=new):
+                keep = (self.st / "style.yaml").read_text(encoding="utf-8")
+                self.edit(old, new)
+                self.assert_error(pattern)
+                (self.st / "style.yaml").write_text(keep, encoding="utf-8")
+
+    def test_non_utf8_style_yaml(self):
+        p = self.st / "style.yaml"
+        p.write_bytes(p.read_bytes() + b"# \xff\xfe\n")
+        self.assert_error(r"style.yaml: not valid UTF-8")
+
+    def test_non_utf8_prompt_template(self):
+        p = self.st / "prompts" / "plate.txt"
+        p.write_bytes(p.read_bytes() + b"\xff\xfe\n")
+        self.assert_error(r"prompts/plate.txt: not valid UTF-8")
+
+    def test_impossible_date_in_style_yaml(self):
+        self.edit("status: draft", "status: draft\nsince: 2026-11-31")
+        self.assert_error(r"style.yaml: not valid YAML: day is out of range")
 
 
 if __name__ == "__main__":

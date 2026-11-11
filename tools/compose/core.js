@@ -5,7 +5,7 @@
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
-  C.VERSION = '1.0.0';
+  C.VERSION = '1.0.1';
   C.STAGE = { W: 1920, H: 1080 };               // stage units: every position and size is in 1920x1080 stage px
   // Parallax depth per layer kind (1 = the subject plane, moves with the camera; < 1 farther, > 1 nearer)
   C.DEPTH = { bg: 0.12, mid: 0.45, fg: 1.0, char: 1.0, mist: 1.25, near: 1.7 };
@@ -94,12 +94,26 @@
     return keys[keys.length - 1][1];
   };
 
-  // Warnings are collected once (they never change a pixel); COMPOSE.load() puts them in READY's log line.
-  C.warn = (msg) => {
-    if (C.warnings.indexOf(msg) >= 0) return;
+  // Warnings never change a pixel. C.warn(msg, key, value): one entry per key (default: the message itself); a
+  // repeat with a larger value replaces the message (the worst case is what is reported), and the film time of the
+  // first occurrence is kept when the warning comes from inside COMPOSE.stage (C.time). console.warn fires once per
+  // key. A headless capture never shows the console, so inline.py puts COMPOSE.report() into READY's `qc` list, which
+  // make.py prints: that carries the load-time warnings and those of the frames drawn before READY resolved.
+  const warned = new Map();                     // key -> { msg, value, t, i: index in C.warnings }
+  C.time = null;                                // the film time being drawn (set by COMPOSE.stage for its callback)
+  C.warn = (msg, key, value) => {
+    const k = key == null ? msg : key, e = warned.get(k);
+    if (e) {
+      if (typeof value === 'number' && !(value <= e.value)) { e.value = value; e.msg = msg; C.warnings[e.i] = msg; }
+      return;
+    }
+    warned.set(k, { msg, value, t: typeof C.time === 'number' ? C.time : null, i: C.warnings.length });
     C.warnings.push(msg);
     if (root.console) root.console.warn('[compose] ' + msg);
   };
+  // One line per warning key, as READY's qc carries them: 'compose: <message>[, first at <t> s]'.
+  C.report = () => Array.from(warned.values(), (e) =>
+    'compose: ' + e.msg + (e.t == null ? '' : `, first at ${e.t.toFixed(1)} s`));
 
   // A canvas of w x h (prebuilt textures and plate copies). OffscreenCanvas is avoided: drawImage from a plain canvas
   // behaves the same in the headless capture and in the browser preview.

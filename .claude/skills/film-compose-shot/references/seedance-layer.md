@@ -7,6 +7,8 @@ Dùng khi shot cần cử động mà code không làm được trên ảnh ph�
 
 ## 1. Khung đầu (miễn phí)
 
+Ai làm: người đã chốt `place` của shot (compositor ở lượt bố cục, hoặc đạo diễn).
+
 Nhân vật trên **nền key phẳng**, đúng vị trí và cỡ trên sân khấu 1920x1080 như trong phim (máy quay ở trạng thái nghỉ):
 
 ```bash
@@ -14,13 +16,18 @@ python3 tools/compose/keyframe.py out/<p>/ep<NN>/plates/ep<NN>_s<NN>_L4_<chu-the
     out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v<NN>.png \
     --x <place.x> --y <place.y> --h <place.h> --pivot feet --anchors projects/<p>/ep<NN>-<slug>/anchors.json --key "<matte.key_bg>"
 ```
-- `--key` lấy từ `style.yaml matte.key_bg`; chọn màu xa màu nhân vật (xanh lá cho mực đen/xám, magenta cho sinh vật
-  xanh). Khung ra 16:9 (1920x1080) nên clip ra 16:9; ảnh vuông cho clip vuông (960×960 ở 720p). Tỉ lệ clip do khung
-  đầu quyết định: Seedance 2.5 image-to-video **từ chối `ratio`** (HTTP 400), nên không truyền `--ratio`.
+- Một màu key cho cả ba bước: giá trị đưa vào `keyframe.py --key` (mặc định `style.yaml matte.key_bg`; đổi sang màu
+  còn lại trong `#00FF00`/`#FF00FF` khi `keyframe.py` báo `WARN KEY NEAR SUBJECT`) cũng là màu ghi trong prompt và là
+  màu `matte_seq.py` tự dò ra (`--key auto`). Khung ra 16:9 nên clip ra 16:9 (ảnh vuông cho clip vuông, ví dụ 960×960 ở 720p).
+- Kiểm tra miễn phí trước khi giao clip: `python3 tools/compose/keyframe.py --check <khung đầu> --key "<màu key>"`
+  (thoát 1 nếu không phải 1920x1080, có alpha, viền không phải màu key, hoặc khung không có nhân vật).
+- Tỉ lệ clip do khung đầu quyết định: Seedance 2.5 image-to-video **từ chối `ratio`** (HTTP 400), nên không truyền `--ratio`.
 - Phương án khác khi shot không cần parallax: chạy Seedance trên **cảnh đã ghép** (một khung `make.py stills` full size),
-  clip thành lớp phủ toàn khung (`seq`, `depth` 0, máy quay chỉ còn zoom/rung 2D).
+  clip thành lớp phủ toàn khung (`seq`, depth 1.0, cover: true: cả khung zoom và rung như một bức ảnh; ở depth 0 chỉ còn rung và nghiêng).
 
 ## 2. Tạo clip (tính phí; tác vụ bất đồng bộ ~2,5 phút cho 5 s 720p)
+
+Ai làm: film-animator (chạy `keyframe.py --check` trước mỗi lệnh tính phí).
 
 ```bash
 FILM_AGENT=<tên agent hoặc để trống> python3 tools/ark.py video \
@@ -36,23 +43,34 @@ flat <key colour> background stays perfectly uniform, no new objects, same ink-w
 - `--duration` API nhận 4–30 s; trên ~8 s chưa thử thực tế (`docs/MODELS.md`).
 - Thử ở 720p; bản cuối 1080p chỉ khi người dùng duyệt chuyển động (thời gian 1080p chưa đo).
 - Bị proxy cắt (502) hay lỗi: ledger ghi `cut-502` / `failed`, **không tự thử lại** (có thể vẫn bị tính phí).
+  Dòng `failed` có `task_id`: lấy clip về bằng `python3 tools/ark.py video --resume-task <id> --ledger <ledger>` (miễn phí).
   Bị từ chối vì ngân sách (thoát mã 3): báo phiên chính, không tự nâng `budget.yaml`.
 - Link video (`*.tos-ap-southeast-1.volces.com`) có hạn: `ark.py` đã tải về ngay.
 
 ## 3. Tách nền từng khung
 
+Ai làm: film-animator, ngay sau khi tải clip về (khung đã tách nền + báo cáo); đạo diễn đọc báo cáo và quyết định.
+
 ```bash
-mkdir -p out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw
-ffmpeg -i out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
-  out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01/raw/%06d.png
-python3 tools/layers/matte.py chroma ...   # xem --help: key = matte.key_bg, có despill; ra PNG RGBA cùng tên
+python3 tools/layers/matte_seq.py out/<p>/ep<NN>/clips/ep<NN>_s<NN>_seedance25_v01.mp4 \
+  --start-frame out/<p>/ep<NN>/clips/ep<NN>_s<NN>_start_v01.png --strict \
+  --strip /tmp/ep<NN>_s<NN>_strip.png      # ảnh xem thử: để ngoài clips/ (check_episode chỉ nhận tên theo quy ước ở đó)
 ```
+- Một lệnh, một tiến trình: ffmpeg tách khung vào `<tên clip>/raw/`, tách nền chroma (`--key auto`, `--low 40 --high 200`,
+  có despill) vào `<tên clip>/000001.png ...`, in các số đo (`bg_dirty`, `flicker`, `area_jitter`, `start IoU`...), các dòng
+  WARN (HAZE, FLICKER, CROPPED, EMPTY, BACKGROUND NOT FLAT, REFRAMED, NOT 16:9) và dòng `L4b: ...` để dán vào `PLATES`.
+  `--strict`: thoát 4 khi có WARN (khung vẫn được ghi). Ngưỡng WARN mới đo trên khung giả lập: đọc số, đừng chỉ đọc WARN.
+- **Không dùng `tools/layers/matte.py` cho khung clip, không `--style/--layer`** (L4 trong style là `rembg`, và không
+  có `low/high` thì cả khung phủ một lớp sương nhấp nháy).
 - **Chroma key + despill** ổn định theo thời gian; `rembg` từng khung làm viền nhấp nháy giữa các khung, chỉ dùng
-  khi nền không phẳng.
-- Kết quả: `out/<p>/ep<NN>/clips/<tên clip không đuôi>/000001.png ...` (RGBA, cỡ gốc của clip, ví dụ 1280x720: lớp `seq` không `place` tự co phủ sân khấu). Xem 3 khung (đầu, giữa,
-  cuối) trước khi dùng: viền xanh còn sót → tăng despill.
+  khi nền không phẳng (`WARN BACKGROUND NOT FLAT`): chạy lại với `--method rembg` vào **thư mục khác** rồi so `flicker`
+  và `area_jitter` của hai lần chạy.
+- Kết quả: `out/<p>/ep<NN>/clips/<tên clip không đuôi>/000001.png ...` (RGBA, cỡ gốc của clip, ví dụ 1280x720: lớp `seq` không `place` tự co phủ sân khấu). Xem ảnh `--strip` (khung đầu, giữa,
+  cuối trên nền ca-rô và nền giấy) trước khi dùng.
 
 ## 4. Đưa vào phim
+
+Ai làm: compositor (dán dòng `L4b: ...` mà `matte_seq.py` in ra, điền `at`).
 
 ```js
 L4b: { seq: { pattern: '../../clips/ep01_s03_seedance25_v01/{n}.png', digits: 6, start: 1, count: 120, fps: 24,

@@ -16,6 +16,7 @@ const CUES = { open: 0, blink: 3.0, event: 4.6, end: DURATION };
 // character 1.0 · front mist 1.25 · near particles 1.7). Anchors (plate px) come from anchors.json via inline.py.
 // place: omitted = cover the frame (L1); { x, y, h, pivot } puts an anchor of the plate at a stage point.
 // rig: strip-warp (warp), eyelids (eyes), breath; a keyed Seedance clip is a plate with seq instead of src.
+// Layers whose matte method is not `none` are loaded from '../../plates/matte/<same name>' (docs/CONVENTIONS.md §3).
 const PLATES = {
   L1: { src: '../../plates/ep00_s01_L1_demo-nui_v01.png', depth: 0.12, overscan: 1.02 },
   L2: { src: '../../plates/ep00_s01_L2_demo-day_v01.png', depth: 0.45, overscan: 1.04, cover: false },
@@ -24,10 +25,10 @@ const PLATES = {
         rig: { warp: { tail: { amp: 34, waves: 0.75, speed: 0.42, power: 1.5 } },
                eyes: { eye: { line: 'rgba(20,16,12,0.8)' } },
                breath: { amp: 0.008, period: 3.4, pivot: 'feet' } } },
-  // a keyed Seedance clip: frames keyed one by one with tools/layers/matte.py IN OUT --method chroma
+  // a keyed Seedance clip: frames keyed with `python3 tools/layers/matte_seq.py <clip.mp4>`
   // (references/seedance-layer.md). A seq layer fills the stage like the clip did: no `place`.
   // L4b: { seq: { pattern: '../../clips/ep01_s03_seedance25_v01/{n}.png', digits: 6, start: 1, count: 120, fps: 24,
-  //        at: 2.0, end: 'hold' }, depth: 1.0 },
+  //        at: 2.0, end: 'hold' }, depth: 1.0, cover: false },
 };
 // Atmosphere colours from styles/<id>/style.yaml palette; preset numbers from styles/<id>/motion.md.
 const ATMOS = { mist: '#f2ecde', ember: '#ff9a3c', sun: '#ffd49a' };

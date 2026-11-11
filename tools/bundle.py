@@ -14,7 +14,7 @@ projects/<project>/<ep<NN>|q<NN>-t<NN>>-*/ (git-ignored, pulled from Drive), the
 The zip goes to Drive ClaudeFilmLab/<ProjectName>/04_SanXuat/<episode folder>/<YYYY-MM-DD>/ (docs/CONVENTIONS.md §11).
 Prints the path, size and the Drive connector file reference `sha256:<hex>:<absolute path>`.
 """
-import argparse, csv, datetime, glob, hashlib, io, json, os, re, sys, zipfile
+import argparse, csv, datetime, glob, hashlib, io, json, os, re, shutil, sys, zipfile
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(LAB, "tools"))
@@ -113,6 +113,23 @@ def film_text_files(media):
     return out
 
 
+def add_member(z, arc, compress_type, src=None, data=None):
+    """Write one zip member with fixed metadata (1980-01-01, mode 0644), from file `src` or text/bytes `data`.
+
+    No mtime, no file mode, no clock: the same inputs give the same zip bytes, so an unchanged re-run keeps its
+    sha256 and drive_sync.py does not plan the bundle for upload again."""
+    info = zipfile.ZipInfo(arc.replace(os.sep, "/"), date_time=(1980, 1, 1, 0, 0, 0))
+    info.external_attr = 0o644 << 16
+    info.compress_type = compress_type
+    if src is None:
+        payload = data.encode("utf-8") if isinstance(data, str) else data
+        with z.open(info, "w") as dst:
+            dst.write(payload)
+        return
+    with open(src, "rb") as f, z.open(info, "w", force_zip64=os.path.getsize(src) >= 1 << 31) as dst:
+        shutil.copyfileobj(f, dst, 1 << 20)
+
+
 def bundle(media, shot, series_dir=None, today=None, with_film=False):
     if not re.fullmatch(r"s\d{2}", shot):
         raise SystemExit(f"--shot must be s<NN> (got {shot!r})")
@@ -133,19 +150,19 @@ def bundle(media, shot, series_dir=None, today=None, with_film=False):
     with zipfile.ZipFile(tmp, "w") as z:
         for full, arc in files:
             comp = zipfile.ZIP_STORED if os.path.splitext(full)[1].lower() in STORED else zipfile.ZIP_DEFLATED
-            z.write(full, arc, compress_type=comp)
+            add_member(z, arc, comp, src=full)
         pr = prompts_rows(series_dir, shot)
         if pr:
-            z.writestr("prompts.csv", pr[0], compress_type=zipfile.ZIP_DEFLATED)
+            add_member(z, "prompts.csv", zipfile.ZIP_DEFLATED, data=pr[0])
             notes.append(f"prompts.csv ({pr[1]} row(s))")
         if with_film:
             ft = film_text_files(media)
             for full, arc in ft:
-                z.write(full, arc, compress_type=zipfile.ZIP_DEFLATED)
+                add_member(z, arc, zipfile.ZIP_DEFLATED, src=full)
             notes.append(f"film sources ({len(ft)} text file(s))")
         an = anchors_for(series_dir, shot)
         if an:
-            z.writestr("anchors.json", an[0], compress_type=zipfile.ZIP_DEFLATED)
+            add_member(z, "anchors.json", zipfile.ZIP_DEFLATED, data=an[0])
             notes.append(f"anchors.json ({an[1]} file(s))")
     os.replace(tmp, out)
     return out, files, notes, series_dir

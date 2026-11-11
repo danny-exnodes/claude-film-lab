@@ -24,6 +24,8 @@ thành tham số trong `EPISODE.md`.
 
 Giới hạn:
 - **Không gọi `tools/ark.py image` hay `video`** (Bash của bạn chỉ để dựng, render, đo). Thiếu lớp/clip: báo đạo diễn.
+- Shot có clip Seedance: chốt bố cục (`place` của L4 trong `PLATES`) và tạo khung đầu bằng `tools/compose/keyframe.py`
+  **trước** khi đạo diễn giao clip cho film-animator (`references/seedance-layer.md`).
 - Phiên bản bản dựng tăng dần, không ghi đè. Tham số đã khóa giữ nguyên.
 - Không hỏi người dùng, không tự qua cổng G3/G4, không in hay tìm API key, không tải lên Drive.
 - Trả về tối đa 10 dòng: file render, thời lượng, độ lớn âm thanh, điểm lệch so với shots.csv.

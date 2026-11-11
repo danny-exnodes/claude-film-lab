@@ -121,6 +121,9 @@ motion: [mist-bands, embers, sun-glow, strip-warp]   # id trong sổ đăng ký 
 sound: {scale: "D minor pentatonic", instruments: [...], notes: "..."}
 type: {latin: "Cormorant Garamond", cjk: "Noto Serif CJK TC"}
 ```
+Tách alpha (`matte`): ảnh tạo ra giữ nguyên ở `plates/<tên>`, bản RGBA đã tách là `plates/matte/<cùng tên>.png` (OUT mặc
+định của `tools/layers/matte.py`, không bao giờ ghi đè ảnh gốc); cột `file` của `prompts.csv` và khóa trong `anchors.json`
+vẫn là tên gốc, không kèm `matte/`.
 Prompt mẫu trong `styles/<id>/prompts/*.txt` dùng chỗ trống `{style_block}`, `{subject}`, `{constraints}`, `{light}`.
 Thêm trường phái mới = chép `styles/_template/`, không sửa skill.
 
@@ -150,9 +153,9 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | File | Ai viết | Nội dung |
 |---|---|---|
 | `EPISODE.md` | đạo diễn | trạng thái tập (§5). **Không đặt tên `STATE.md`** – tên đó thuộc cinecode |
-| `budget.yaml` | đạo diễn | trần chi phí (§7) |
+| `budget.yaml` | đạo diễn | trần chi phí (§7). `tools/check_episode.py` kiểm: thiếu file là ERROR từ khâu 0; chỉ bốn khóa `images`, `video_seconds`, `models`, `ledger_required` (khóa lạ là ERROR: gõ sai tên trần = không có trần); `images` và `video_seconds` bắt buộc, là số ≥ 0 |
 | `research.md` | film-researcher | nguyên văn, link, cách đọc tên; tài liệu gốc dùng tới ghi theo tên file trong `01_TaiLieuGoc/` (§11.4) |
-| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`. Mọi dòng không phải tiêu đề `#`, dòng trống, chú thích `<!-- -->` hay trích dẫn `>` đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>` |
+| `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`; hai mốc liền nhau cách nhau tối thiểu 3 s. Dòng không phải lời bình: tiêu đề `#`, dòng trống, trích dẫn `>`, chú thích `<!-- -->` (kể cả chú thích nằm trong dòng: bị bỏ, phần chữ còn lại vẫn là lời bình), khối code ` ``` `/`~~~`, khối YAML đầu file, đường kẻ `---`/`***`/`___`. Mọi dòng khác đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>`. Lời bình không dùng dấu gạch ngang (`—`, `–`, `--`: ERROR; trong `>` là WARN), không để chữ Hán hay ký hiệu markdown (`\|`, `` ` ``, `](`, `<`, `>`: WARN, TTS không đọc được) |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
@@ -210,6 +213,7 @@ images: 40               # tổng số ảnh tối đa (mọi model)
 video_seconds: 60        # tổng giây video tối đa
 models:                  # (tuỳ chọn) trần riêng theo model, đơn vị ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6
+ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có: buộc kéo ledger từ Drive trước; bật từ khâu 4
 ```
 `ledger.csv` (đặt ở `out/<project>/<id>/ledger.csv`; bản gốc trên Drive `04_SanXuat/<thư mục tập>/ledger.csv`, kéo về đầu
 phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
@@ -232,10 +236,33 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   đọc `budget.yaml`) làm trước khi lấy khoá; lệnh gọi API làm sau khi mở khoá (khoá không giữ trong lúc gọi API).
   Nhờ vậy N agent chạy song song trong cùng container không vượt trần.
 - Request 502 bị proxy cắt: ghi `cut-502`, không thử lại.
-- Thư mục chứa file đầu ra được tạo trước khi kiểm ngân sách và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
+- Mã thoát của `image` / `video` / `lambda-job prepare`: **2** = bị từ chối tại chỗ, không gửi gì, không ghi dòng ledger,
+  không tạo thư mục đầu ra → sửa lệnh; **3** = vượt trần (dòng `refused-budget`); **1** = request đã rời máy → xem dòng
+  ledger của nó (có thể đã tính phí), không tự chạy lại.
+- `budget.yaml` chỉ nhận bốn khoá `images`, `video_seconds`, `models`, `ledger_required`; khoá lạ (vd. `image:`), trần
+  không phải số ≥ 0, file thiếu/rỗng/hỏng → mã 2. Request phải nằm dưới một trần (ảnh: `images` hoặc `models.<model>`;
+  video: `video_seconds` hoặc `models.<model>`), không thì mã 2 `has no cap for ...`.
+- File đầu ra đã tồn tại (kích thước > 0) → mã 2 `output exists`, kèm gợi ý `_v<NN>` còn trống: phiên bản chỉ tăng, không
+  ghi đè file đã trả tiền (`--overwrite` chỉ cho thử nhanh ngoài tập). Ledger có header khác chuẩn → mã 2
+  `ledger header mismatch`: sửa header hoặc kéo lại từ Drive, không xoá file.
+- Thư mục chứa file đầu ra được tạo sau các kiểm tra tại chỗ ở trên, trước khi ghi `pending` và gọi API. Lưu ảnh lỗi → `failed`, note `save-failed`;
   tải video lỗi → `failed`, note `download-failed` (cả hai vẫn tính phí); ark.py in URL đầy đủ và task id để tải tay (link có hạn).
 - `ark.py video --resume-task <task_id> [out.mp4] --ledger L`: không tạo task, không kiểm ngân sách, không ghi `pending`;
   poll tiếp + tải về, ghi dòng cuối cho task đó với `req=` lấy từ ledger (`out` mặc định lấy từ ledger). Cần ledger, không cần budget.
+- `ledger_required: true` trong `budget.yaml`: `ark.py` thoát mã 2 (không gọi API, không ghi gì) khi file ledger chưa
+  tồn tại hoặc rỗng – một ledger trống sẽ tính lại mọi trần từ 0. Kéo ledger của tập từ Drive trước; chỉ khi Drive chưa
+  có (tập chưa tạo ảnh/video nào) mới tạo ledger rỗng có header bằng `python3 tools/ark.py ledger-merge -o <ledger>`.
+- **Ảnh qua Lambda** (pro, 4K; `lambda/README.md`) dùng cùng ledger và cùng cách đếm:
+  `ark.py lambda-job prepare` làm đúng bước nguyên tử ở trên (dòng `pending`, `note` = `req=<id>; lambda`, vượt trần →
+  `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
+  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
+  Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
+- **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
+  `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
+  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
+  không (gộp không bao giờ làm mất dòng đã tính phí). Dùng mỗi khi có hai bản ledger
+  của một tập (hai phiên, hai file trên Drive, bản Drive + bản trong container): **không bao giờ** "lấy bản mới nhất"
+  cho ledger, vì bản kia chứa các request đã tính phí (§11.6).
 - File bắt buộc theo khâu (`tools/check_episode.py`): `script.md`, `shots.csv` từ khâu 3; `prompts.csv` từ khâu 5
   (được viết dần từ khâu 3). Trước đó thiếu file chỉ là WARN.
 
@@ -263,7 +290,7 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 | `key_bg #FF00FF` + rembg cho mọi lớp | `matte.per_layer`: thủy mặc dùng `luminance` cho L2/L3 (giữ vệt mực loang), `rembg` cho L4/P |
 | Ngân sách ghi bằng prompt | `ark.py --budget/--ledger` chặn trong công cụ |
 | `cost_note` | `usage` JSON nguyên văn (API không trả tiền) |
-| Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); S3 khi Lambda sẵn sàng. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
+| Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); ảnh pro/4K từ Lambda tải từ S3 về `out/` rồi vào gói như mọi ảnh. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
 | Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-<v>.txt` |
 | Song song plate-maker | Tối đa 3 agent song song; ledger dùng khoá file |
 | Kiểm tra kịch bản bằng mắt | `tools/check_episode.py` kiểm schema, thời lượng, nhịp, tên file |
@@ -381,9 +408,17 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `parentId = '<id>' and trashed = false`, tải từng file chữ (`download_file_content`, giải base64) về đúng đường dẫn;
    thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
-   cũ vào `99_LuuTru/` theo bước 3 của mục đẩy.
-4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC):
+   cũ vào `99_LuuTru/` theo bước 3 của mục đẩy. **Ngoại lệ `ledger.csv`:** tải **mọi** bản về
+   (`out/<project>/ep<NN>/ledger.drive-1.csv`, `…-2.csv`) rồi gộp, không chọn bản mới nhất:
+   `python3 tools/ark.py ledger-merge out/<project>/ep<NN>/ledger.drive-*.csv -o out/<project>/ep<NN>/ledger.csv`
+   (§7); lần đẩy ledger kế tiếp sẽ đưa các bản cũ vào `99_LuuTru/`.
+4. Chụp dấu bản vừa kéo và ghi giờ kéo (UTC), **một lần** sau lần kéo đầu của container:
    `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>` (từ thư mục gốc repo).
+   Đã có snapshot (kéo thêm theo khâu, container cũ còn sống): `python3 tools/drive_sync.py pulled projects/<project>
+   <các file vừa kéo>` – chỉ thay dòng của các file đó, không đụng `.pulled.at`, không ghi `.pushed.log`. `snapshot`
+   từ chối (mã thoát 1, không ghi gì) khi còn thay đổi chưa đẩy, vì chụp lại sẽ đánh dấu chúng là đã đẩy; `--force`
+   chỉ dùng khi chắc chắn bỏ các thay đổi đó khỏi danh sách đẩy. File tạm (`*.b64`, `*.orig`, `*.bak`, `*.tmp`,
+   `*.part`, `*~`) và `ledger.drive-*.csv` không vào dấu, không vào danh sách đẩy.
    Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
    `find projects/<project>` in ra, media dạng `out/<project>/…`; không có file nào bắt đầu bằng `.`) và
    `projects/<project>/.pulled.at` (`2026-11-10T15:30:00Z`). Tương đương bằng shell khi không chạy được công cụ:
@@ -411,8 +446,11 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 2. Mỗi file (đúng các tham số `plan` in ra): `create_file` vào thư mục tương ứng (ID từ manifest), `title` = tên file, `base64Content` =
    `sha256:<hex>:<đường dẫn tuyệt đối>` (hex từ `sha256sum`), `contentMimeType` (`.md` `text/markdown`, `.csv` `text/csv`,
    `.json` `application/json`, `.yaml`/`.txt` `text/plain`), `disableConversionToGoogleType: true`. Tải lên thành công →
-   ngay lập tức `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>`
-   (thay đúng dòng của file trong `.pulled.sha256`, thêm dòng vào `.pushed.log`).
+   ngay lập tức `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>
+   --sha256 <hex>` đúng như `plan` in ra (thay đúng dòng của file trong `.pulled.sha256`, thêm dòng vào
+   `.pushed.log`). `--sha256` là bản đã tải lên: file bị sửa sau lúc tải thì `record` in `WARN … still to push` và
+   file vẫn là CHANGED ở lần `plan` sau. `record`/`pulled` chỉ nhận file trong `projects/<project>/` hoặc
+   `out/<project>/` (mã thoát 2); chạy song song nhiều lệnh `record` được (có khoá `.drive_sync.lock`).
 3. **Quy tắc phiên bản (chọn vì đơn giản và chắc):** connector không ghi đè được nội dung file (`update_file` chỉ sửa
    tên, thư mục, thuộc tính), nên lịch sử phiên bản của Drive không dùng được. Mỗi lần đẩy là **file mới**; chỉ sau khi
    tải lên thành công, tìm bản cũ ngay lúc đó bằng `search_files` (`parentId = '<id thư mục>' and title = '<tên file>'
@@ -422,6 +460,12 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `03_KichBan__ep01-bac-thi__script_20261110-1530.md`. Kết quả: mỗi thư mục luôn có đúng một bản hiện hành mỗi tên;
    mọi bản cũ nằm ở `99_LuuTru/`, tìm lại được theo tên. Tải lên trước, chuyển sau: bị ngắt giữa chừng chỉ để lại
    bản trùng (bước 3 của mục kéo xử lý), không bao giờ mất bản nào.
+   **`ledger.csv` trước khi đẩy:** phiên khác có thể đã đẩy ledger của cùng tập sau lần kéo. `plan` in sẵn các bước
+   này thành khối `pre` ngay trước dòng `create_file` của ledger (JSON: `pre.ledger_merge`) và ghi chú `ledger: push
+   after every stage that generated; no approval gate` – ledger không chờ duyệt như media. Tải bản đang ở Drive về
+   `out/<project>/ep<NN>/ledger.drive-1.csv`, `ark.py ledger-merge out/<project>/ep<NN>/ledger.csv
+   out/<project>/ep<NN>/ledger.drive-1.csv -o out/<project>/ep<NN>/ledger.csv`, xoá bản tạm, rồi mới đẩy bản đã gộp
+   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào).
 4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
    trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
    dùng), xung đột thì hỏi người dùng; rồi mới đẩy. Với file NEW, mọi kết quả `search_files` có ID không nằm trong
@@ -432,7 +476,8 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    `99_LuuTru/` theo bước 3, cập nhật `drive.files` và đẩy `PROJECT.md`.
 6. Cập nhật dấu **chỉ cho các file đã tải lên thành công** (`record` ở bước 2 thay đúng dòng của file đó trong
    `.pulled.sha256`; file người dùng từ chối tải giữ dấu cũ để lần sau vẫn hiện trong danh sách – không chạy lại
-   `snapshot` sau khi đẩy). `plan` chạy lại phải in `Nothing to push.` (trừ file cố ý chưa đẩy); ghi giờ đẩy vào cột cuối dòng
+   `snapshot` sau khi đẩy). `plan` chạy lại phải in `Nothing to push.` (trừ file cố ý chưa đẩy; còn plate/clip chưa nằm trong gói nào thì
+   dòng đó là `Nothing to push (text). N plate/clip file(s) are in no bundle…` – media ấy chỉ có trong container); ghi giờ đẩy vào cột cuối dòng
    `## Nhật ký` của EPISODE.md.
 7. Mỗi lần tải lên người dùng duyệt: gom file của một khâu đẩy một lượt, báo trước danh sách.
 

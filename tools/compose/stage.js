@@ -74,7 +74,8 @@
       let f = 1;
       if (coverPlate) {
         f = coverFactor(cam, d, zd, coverPlate);
-        if (f > 1.0005) C.warn(`plate ${coverPlate.id} shows its edge under this camera: covered by up to +${((f - 1) * 100).toFixed(1)} % zoom; give it more overscan or a smaller move`);
+        // keyed per plate: one entry that keeps the worst zoom (fix: more overscan, or a smaller move)
+        if (f > 1.0005) C.warn(`plate ${coverPlate.id} shows its edge: up to +${((f - 1) * 100).toFixed(1)} % extra zoom`, 'edge:' + coverPlate.id, f);
       }
       g.save();
       g.setTransform(...st.base);
@@ -88,9 +89,10 @@
     // st.screen(draw) draws in stage px without the camera (a title, a fixed veil).
     st.screen = (draw) => { g.save(); g.setTransform(...st.base); draw(g); g.restore(); };
     st.plate = (id, o) => C.drawPlate(st, id, o);
+    const before = C.time;
+    C.time = cam.t;                              // only read by C.warn (the film time a warning first appeared)
     g.save();
-    fn(st);
-    g.restore();
+    try { fn(st); } finally { g.restore(); C.time = before; }
     return st;
   };
 

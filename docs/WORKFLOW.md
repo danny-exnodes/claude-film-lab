@@ -47,7 +47,8 @@ flowchart TD
 | 11 | Xuất bản | `film-publisher` | `publish.md` | người dùng tự đăng |
 
 Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, không tự qua cổng. Trước mỗi cổng phiên chính chạy
-`python3 tools/check_episode.py episode <thư mục tập>` (ghi `review/check-<v>.txt`); còn ERROR thì chưa trình duyệt.
+`python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe` từ G3; file chỉ được ghi
+khi có `--out`); còn ERROR thì chưa trình duyệt.
 
 ## 3. Agents
 
@@ -62,6 +63,7 @@ Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, khôn
 | `film-compositor` | Dựng, âm thanh, render | `film-compose-shot`, `cinecode` | Bash, Read, Write, Edit, Glob, Grep | opus | một agent mỗi tập; không gọi ark.py |
 | `film-reviewer` | Kiểm tra độc lập | – | Read, Write, Edit, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode; chỉ ghi `review/qc-*.md` và MEMORY.md |
 | `film-publisher` | Xuất bản YouTube | – | Read, Write, Edit, Glob, Grep | sonnet | `publish.md`, không tự đăng |
+| `film-narrator` | Lồng tiếng lời bình (VieNeu-TTS local, không phí) | – | Bash, Read, Write, Glob, Grep | sonnet | `background: true`; chỉ `tools/tts/vieneu_tts.py`, giọng/mode/seed theo hợp đồng, xong = `--check` đạt; chưa gắn vào khâu nào |
 
 Gọi agent: Claude tự giao theo `description`, hoặc gọi tên trong câu ("giao film-writer viết khâu 2"). Mỗi lần giao có
 hợp đồng: đường dẫn tập, khâu, file đầu vào, file đầu ra, trần chi phí, tiêu chí xong. Agent trả về tối đa 10 dòng.
@@ -78,6 +80,11 @@ Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-m
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Kiểm ngân sách và ghi dòng `pending` nằm trong cùng
   một khóa, nên agent song song không vượt trần (CONVENTIONS §7).
+- Ảnh pro/4K đi qua Lambda (`lambda/README.md`) và vẫn vào cùng ledger: `ark.py lambda-job prepare` (kiểm trần, dòng
+  `pending`, in payload) → Invoke → `ark.py lambda-job finish` (dòng cuối). Không có ledger thì không gọi Lambda.
+- Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm (ghi vào `## Nhật ký` của EPISODE.md khi bắt đầu khâu 4–6). Có
+  hai bản ledger của một tập thì gộp bằng `ark.py ledger-merge`, không lấy bản mới nhất; `ledger_required: true` trong
+  `budget.yaml` (bật từ khâu 4) chặn việc tạo ảnh khi chưa kéo ledger (CONVENTIONS §7, §11.6).
 - Tiết kiệm nhất ở G2: một ảnh thử (2K hoặc `--fast`) và một shot mẫu được duyệt trước khi tạo hàng loạt.
 
 ## 5. Lưu trữ

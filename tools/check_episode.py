@@ -20,8 +20,12 @@ numbers go into the report, so `--probe --out review/check-<v>.txt` is what film
 script.md rules: every narration line starts with a [mm:ss] mark (an optional "- " bullet before it is
 allowed). Lines that are not narration: blank lines, headings (#), blockquotes (>), HTML comments,
 fenced code blocks, a YAML front matter block and horizontal rules.
+
+Also checked: budget.yaml (the four keys of docs/CONVENTIONS.md §7, both totals required), `stage` against
+the gate dates, and with --probe only the newest draft and the newest final render (older versions get one
+INFO line). A file that cannot be read gives an ERROR line; the report is written even then.
 """
-import argparse, csv, io, json, os, re, shutil, subprocess, sys, unicodedata
+import argparse, csv, datetime, io, json, math, os, re, shutil, subprocess, sys, unicodedata
 
 LAB = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(LAB, "tools"))
@@ -114,9 +118,20 @@ def nfc(s):
     return unicodedata.normalize("NFC", s)
 
 
+class CheckError(Exception):
+    """A file that cannot be read as text. `msg` is the text for the report, str() also names the file."""
+
+    def __init__(self, path, msg):
+        super().__init__(f"{path}: {msg}")
+        self.path, self.msg = path, msg
+
+
 def read_text(path):
-    with open(path, encoding="utf-8-sig") as f:
-        return nfc(f.read())
+    try:
+        with open(path, encoding="utf-8-sig") as f:
+            return nfc(f.read())
+    except UnicodeDecodeError as e:
+        raise CheckError(path, f"not valid UTF-8 (byte {e.start}); save the file as UTF-8") from None
 
 
 def split_front_matter(text):
@@ -133,8 +148,8 @@ def read_csv(path, header, rep, name):
         text = read_text(path)
         rd = csv.reader(io.StringIO(text, newline=""), strict=True)
         rows = list(rd)
-    except (csv.Error, UnicodeDecodeError) as e:
-        rep.error(name, f"not valid RFC 4180 UTF-8 CSV: {e}")
+    except (csv.Error, CheckError) as e:
+        rep.error(name, f"not valid RFC 4180 UTF-8 CSV: {getattr(e, 'msg', e)}")
         return None
     if not rows:
         rep.error(name, "empty file (header required)")
@@ -154,10 +169,12 @@ def read_csv(path, header, rep, name):
 
 
 def to_float(s):
+    """A finite number or None ('nan' and 'inf' are not timings: every comparison with them is false)."""
     try:
-        return float(s)
+        x = float(s)
     except (TypeError, ValueError):
         return None
+    return x if math.isfinite(x) else None
 
 
 def fmt_s(x):
@@ -173,14 +190,18 @@ def check_front_matter(ep_dir, rep):
         return None
     if os.path.exists(os.path.join(ep_dir, "STATE.md")):
         rep.error("STATE.md", "episode state must be EPISODE.md; STATE.md belongs to cinecode")
-    text = read_text(path)
+    try:
+        text = read_text(path)
+    except CheckError as e:
+        rep.error("EPISODE.md", e.msg)
+        return None
     fm, body = split_front_matter(text)
     if fm is None:
         rep.error("EPISODE.md", "no YAML front matter (--- ... --- at the top)")
         return None
     try:
         meta = yaml.safe_load(fm) or {}
-    except yaml.YAMLError as e:
+    except (yaml.YAMLError, ValueError) as e:   # ValueError: an impossible date such as 2026-11-31
         rep.error("EPISODE.md", f"front matter is not valid YAML: {str(e).splitlines()[0]}")
         return None
     if not isinstance(meta, dict):
@@ -283,6 +304,108 @@ def check_front_matter(ep_dir, rep):
     return meta
 
 
+# Stage at which each gate is presented (docs/WORKFLOW.md §2); past it the gate must carry a date.
+GATE_STAGE = {"G1": 2, "G2": 4, "G3": 8, "G4": 10}
+
+
+def check_stage_gates(meta, rep):
+    """`stage` must not be ahead of an unpassed gate; gate dates are filled in order and do not decrease."""
+    W = "EPISODE.md"
+    stage, gates = meta.get("stage"), meta.get("gates")
+    if isinstance(stage, bool) or not isinstance(stage, int) or not isinstance(gates, dict):
+        return                                   # check_front_matter already reported it
+    dates = {}
+    for g in GATES:
+        val = gates.get(g, "")
+        if val is None:
+            dates[g] = None
+        elif not RE_DATE.match(str(val)):
+            return                               # missing or malformed: reported by check_front_matter
+        else:
+            try:
+                dates[g] = datetime.date.fromisoformat(str(val))
+            except ValueError:
+                rep.error(W, f"gates.{g} = {val!r} is not a calendar date")
+                return
+    behind = set()
+    for g in GATES:
+        if dates[g] is None and stage > GATE_STAGE[g]:
+            behind.add(g)
+            rep.error(W, f"stage {stage} is past gate {g} (stage {GATE_STAGE[g]}) but gates.{g} is null: "
+                         f"only the user passes a gate; set stage back or record the approval date")
+    for i, g in enumerate(GATES):
+        later = [x for x in GATES[i + 1:] if dates[x] is not None]
+        if dates[g] is None and later and g not in behind:
+            rep.error(W, f"gates.{later[0]} is dated but the earlier gate {g} is null")
+    prev = None
+    soon = datetime.date.today() + datetime.timedelta(days=1)   # one day of slack for time zones
+    for g in GATES:
+        d = dates[g]
+        if d is None:
+            continue
+        if prev and d < dates[prev]:
+            rep.error(W, f"gates.{g} {d} is before gates.{prev} {dates[prev]}")
+        if d > soon:
+            rep.warn(W, f"gates.{g} {d} is in the future")
+        prev = g
+
+
+BUDGET_KEYS = ("images", "video_seconds", "models", "ledger_required")
+BUDGET_REQUIRED = ("images", "video_seconds")
+LEDGER_REQUIRED_FROM_STAGE = 4
+
+
+def is_cap(v):
+    return not isinstance(v, bool) and isinstance(v, (int, float)) and math.isfinite(v) and v >= 0
+
+
+def check_budget(ep_dir, meta, rep):
+    """budget.yaml (docs/CONVENTIONS.md §7): a stage-0 output; a misspelled or missing cap is no cap."""
+    import yaml
+    W = "budget.yaml"
+    path = os.path.join(ep_dir, W)
+    if not os.path.isfile(path):
+        rep.error(W, "missing (written at stage 0: no paid call without a budget; copy templates/episode/budget.yaml)")
+        return
+    try:
+        b = yaml.safe_load(read_text(path))
+    except CheckError as e:
+        rep.error(W, e.msg)
+        return
+    except (yaml.YAMLError, ValueError) as e:
+        rep.error(W, f"not valid YAML: {str(e).splitlines()[0]}")
+        return
+    if b is None:
+        b = {}                                   # an empty file is an empty mapping: both totals are missing
+    if not isinstance(b, dict):
+        rep.error(W, f"must be a mapping with {', '.join(BUDGET_KEYS)}")
+        return
+    for k in b:
+        if k not in BUDGET_KEYS:
+            rep.error(W, f"unknown key {k} (a misspelled cap is no cap)")
+    for k in BUDGET_REQUIRED:
+        if k not in b:
+            rep.error(W, f"required key '{k}' missing")
+        elif not is_cap(b[k]):
+            rep.error(W, f"{k} = {b[k]!r} must be a number >= 0")
+    models = b.get("models")
+    if models is not None:
+        if not isinstance(models, dict):
+            rep.error(W, "models must be a mapping model id -> number >= 0")
+        else:
+            for mid, cap in models.items():
+                if not is_cap(cap):
+                    rep.error(W, f"models.{mid} = {cap!r} must be a number >= 0")
+    required = b.get("ledger_required")
+    if "ledger_required" in b and not isinstance(required, bool):
+        rep.error(W, f"ledger_required = {required!r} must be true or false")
+    elif required is not True:
+        stage = meta.get("stage") if meta else None
+        if isinstance(stage, int) and stage >= LEDGER_REQUIRED_FROM_STAGE:
+            rep.warn(W, f"ledger_required is not true at stage {stage} (set it from stage {LEDGER_REQUIRED_FROM_STAGE}: "
+                        f"ark.py then refuses to generate before the ledger was pulled from Drive)")
+
+
 def missing_file(rep, meta, name):
     stage = meta.get("stage") if meta else None
     need = REQUIRED_FROM_STAGE.get(name, 0)
@@ -301,7 +424,9 @@ def check_shots(ep_dir, meta, rep):
     if rows is None:
         return None
     if not rows:
-        rep.error("shots.csv", "no shots")
+        stage = meta.get("stage") if meta else None
+        early = isinstance(stage, int) and stage < REQUIRED_FROM_STAGE["shots.csv"]
+        (rep.warn if early else rep.error)("shots.csv", "no shots")
         return {}
     shots, prev, prev_num, prev_to = {}, None, None, None
     length = meta.get("length_s") if meta else None
@@ -372,8 +497,14 @@ def check_shots(ep_dir, meta, rep):
     return shots
 
 
+RE_INLINE_COMMENT = re.compile(r"<!--.*?-->")
+
+
 def narration_lines(text):
-    """Yield (line number, line) for narration lines of script.md."""
+    """Yield (line number, line) for narration lines of script.md.
+
+    HTML comments are removed from a line before it is classified, so narration before or after a comment
+    on the same line is kept (without the comment); the line is yielded unchanged when it has none."""
     lines = text.splitlines()
     i, n = 0, len(lines)
     if lines and lines[0].strip() == "---":   # optional front matter
@@ -390,19 +521,32 @@ def narration_lines(text):
             continue
         if fence:
             continue
-        if comment:
-            if "-->" in s:
-                comment = False
-            continue
-        if s.startswith("<!--"):
-            comment = "-->" not in s[4:]
-            continue
+        if comment:                              # inside a multi-line comment: keep what follows its end
+            if "-->" not in raw:
+                continue
+            comment = False
+            raw = raw.split("-->", 1)[1].strip()
+        if "<!--" in raw:
+            raw = RE_INLINE_COMMENT.sub("", raw)
+            if "<!--" in raw:                    # a comment that continues on the next lines
+                comment = True
+                raw = raw.split("<!--", 1)[0]
+            raw = raw.strip()
+        s = raw.strip()
         if not s or s.startswith("#") or s.startswith(">") or re.fullmatch(r"(-{3,}|\*{3,}|_{3,})", s):
             continue
         yield k + 1, raw
 
 
 RE_MARK = re.compile(r"^\s*(?:[-*]\s+)?\[(\d{2}):(\d{2})\]\s*(.*)$")
+RE_CJK = re.compile("[\u3400-\u9fff\uf900-\ufaff]+")
+UNSPEAKABLE = ("|", "`", "](", "<", ">")
+
+
+def unspeakable(said):
+    """What a TTS engine would read as noise in the spoken text of a narration line."""
+    found = [f"CJK ideograph(s) {''.join(RE_CJK.findall(said))}"] if RE_CJK.search(said) else []
+    return found + [repr(x) for x in UNSPEAKABLE if x in said]
 
 
 def check_script(ep_dir, meta, rep):
@@ -410,13 +554,19 @@ def check_script(ep_dir, meta, rep):
     if not os.path.isfile(path):
         missing_file(rep, meta, "script.md")
         return
-    text = read_text(path)
+    try:
+        text = read_text(path)
+    except CheckError as e:
+        rep.error("script.md", e.msg)
+        return
     narr = list(narration_lines(text))
     narr_nos = {n for n, _ in narr}
     for n, line in enumerate(text.splitlines(), start=1):
         for ch, name in DASHES.items():
             if ch in line and n not in narr_nos:
                 rep.warn(f"script.md:{n}", f"{name} outside narration (use ',' '.' or ':')")
+        if "--" in line and n not in narr_nos and line.lstrip().startswith(">"):
+            rep.warn(f"script.md:{n}", "double hyphen '--' outside narration (use ',' '.' or ':')")
     if not narr:
         rep.error("script.md", "no narration lines")
         return
@@ -427,6 +577,8 @@ def check_script(ep_dir, meta, rep):
         for ch, name in DASHES.items():
             if ch in line:
                 rep.error(W, f"{name} in narration (TTS reads it badly; use ',' '.' or ':')")
+        if "--" in line:
+            rep.error(W, "double hyphen '--' in narration (TTS reads it badly; use ',' '.' or ':')")
         m = RE_MARK.match(line)
         if not m:
             rep.error(W, f"narration line without [mm:ss] mark: {line.strip()[:60]!r}")
@@ -437,6 +589,8 @@ def check_script(ep_dir, meta, rep):
         t = mm * 60 + ss
         if not said:
             rep.error(W, "mark without text")
+        if unspeakable(said):
+            rep.warn(W, f"not speakable: {', '.join(unspeakable(said))} in the spoken text (TTS reads it as noise)")
         if prev_t is not None:
             if t <= prev_t:
                 rep.error(W, f"mark [{mm:02d}:{ss:02d}] not after previous [{prev_t // 60:02d}:{prev_t % 60:02d}] (line {prev_n})")
@@ -549,38 +703,71 @@ def check_media(media, meta, prompt_rows, rep):
     check_listed_files(media, meta, prompt_rows, rep)
     led = os.path.join(media, "ledger.csv")
     if os.path.isfile(led):
-        with open(led, encoding="utf-8") as fh:
-            head = fh.readline().strip()
-        if head != ",".join(LEDGER_HEADER):
+        head = ledger_head(led, rep)
+        if head is not None and head != ",".join(LEDGER_HEADER):
             rep.error("media/ledger.csv", f"header is {head!r}, expected {','.join(LEDGER_HEADER)!r}")
     return True
 
 
-def check_listed_files(media, meta, prompt_rows, rep):
-    """Every prompts.csv file should exist in plates/ (images) or clips/ (clips) once it was made.
+def ledger_head(path, rep):
+    """First line of ledger.csv (a BOM is not part of it), or None after reporting an unreadable file."""
+    try:
+        return read_text(path).split("\n", 1)[0].strip()
+    except CheckError as e:
+        rep.error("media/ledger.csv", e.msg)
+        return None
 
-    Rows are written at stage 3, before anything is generated, so a missing file is an ERROR only when
-    the row says it was generated or accepted (non-empty `usage` or `approved=yes`) or the episode is at
-    stage >= FILES_REQUIRED_FROM_STAGE (7, compositing: every listed file must exist by then). Otherwise
-    it is a pending row: one INFO line lists them, so stage 3-6 checks (and gate G2) can pass.
+
+def required_rows(prompt_rows, stage):
+    """prompts.csv rows whose file must be on disk.
+
+    Rows are written at stage 3, before anything is generated. A row is required once it was accepted
+    (approved=yes) or generated and not judged yet (non-empty `usage`, `approved` empty); every other row
+    from stage FILES_REQUIRED_FROM_STAGE (7, compositing). A rejected row (approved=no) is never required:
+    it is the record of a paid image, not an input of the film."""
+    late = isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE
+    return [r for r in prompt_rows or []
+            if r["approved"] != "no" and (r["approved"] == "yes" or r["usage"] or late)]
+
+
+def check_listed_files(media, meta, prompt_rows, rep):
+    """Every required prompts.csv file (required_rows) must exist in plates/ (images) or clips/ (clips).
+
+    A missing file that is not required yet is a pending row: one INFO line lists them, so stage 3-6
+    checks (and gate G2) can pass. Missing rejected files get one INFO line as well.
     """
     stage = meta.get("stage") if meta else None
-    late = isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE
-    pending = []
+    required = {id(r) for r in required_rows(prompt_rows, stage)}
+    pending, rejected = [], []
     for r in prompt_rows or []:
         f = r["file"]
         sub = "plates" if RE_LAYER_FILE.match(f) else "clips" if RE_CLIP_FILE.match(f) else None
         if sub is None or os.path.isfile(os.path.join(media, sub, f)):
             continue
-        made = r["approved"] == "yes" or bool(r["usage"])
-        if made or late:
-            why = ("approved=yes" if r["approved"] == "yes" else "usage is filled") if made else f"episode is at stage {stage}"
+        if r["approved"] == "no":
+            rejected.append(f)
+        elif id(r) in required:
+            why = ("approved=yes" if r["approved"] == "yes" else "usage is filled" if r["usage"]
+                   else f"episode is at stage {stage}")
             rep.error("prompts.csv", f"{f} listed but not found in {os.path.join(media, sub)} ({why})")
         else:
             pending.append(f)
     if pending:
         rep.info(f"prompts.csv: {len(pending)} file(s) not generated yet (no usage, not approved; required from "
                  f"stage {FILES_REQUIRED_FROM_STAGE}): {', '.join(pending)}")
+    if rejected:
+        rep.info(f"prompts.csv: {len(rejected)} rejected file(s) not on disk (approved=no): {', '.join(rejected)}")
+
+
+def check_media_missing(media, meta, prompt_rows, rep):
+    """The media folder is absent (check_media said so): from compositing on that is not a detail."""
+    stage = meta.get("stage") if meta else None
+    n = len(required_rows(prompt_rows, stage))
+    if n and isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
+        rep.error("media", f"media folder missing but {n} approved/generated file(s) are required: "
+                           f"pull the shot bundles from Drive (drive_link)")
+    else:
+        rep.info(f"media: {n} approved/generated file(s) of prompts.csv not checked (media folder missing)")
 
 
 # ==================================================================== probe =====
@@ -626,20 +813,53 @@ def is_16_9(w, h):
     return w > 0 and h > 0 and abs(w / h - 16 / 9) <= 0.01
 
 
-def probe_media(media, meta, rep):
-    """--probe: ffprobe numbers for clips/*.mp4 and renders/*.mp4, loudness for final renders."""
+RE_RENDER_VERSION = re.compile(r"_(draft|final)_v(\d{2})\.mp4$")
+DEFAULT_FORMAT = (1920, 1080, 24.0)
+FPS_TOL = 0.01
+
+
+def series_format(ep_dir):
+    """(width, height, fps) from `format:` in the front matter of SERIES.md in the episode's parent folder
+    (docs/CONVENTIONS.md §4), else 1920x1080 at 24 fps."""
+    import yaml
+    try:
+        fm, _ = split_front_matter(read_text(os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "SERIES.md")))
+        f = yaml.safe_load(fm or "")["format"]
+        w, h, fps = f["width"], f["height"], f["fps"]
+        if all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (w, h)) and is_cap(fps) and fps > 0:
+            return w, h, float(fps)
+    except (OSError, CheckError, yaml.YAMLError, ValueError, TypeError, KeyError):
+        pass
+    return DEFAULT_FORMAT
+
+
+def probe_media(media, meta, rep, fmt=None):
+    """--probe: ffprobe numbers for clips/*.mp4 and the newest draft and final in renders/, loudness for the final.
+
+    Versions are never deleted (docs/CONVENTIONS.md §2), so only the highest version of each kind is judged;
+    an older one gets one INFO line and is not measured."""
     if not (shutil.which("ffprobe") and shutil.which("ffmpeg")):
         rep.error("probe", "ffprobe/ffmpeg not found on PATH: clips and renders not measured")
         return
     length = meta.get("length_s") if meta else None
+    fw, fh, ffps = fmt or DEFAULT_FORMAT
     found = 0
     for sub in ("clips", "renders"):
         d = os.path.join(media, sub)
         names = sorted(n for n in os.listdir(d) if n.endswith(".mp4")) if os.path.isdir(d) else []
+        versions = {n: RE_RENDER_VERSION.search(n) for n in names} if sub == "renders" else {}
+        newest = {}
+        for m in filter(None, versions.values()):
+            newest[m.group(1)] = max(newest.get(m.group(1), 0), int(m.group(2)))
         for name in names:
             found += 1
             where = f"media/{sub}/{name}"
-            final = sub == "renders" and "_final_" in name
+            m = versions.get(name)
+            kind = m.group(1) if m else None
+            if m and int(m.group(2)) < newest[kind]:
+                rep.info(f"probe {where}: superseded by v{newest[kind]:02d}, not measured")
+                continue
+            final, draft = kind == "final", kind == "draft"
             try:
                 pr = ffprobe(os.path.join(d, name))
             except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired) as e:
@@ -662,27 +882,40 @@ def probe_media(media, meta, rep):
                     lufs = None
                     rep.error(where, f"loudness not measured: {e}")
             rep.info(msg)
-            if not is_16_9(w, h):
-                (rep.error if final else rep.warn)(where, f"{w}x{h} is not 16:9")
             if final:
+                if (w, h) != (fw, fh) or not pr["fps"] or abs(pr["fps"] - ffps) > FPS_TOL:
+                    if pr["fps"] and abs(pr["fps"] - ffps) > FPS_TOL and fps == f"{ffps:.3g} fps":
+                        # 23.976 must not print as '24 fps is not ... 24 fps'
+                        fps = f"{pr['fps']:.3f} fps"
+                    rep.error(where, f"{w}x{h} at {fps} is not the series format {fw}x{fh} at {ffps:g} fps")
                 if not pr["audio"]:
                     rep.error(where, f"final render has no audio stream (master must be {LUFS_TARGET:g} LUFS)")
                 elif lufs is not None and abs(lufs - LUFS_TARGET) > LUFS_TOL:
                     rep.error(where, f"integrated loudness {lufs:.1f} LUFS outside {LUFS_TARGET:g} +-{LUFS_TOL:g} LUFS")
+            elif draft:
+                if (w, h) != (fw // 2, fh // 2):
+                    rep.warn(where, f"{w}x{h} is not the draft size {fw // 2}x{fh // 2} (half the series format)")
+                if not pr["audio"]:
+                    rep.warn(where, "draft render has no audio stream")
+            elif not is_16_9(w, h):
+                rep.warn(where, f"{w}x{h} is not 16:9")
             if diff is not None and abs(diff) > LENGTH_TOL_S:
-                rep.warn(where, f"duration {pr['duration']:.2f} s differs from length_s {fmt_s(length)} s "
-                                f"by {diff:+.2f} s (> {LENGTH_TOL_S:g} s)")
+                (rep.error if final else rep.warn)(
+                    where, f"duration {pr['duration']:.2f} s differs from length_s {fmt_s(length)} s "
+                           f"by {diff:+.2f} s (> {LENGTH_TOL_S:g} s)")
     if not found:
         rep.info(f"probe: no mp4 in {os.path.join(media, 'clips')} or {os.path.join(media, 'renders')}")
 
 
-def cmd_episode(a):
-    rep = Report()
+def cmd_episode(a, rep=None):
+    rep = rep or Report()
     ep_dir = a.episode
     if not os.path.isdir(ep_dir):
         print(f"ERROR {ep_dir}: not a directory")
         return 1
     meta = check_front_matter(ep_dir, rep) or {}
+    check_stage_gates(meta, rep)
+    check_budget(ep_dir, meta, rep)
     shots = check_shots(ep_dir, meta, rep)
     check_script(ep_dir, meta, rep)
     files = check_prompts(ep_dir, meta, shots, rep)
@@ -690,7 +923,9 @@ def cmd_episode(a):
     if media is None and isinstance(meta.get("media"), str):
         media = meta["media"] if os.path.isabs(meta["media"]) else os.path.join(LAB, meta["media"])
     if check_media(media, meta, files, rep) and a.probe:
-        probe_media(media, meta, rep)
+        probe_media(media, meta, rep, series_format(ep_dir))
+    if not (media and os.path.isdir(media)):
+        check_media_missing(media, meta, files, rep)
     if shots:
         total = max(to_float(r["to_s"]) or 0 for r in shots.values())
         rep.info(f"{len(shots)} shot(s), {fmt_s(total)} s; media: {media or '-'}")
@@ -715,7 +950,10 @@ def check_style(style_dir, rep):
         return
     try:
         y = yaml.safe_load(read_text(path)) or {}
-    except yaml.YAMLError as e:
+    except CheckError as e:
+        rep.error("style.yaml", e.msg)
+        return
+    except (yaml.YAMLError, ValueError) as e:
         rep.error("style.yaml", f"not valid YAML: {str(e).splitlines()[0]}")
         return
     if not isinstance(y, dict):
@@ -739,7 +977,7 @@ def check_style(style_dir, rep):
                 rep.warn(W, f"id '{sid}' is a template id; set id = new folder name after copying")
             else:
                 rep.error(W, f"id {y['id']!r} must be kebab-case ASCII")
-    if "status" in y and y["status"] not in STYLE_STATUS:
+    if "status" in y and (not isinstance(y["status"], str) or y["status"] not in STYLE_STATUS):
         rep.error(W, f"status {y['status']!r} must be stable or draft")
     if "base" in y and y["base"] is not None and not isinstance(y["base"], str):
         rep.error(W, "base must be a recipe name (e.g. cinecode:ink-wash) or null")
@@ -778,7 +1016,9 @@ def check_style(style_dir, rep):
         rep.error(W, "motion must be a list of module ids")
     elif "motion" in y and known_motions() is not None:
         for m in y["motion"]:
-            if m not in known_motions():
+            if not isinstance(m, str):
+                rep.error(W, f"motion entry {m!r} must be a module id string")
+            elif m not in known_motions():
                 rep.warn(W, f"motion id '{m}' is not in tools/compose/motions.json")
     check_style_prompts(style_dir, rep)
     if not os.path.isfile(os.path.join(style_dir, "STYLE.md")):
@@ -806,9 +1046,10 @@ def check_matte(matte, rep):
             rep.error(W, f"{where} must be a mapping")
             continue
         m = spec.get("method")
-        if m not in MATTE_METHODS:
+        if not isinstance(m, str) or m not in MATTE_METHODS:
             rep.error(W, f"{where}.method {m!r} not in {'|'.join(sorted(MATTE_METHODS))}")
-        methods.add(m)
+        else:
+            methods.add(m)
         lo, hi = spec.get("low"), spec.get("high")
         for k, val in (("low", lo), ("high", hi)):
             if val is not None and (isinstance(val, bool) or not isinstance(val, int) or not 0 <= val <= 255):
@@ -834,7 +1075,11 @@ def check_style_prompts(style_dir, rep):
         rep.error("prompts/", "no prompt templates (prompts/*.txt)")
         return
     for f in txt:
-        text = read_text(os.path.join(d, f))
+        try:
+            text = read_text(os.path.join(d, f))
+        except CheckError as e:
+            rep.error(f"prompts/{f}", e.msg)
+            continue
         if not text.strip():
             rep.error(f"prompts/{f}", "empty")
         for ph in re.findall(r"\{([^{}\n]*)\}", text):
@@ -844,8 +1089,8 @@ def check_style_prompts(style_dir, rep):
             rep.warn(f"prompts/{f}", "does not use {style_block} (it should open every image prompt)")
 
 
-def cmd_style(a):
-    rep = Report()
+def cmd_style(a, rep=None):
+    rep = rep or Report()
     if not os.path.isdir(a.style):
         print(f"ERROR {a.style}: not a directory")
         return 1
@@ -867,7 +1112,24 @@ def main(argv=None):
     s = sp.add_parser("style", help="check a style pack styles/<id>")
     s.add_argument("style")
     a = p.parse_args(argv)
-    return cmd_episode(a) if a.cmd == "episode" else cmd_style(a)
+    rep = Report()
+    try:
+        return cmd_episode(a, rep) if a.cmd == "episode" else cmd_style(a, rep)
+    except Exception as e:   # a bug or an input nobody foresaw: still a report with what was found, not a traceback
+        rep.error("internal", f"{type(e).__name__}: {e}")
+        target = a.episode if a.cmd == "episode" else a.style
+        out = rep.text(f"check_episode {a.cmd} {os.path.normpath(target)}")
+        sys.stdout.write(out)
+        if getattr(a, "out", None):
+            dest = a.out if os.path.isabs(a.out) else os.path.join(target, a.out)
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
+                with open(dest, "w", encoding="utf-8") as f:
+                    f.write(out)
+                print(f"written {dest}")
+            except OSError as oe:
+                print(f"ERROR {dest}: report not written: {oe}")
+        return 1
 
 
 if __name__ == "__main__":

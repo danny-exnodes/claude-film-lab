@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """Pull an alpha matte from a generated layer image (docs/CONVENTIONS.md §3 matte).
 
-  python3 tools/layers/matte.py IN OUT --method none|luminance|chroma|rembg
+  python3 tools/layers/matte.py IN [OUT] --method none|luminance|chroma|rembg
           [--key #FF00FF] [--paper auto|#FFFFFF] [--low N --high N]
-          [--style styles/<id> --layer L2] [--preview PREVIEW.png]
+          [--style styles/<id> --layer L2] [--preview PREVIEW.png] [--overwrite]
+          [--rembg-model NAME] [--allow-download]
+
+OUT may be left out: the matte is then written to <IN dir>/matte/<IN stem>.png (plates/matte/ for a plate,
+same file name). The source image is never overwritten: OUT equal to IN is always refused, an existing
+OUT is refused unless --overwrite is given, and --preview may not name IN or OUT.
+A rembg model that is not in the local model folder is refused instead of downloaded (some models are
+1 GB and need 9 GB of RAM); --allow-download lets rembg fetch it.
+Alpha the input already has is kept: the new matte is multiplied by it (method none keeps it as it is).
 
 Methods
   none       keep the image's own alpha (opaque if it has none)
@@ -17,7 +25,8 @@ Methods
              paper_bg is only a hint then; an explicit --paper colour still wins.
   chroma     flat key background: alpha = RGB distance to the key colour with a soft ramp, then despill
              (the key's tint is removed from edge pixels only)
-  rembg      rembg.remove (u2net); slow on first use while the model loads. ~1 GB RAM per process, so runs
+  rembg      rembg.remove with an explicit model: --rembg-model, else $FILM_REMBG_MODEL, else u2net (the
+             model the session hook prefetches); slow on first use while the model loads. ~1 GB RAM per process, so runs
              take a machine-wide lock (REMBG_LOCK, /tmp/film-lab-rembg.lock): parallel agents queue, not OOM
 Then cleanup: alpha < low -> 0, alpha > high -> 255, linear in between.
 
@@ -30,7 +39,7 @@ result is under 10% transparent (paper not removed: try --paper auto or a higher
 import argparse, contextlib, fcntl, os, re, sys, time
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFilter, ImageOps
 
 METHODS = ("none", "luminance", "chroma", "rembg")
 CHROMA_FULL = 160.0   # RGB distance from the key at which a pixel is fully opaque (before cleanup)
@@ -46,6 +55,11 @@ def hex_rgb(s):
     if not re.fullmatch(r"[0-9A-Fa-f]{6}", s):
         raise ValueError(f"not a #RRGGBB colour: {s!r}")
     return np.array([int(s[i:i + 2], 16) for i in (0, 2, 4)], dtype=np.float32)
+
+
+def hex_text(s):
+    """'f4efe4' / '#f4efe4' -> '#F4EFE4' (ValueError when it is not a colour)."""
+    return "#%02X%02X%02X" % tuple(int(c) for c in hex_rgb(str(s)))
 
 
 def estimate_paper(rgb, frac=BORDER_FRAC):
@@ -87,16 +101,31 @@ def style_key(layer):
 
 
 def style_settings(style_dir, layer):
+    """Matte settings of one layer: method, low, high, bg (the layer's own flat background, optional)
+    and the style-wide key / paper colours."""
     import yaml
-    with open(os.path.join(style_dir, "style.yaml"), encoding="utf-8") as f:
-        y = yaml.safe_load(f) or {}
-    m = y.get("matte") or {}
-    per = m.get("per_layer") or {}
+    path = os.path.join(style_dir, "style.yaml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            y = yaml.safe_load(f) or {}
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else " ".join(str(e).split())
+        raise SystemExit(f"matte: cannot read {path} ({reason})")
+    m = y.get("matte") if isinstance(y, dict) else None
+    m = {} if m is None else m
+    per = m.get("per_layer") if isinstance(m, dict) else None
+    per = {} if per is None else per
+    if not isinstance(m, dict) or not isinstance(per, dict):
+        raise SystemExit(f"matte: {path}: matte and matte.per_layer must be mappings")
     key = style_key(layer)
-    spec = per.get(layer) or per.get(key)
+    name = layer if per.get(layer) else key
+    spec = per.get(name)
     if spec is None:
         raise SystemExit(f"{style_dir}/style.yaml: matte.per_layer has no entry for {layer} ({key})")
-    return {"method": spec.get("method"), "low": spec.get("low"), "high": spec.get("high"),
+    if not isinstance(spec, dict):
+        raise SystemExit(f"matte: {path}: matte.per_layer.{name} must be a mapping "
+                         f"{{method, low, high, bg}}, not {spec!r}")
+    return {"method": spec.get("method"), "low": spec.get("low"), "high": spec.get("high"), "bg": spec.get("bg"),
             "key": m.get("key_bg"), "paper": m.get("paper_bg")}
 
 
@@ -148,10 +177,33 @@ def despill_key(rgb, key, alpha):
     return np.clip(out, 0, 255)
 
 
-def matte_rembg(im):
-    from rembg import remove
+REMBG_MODEL = "u2net"  # default rembg model: the one doctor.sh checks and the session hook prefetches
+_REMBG_SESSIONS = {}   # model name -> rembg session, one per process
+
+
+def rembg_model_files(model):
+    """Where rembg 2.x looks for <model>.onnx: its model folder, then the legacy ~/.u2net folder."""
+    env = os.environ.get
+    xdg = env("XDG_DATA_HOME")
+    home = env("U2NET_HOME") or env("REMBG_HOME") or (os.path.join(xdg, "rembg") if xdg else os.path.join("~", ".rembg"))
+    legacy = env("U2NET_HOME") or os.path.join(xdg or "~", ".u2net")
+    return [os.path.join(os.path.expanduser(home), "models", model, model + ".onnx"),
+            os.path.join(os.path.expanduser(legacy), model + ".onnx")]
+
+
+def rembg_model_cached(model):
+    return any(os.path.isfile(f) for f in rembg_model_files(model))
+
+
+def matte_rembg(im, model=REMBG_MODEL):
+    """The session is always explicit: rembg.remove() without one picks its own default model
+    (bria-rmbg in rembg 2.0.87: a 1 GB download and about 9 GB of RAM per 2K image)."""
+    from rembg import new_session, remove
     with rembg_lock():
-        cut = remove(im.convert("RGB"))
+        session = _REMBG_SESSIONS.get(model)
+        if session is None:
+            session = _REMBG_SESSIONS[model] = new_session(model)
+        cut = remove(im.convert("RGB"), session=session)
     a = np.asarray(cut.convert("RGBA"), dtype=np.float32)[..., 3]
     return np.asarray(im.convert("RGB"), dtype=np.float32), a
 
@@ -163,7 +215,7 @@ def resolve_paper(rgb, paper):
     return hex_rgb(paper)
 
 
-def run(src, method, key="#FF00FF", paper="#FFFFFF", low=None, high=None, info=None):
+def run(src, method, key="#FF00FF", paper="#FFFFFF", low=None, high=None, info=None, *, rembg_model=REMBG_MODEL):
     """PIL image -> RGBA PIL image. paper may be 'auto'. If info is a dict, the paper used is stored
     there as info['paper'] ('#RRGGBB')."""
     if method not in METHODS:
@@ -181,8 +233,13 @@ def run(src, method, key="#FF00FF", paper="#FFFFFF", low=None, high=None, info=N
     elif method == "chroma":
         col, a = matte_chroma(rgb, hex_rgb(key))
     else:
-        col, a = matte_rembg(src)
+        col, a = matte_rembg(src, rembg_model)
     a = cleanup(a, low, high)
+    src_a = rgba[..., 3]
+    if method != "none" and (src_a < 255).any():
+        # alpha channel or palette transparency of the source: what was transparent stays transparent
+        a = a * (src_a / 255.0)
+        print("note: input already has alpha: combined with the new matte", file=sys.stderr)
     out = np.dstack([col, a])
     return Image.fromarray(np.round(out).astype(np.uint8), "RGBA")
 
@@ -192,10 +249,18 @@ def preview(rgba):
     return Image.alpha_composite(red, rgba).convert("RGB")
 
 
+def same_file(a, b):
+    """True when two paths name one file: by inode when both exist, else by normalised absolute path."""
+    if os.path.exists(a) and os.path.exists(b):
+        return os.path.samefile(a, b)
+    return os.path.normcase(os.path.realpath(a)) == os.path.normcase(os.path.realpath(b))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__.split("\n\n", 1)[1])
-    p.add_argument("inp", metavar="IN"); p.add_argument("out", metavar="OUT")
+    p.add_argument("inp", metavar="IN")
+    p.add_argument("out", metavar="OUT", nargs="?", help="RGBA .png to write (default <IN dir>/matte/<IN stem>.png)")
     p.add_argument("--method", choices=METHODS)
     p.add_argument("--key", help="key colour for chroma (default style key_bg or #FF00FF)")
     p.add_argument("--paper", help="paper colour for luminance: auto (default; estimated from the image border) "
@@ -204,9 +269,16 @@ def main(argv=None):
     p.add_argument("--style", help="styles/<id>: read matte settings from style.yaml")
     p.add_argument("--layer", help="layer code (L1-L4, P<n>-<part>, FX); default from IN file name")
     p.add_argument("--preview", help="also write the result composited over pure red")
+    p.add_argument("--overwrite", action="store_true", help="replace an existing OUT (never IN)")
+    p.add_argument("--rembg-model", metavar="NAME",
+                   help=f"rembg model for method rembg (default $FILM_REMBG_MODEL, else {REMBG_MODEL})")
+    p.add_argument("--allow-download", action="store_true",
+                   help="let rembg download a model that is not cached locally")
     a = p.parse_args(argv)
 
-    cfg = {"method": None, "low": None, "high": None, "key": None, "paper": None}
+    if a.out is None:
+        a.out = os.path.join(os.path.dirname(a.inp), "matte", os.path.splitext(os.path.basename(a.inp))[0] + ".png")
+    cfg = {"method": None, "low": None, "high": None, "key": None, "paper": None, "bg": None}
     if a.style:
         layer = a.layer
         if not layer:
@@ -222,25 +294,55 @@ def main(argv=None):
         p.error("OUT must be a .png file (RGBA)")
     if not cfg["method"]:
         p.error("--method is required (or --style with --layer)")
-    # Only an explicit --paper colour is used as is; style.yaml paper_bg (often "#FFFFFF" while Seedream
-    # paints ivory or a gradient) and the default both mean auto.
-    paper = a.paper or "auto"
-    info = {}
+    method = cfg["method"]
+    # nothing is written before these checks pass: a mistyped path must not cost a paid image
+    if same_file(a.inp, a.out):
+        p.error("OUT is the same file as IN: the source image is never overwritten")
+    if os.path.lexists(a.out) and not a.overwrite:
+        p.error("OUT exists (versions only go up; --overwrite replaces a matte)")
+    if a.preview and (same_file(a.preview, a.inp) or same_file(a.preview, a.out)):
+        p.error("--preview is the same file as IN or OUT")
+    model = a.rembg_model or os.environ.get("FILM_REMBG_MODEL") or REMBG_MODEL
+    if method == "rembg":
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", model):
+            p.error(f"--rembg-model must be a rembg model name, not {model!r}")
+        if not a.allow_download and not rembg_model_cached(model):
+            print(f"matte: rembg model {model} is not cached (run tools/doctor.sh or the session hook, "
+                  "or pass --allow-download)", file=sys.stderr)
+            sys.exit(2)
+    try:
+        # the layer's own background (per_layer.<code>.bg) beats the style-wide colour; a flag beats both
+        # (only the colour the method reads is checked: the other one never stopped a matte)
+        key = hex_text(a.key or cfg["bg"] or cfg["key"] or "#FF00FF") if method == "chroma" else "#FF00FF"
+        # luminance: only an explicit --paper colour is used as is. style.yaml paper_bg and a per-layer bg (often
+        # "#FFFFFF" while Seedream paints ivory or a gradient) both mean auto: estimated from the image border.
+        explicit_paper = bool(a.paper) and a.paper.strip().lower() != "auto"
+        paper = hex_text(a.paper) if explicit_paper and method == "luminance" else "auto"
+    except ValueError as e:
+        sys.exit(f"matte: {e}")
     try:
         with Image.open(a.inp) as src:
             src.load()
-            out = run(src, cfg["method"], key=cfg["key"] or "#FF00FF", paper=paper,
-                      low=cfg["low"], high=cfg["high"], info=info)
+            src = ImageOps.exif_transpose(src) or src
+    except (OSError, SyntaxError, ValueError) as e:
+        reason = e.strerror if isinstance(e, OSError) and e.strerror else " ".join(str(e).split())
+        sys.exit(f"matte: cannot read {a.inp} ({reason})")
+    try:
+        info = {}
+        out = run(src, method, key=key, paper=paper, low=cfg["low"], high=cfg["high"], info=info, rembg_model=model)
     except ValueError as e:
         sys.exit(f"matte: {e}")
     if "paper" in info:
-        how = "explicit" if a.paper and a.paper.strip().lower() != "auto" else "auto, from the image border"
-        hint = f"; style paper_bg {cfg['paper']}" if cfg["paper"] and how != "explicit" else ""
+        how = "explicit" if explicit_paper else "auto, from the image border"
+        style_paper = cfg["bg"] or cfg["paper"]
+        hint = f"; style paper_bg {style_paper}" if style_paper and not explicit_paper else ""
+        paper = info["paper"]
         print(f"paper {info['paper']} ({how}{hint})")
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     out.save(a.out, "PNG")
     al = np.asarray(out)[..., 3]
-    print(f"saved {a.out} ({out.width}x{out.height} RGBA, method {cfg['method']}, low {cfg['low']}, high {cfg['high']}); "
+    how = {"chroma": f"chroma key {key}", "luminance": f"luminance paper {paper}", "rembg": f"rembg({model})"}.get(method, method)
+    print(f"saved {a.out} ({out.width}x{out.height} RGBA, method {how}, low {cfg['low']}, high {cfg['high']}); "
           f"transparent {np.mean(al == 0) * 100:.1f}%, opaque {np.mean(al == 255) * 100:.1f}%")
     m = RE_LAYER.match(os.path.basename(a.inp))
     layer = a.layer or (m.group(1) if m else None)

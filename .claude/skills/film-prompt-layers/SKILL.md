@@ -50,8 +50,8 @@ Nền phẳng lấy màu từ `matte.paper_bg` (luminance) hoặc `matte.key_bg`
    chữ Hán từ `research.md`) hoặc "diễn giải". Mỗi đặc điểm thành **một cụm viết HOA** trong prompt
    (`NINE TAILS`, `FOUR EARS`, `EYES ON ITS BACK`, `NO EYES ON THE FACE`).
 2. Prompt khóa nhân vật (front, toàn thân) → ảnh khóa duyệt ở G2 → các góc khác dùng ảnh khóa làm `--ref`.
-3. Biến thể trạng thái (mắt nhắm, cúi đầu): đổi đúng một chi tiết, ảnh khóa làm `--ref`. Seedream Pro chỉ qua Lambda,
-   v1.0.0 chưa triển khai → dùng model `image` 2K.
+3. Biến thể trạng thái (mắt nhắm, cúi đầu): đổi đúng một chi tiết, ảnh khóa làm `--ref`. Seedream Pro chỉ qua Lambda
+   (đã triển khai; `ark.py lambda-job prepare` → Invoke → `finish`, do đạo diễn chạy ở phiên chính, agent không gọi).
 4. Lỗi hay gặp, ghi thành ràng buộc: tự thêm mắt trên mặt, sai số đuôi/tai, quầng sương quanh viền, bóng đổ dưới chân.
 5. Mỗi prompt lưu thành file `projects/<project>/ep<NN>-<slug>/prompts/<tên-file-ảnh-không-đuôi>.txt` và một dòng
    `prompts.csv` (cột `file` ghi tên ảnh sẽ tạo, `usage` và `approved` để trống).
@@ -67,8 +67,8 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
 ```
 - **G2 trước hàng loạt:** khâu 4 chỉ tạo ảnh khóa nhân vật và đủ lớp của **một** shot mẫu (2K, hoặc `--fast` để nháp).
   Không tạo shot khác cho tới khi `gates.G2` có ngày trong EPISODE.md.
-- Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua `lambda/` khi đã triển khai; v1.0.0 chưa
-  → dùng 2K của model `image`.
+- Không dùng `--force`. Ảnh pro hoặc 4K vượt giới hạn 30 s của proxy → chỉ qua Lambda (đã triển khai), ở phiên chính, luôn bằng
+  `ark.py lambda-job prepare` → Invoke → `finish` để vào ledger (`lambda/README.md`); agent tạo lớp dùng 2K của model `image`.
 - **Có `--ref` thì dùng `--fast`** (`dola-seedream-5-0-flash`, 2K/2560x1440): lite + `--ref` ở 2K bị proxy cắt (502 ở
   31 s, có thể vẫn tính phí); flash + `--ref` chạy ~75 ảnh không lần 502 nào (`docs/MODELS.md`). Lite chỉ khi không `--ref`.
 - `--seed` và `--negative` có trong ark.py nhưng **chưa xác minh** model áp dụng: ghi seed vào `prompts.csv` để tham
@@ -82,9 +82,10 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
 
 1. Tách alpha theo style (method, ngưỡng low/high, màu nền lấy từ `matte.per_layer`, `P1-x` dùng khóa `P`):
    ```
-   python3 tools/layers/matte.py <ảnh gốc> <ảnh RGBA>.png --style styles/<id> --layer <mã> --preview <xem-thử>.png
+   python3 tools/layers/matte.py <ảnh gốc> --style styles/<id> --layer <mã> --preview <xem-thử>.png
    ```
-   Không ghi đè ảnh gốc: ảnh tách đặt ở thư mục riêng (vd. `plates/matte/`) cùng tên file. Cờ tường minh chỉ dùng khi
+   Bỏ OUT thì ảnh tách ghi vào `plates/matte/<cùng tên>.png` – đây là quy tắc (CONVENTIONS §3); matte.py từ chối ghi đè
+   ảnh gốc và từ chối OUT đã có (`--overwrite` chỉ để thay một bản tách). Cờ tường minh chỉ dùng khi
    đạo diễn ghi trong hợp đồng. Thủy mặc: L2/L3 `luminance` (rembg cắt mất vệt mực loang), L4/P `rembg`.
    `luminance` mặc định `--paper auto`: ước lượng màu giấy từ viền ảnh (nền Seedream "trắng" thường ngà/gradient như
    `#F5F1EE`, `#EAE5DF`) và in `paper #…`; `paper_bg` của style chỉ để tham khảo. `WARNING: L2/L3 is only …% transparent`

@@ -34,8 +34,8 @@ Tiếng Anh cho prompt (model hiểu tốt hơn); cụm viết HOA là đặc đ
 ## 4. Kiểm tên file
 
 Regex lớp (CONVENTIONS §2): `^ep\d{2}_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$`.
-Chủ thể là slug không dấu (`bac-thi`, `nui-co`). Bản sau tách alpha giữ cùng tên đuôi `.png` ở thư mục tách riêng hoặc
-tăng phiên bản, theo cách `matte.py` ghi ra (xem `--help`), không ghi đè ảnh gốc.
+Chủ thể là slug không dấu (`bac-thi`, `nui-co`). Bản sau tách alpha giữ cùng tên, đuôi `.png`, trong
+`plates/matte/` (OUT mặc định của `matte.py`), không ghi đè ảnh gốc.
 
 ## 5. Lỗi hay gặp → cách sửa
 
@@ -49,4 +49,4 @@ tăng phiên bản, theo cách `matte.py` ghi ra (xem `--help`), không ghi đè
 | Video ra vuông | ảnh đầu vào vuông → tự làm khung đầu 16:9 (vd. 1280x720); không `--ratio` (Seedance 2.5 từ chối khi có `--image`) |
 | L2/L3 luminance gần 0% trong suốt | nền "trắng" thật ra ngà/gradient → để `matte.py` dùng `--paper auto` (mặc định), tăng `--low` nếu còn loang |
 | rembg cắt mất vệt mực loang | lớp mực (L2/L3 thủy mặc) dùng `luminance`, không `rembg` |
-| 502 sau ~30 s | không thử lại; giảm size, `--fast`; pro/4K chờ Lambda |
+| 502 sau ~30 s | không thử lại; giảm size, `--fast`; pro/4K chỉ ở phiên chính qua `ark.py lambda-job prepare` → Invoke → `finish` |

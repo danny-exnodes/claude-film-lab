@@ -5,31 +5,48 @@ The Drive connector has no CLI: Claude pulls and pushes one file at a time with 
 (download_file_content, create_file, update_file). This helper remembers what was pulled, maps every local
 path to its Drive folder ID from PROJECT.md and prints the exact connector calls for what changed.
 
-  python3 tools/drive_sync.py snapshot projects/<project> [--include-out out/<project>]
+  python3 tools/drive_sync.py snapshot projects/<project> [--include-out out/<project>] [--force]
+  python3 tools/drive_sync.py pulled   projects/<project> <path>...
   python3 tools/drive_sync.py plan     projects/<project> [--include-out out/<project>] [--json] [--now YYYYMMDD-HHMM] [--date YYYY-MM-DD]
-  python3 tools/drive_sync.py record   projects/<project> --uploaded <path> --id <newDriveFileId> [--uploaded ... --id ...]
+  python3 tools/drive_sync.py record   projects/<project> --uploaded <path> --id <newDriveFileId> [--sha256 <hex>] [--uploaded ... --id ...]
 
-snapshot  right after a pull: hash the working copy into projects/<project>/.pulled.sha256 and write the pull time
-          to projects/<project>/.pulled.at (§11.6 pull step 4).
+snapshot  right after the first pull of a container: hash the working copy into projects/<project>/.pulled.sha256
+          and write the pull time to projects/<project>/.pulled.at (§11.6 pull step 4). When a snapshot already
+          exists and files differ from it (local edits not pushed yet), nothing is written and the exit code is 1:
+          push them, or use `pulled` for the files just pulled; --force rewrites everything anyway.
+pulled    after pulling more files into a working copy that already has a snapshot: set only those files' lines
+          to their current hashes. No .pushed.log line, .pulled.at untouched.
 plan      list new/changed files: target folder (logical path + ID, or MISSING + which folder to create under which
           parent first), Drive title, mime type, the create_file file reference `sha256:<hex>:<absolute path>` and,
           the search_files query that finds the old version(s) and their archive name in 99_LuuTru/ (§11.6 push
           step 3): for changed files always; for new files too, because Drive may already hold a file with that
           title in the folder (first push after a manual upload, lost snapshot) – archive it if the search finds one. TienDo_SanXuat.csv is listed apart (§11.6 step 5). --json: same plan as JSON.
+          A ledger.csv gets a `pre` block before its create_file line: download every Drive copy, ledger-merge,
+          plan again, then upload (§11.6 push step 3); it has no approval gate.
 record    after each successful create_file: replace just that file's line in .pulled.sha256 and append
           `<UTC> <path> <new Drive ID>` to projects/<project>/.pushed.log (§11.6 push steps 2 and 6).
+          --sha256 (as the plan prints it) is the hash that was uploaded: when the file was edited after the
+          upload, that hash is stored, so the file stays CHANGED.
 
-State files in projects/<project>/ (dotfiles: never pushed, never snapshotted):
+State files in projects/<project>/ (dotfiles: never pushed, never snapshotted), changed only under an exclusive
+lock on projects/<project>/.drive_sync.lock and replaced atomically, so parallel `record` calls are safe:
   .pulled.sha256  `sha256sum` format `<hex>  <path>`; paths as `find projects/<project>` prints them from the repo
                   root (projects/<project>/..., media from --include-out as out/<project>/...), so the shell commands
                   of §11.6 and `sha256sum -c` (from the repo root) still work on it.
   .pulled.at      pull time, UTC ISO (2026-11-10T15:30:00Z).
   .pushed.log     one line per upload this session: `<UTC ISO> <path> <new Drive ID>`.
 
-Ignored everywhere: dotfiles and dot-directories, __pycache__.
-Exit: 0 ok, 1 plan has blockers (folders to create, unmapped files), 2 cannot plan (no PROJECT.md, bad manifest...).
+Ignored everywhere: dotfiles and dot-directories, __pycache__. Never planned or snapshotted: temp files
+(*.b64, *.orig, *.bak, *.tmp, *.part, *~; the plan lists them once) and ledger.drive-*.csv (Drive copies to merge).
+Exit: 0 ok, 1 plan has blockers (folders to create, unmapped files) or snapshot refused, 2 cannot plan or record
+(no PROJECT.md, bad manifest, a path outside the project...).
 """
-import argparse, datetime, hashlib, json, mimetypes, os, re, sys
+import argparse, contextlib, datetime, fnmatch, hashlib, json, mimetypes, os, re, sys, zipfile
+
+try:
+    import fcntl
+except ImportError:          # no flock on this platform: state files are still replaced atomically
+    fcntl = None
 
 import yaml
 
@@ -37,6 +54,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import episode_id  # noqa: E402  ep<NN> | q<NN>t<NN> (docs/CONVENTIONS.md §2)
 
 SNAPSHOT, PULLED_AT, PUSHED_LOG = ".pulled.sha256", ".pulled.at", ".pushed.log"
+LOCK = ".drive_sync.lock"
+TEMP_PATTERNS = ("*.b64", "*.orig", "*.bak", "*.tmp", "*.part", "*~")     # pull / editor / bundle leftovers
+LEDGER, LEDGER_COPIES = "ledger.csv", "ledger.drive-*.csv"                # copies: downloaded for ledger-merge
+RE_SHOT_TAG = re.compile(r"_s\d{2}_")                                     # as tools/bundle.py picks shot media
+SNIPPETS_OFF = "  excludeContentSnippets=true"       # search_files returns long content snippets by default
+NOTE_MEDIA = "media: push only after the user approved it (§9)"
+NOTE_LEDGER = "ledger: push after every stage that generated; no approval gate"
 ARCHIVE = "99_LuuTru"
 IF_EXISTS = "if a file with this title already exists in the folder (first push), archive it"
 FOLDER_MIME = "application/vnd.google-apps.folder"
@@ -87,6 +111,15 @@ def walk(root):
     return sorted(found)
 
 
+def is_temp(path):
+    name = path.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(name, pat) for pat in TEMP_PATTERNS)
+
+
+def is_ledger_copy(path):
+    return fnmatch.fnmatchcase(path.rsplit("/", 1)[-1], LEDGER_COPIES)
+
+
 def lab_root(project_dir):
     """The directory `find projects/<project>` runs from: two levels above the project working copy."""
     return os.path.dirname(os.path.dirname(project_dir))
@@ -122,18 +155,67 @@ def read_snapshot(project_dir):
             m = re.match(r"^([0-9a-fA-F]{64}) [ *](.+)$", line)
             if not m:
                 raise SyncError(f"{path}:{n}: not a sha256sum line: {line[:80]!r}")
-            p = m.group(2)
+            p = m.group(2).replace("\\", "/")
             p = key_for(project_dir, p) if os.path.isabs(p) else os.path.normpath(p).replace(os.sep, "/")
             snap[p] = m.group(1).lower()
     return snap
 
 
-def write_snapshot(project_dir, snap):
-    path = os.path.join(project_dir, SNAPSHOT)
-    with open(path, "w", encoding="utf-8") as f:
-        for k in sorted(snap):
-            f.write(f"{snap[k]}  {k}\n")
+def write_atomic(path, text):
+    """Replace path with text: temp dotfile in the same folder, fsync, os.replace (never a truncated file)."""
+    tmp = os.path.join(os.path.dirname(path), f"{os.path.basename(path)}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return path
+
+
+def write_snapshot(project_dir, snap):
+    return write_atomic(os.path.join(project_dir, SNAPSHOT), "".join(f"{snap[k]}  {k}\n" for k in sorted(snap)))
+
+
+class State:
+    """What locked_state yields: the snapshot as it is on disk now, plus what to write when the block ends."""
+
+    def __init__(self, snap):
+        self.existed = snap is not None
+        self.snap = snap or {}       # edit in place; written back when the block ends
+        self.save = True             # set False to leave .pulled.sha256 untouched
+        self.pulled_at = None        # set to a UTC ISO string to rewrite .pulled.at
+        self.log = []                # lines to append to .pushed.log
+
+
+@contextlib.contextmanager
+def locked_state(project_dir, fresh=False):
+    """Exclusive lock on <project dir>/.drive_sync.lock around a read-modify-write of the state files.
+
+    The snapshot is re-read inside the lock, so parallel `record` calls each see the lines the others wrote.
+    fresh=True starts from an empty snapshot without reading the old one (snapshot --force, also over a damaged
+    file). Nothing is written when the block raises."""
+    with open(os.path.join(project_dir, LOCK), "a") as lock:
+        if fcntl:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            st = State(None if fresh else read_snapshot(project_dir))
+            yield st
+            if st.save:
+                write_snapshot(project_dir, st.snap)
+            if st.pulled_at:
+                write_atomic(os.path.join(project_dir, PULLED_AT), st.pulled_at + "\n")
+            if st.log:
+                with open(os.path.join(project_dir, PUSHED_LOG), "a", encoding="utf-8") as f:
+                    f.writelines(st.log)
+                    f.flush()
+                    os.fsync(f.fileno())
+        finally:
+            if fcntl:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def read_text(path):
@@ -280,6 +362,7 @@ def archive_name(folder, title, stamp):
 
 
 def search_query(fid, folder, title):
+    title = title.replace("\\", "\\\\").replace("'", "\\'")      # Drive query syntax: escape \ and ' in values
     return f"parentId = '{fid or '<ID of ' + folder + '>'}' and title = '{title}' and trashed = false"
 
 
@@ -300,19 +383,72 @@ def out_files(out_arg):
     return [(r, os.path.join(out_dir, r)) for r in walk(out_dir)]
 
 
+def state_key(pd, arg):
+    """(snapshot key, absolute path) for a file argument of `pulled` / `record`; SyncError when it is not a
+    pushable file of this project (projects/<project>/... or out/<project>/...)."""
+    p = arg.replace("\\", "/")
+    full = p if os.path.isabs(p) or os.path.exists(p) else os.path.join(pd, p)
+    if not os.path.isfile(full):
+        raise SyncError(f"{arg}: file not found")
+    key = key_for(pd, full)
+    own = (key_for(pd, pd) + "/", f"out/{os.path.basename(pd)}/")
+    if not key.startswith(own):
+        raise SyncError(f"{arg}: not a file of this project (expected a path under {own[0]} or {own[1]})")
+    if ignored(key):
+        raise SyncError(f"{arg}: dotfiles and __pycache__ are never pushed")
+    return key, os.path.abspath(full)
+
+
 def cmd_snapshot(a):
     pd = project_dir_of(a.project)
-    snap = {key_for(pd, os.path.join(pd, r)): sha256(os.path.join(pd, r)) for r in walk(pd)}
-    n_project = len(snap)
+    files = [os.path.join(pd, r) for r in walk(pd)]
+    n_project = len(files)
     if a.include_out:
-        for _, full in out_files(a.include_out):
-            snap[key_for(pd, full)] = sha256(full)
-    path = write_snapshot(pd, snap)
+        files += [full for _, full in out_files(a.include_out)]
+    snap, n_kept = {}, 0
+    for i, full in enumerate(files):
+        key = key_for(pd, full)
+        if is_temp(key) or is_ledger_copy(key):
+            continue                 # never pushed: not part of what was pulled
+        snap[key] = sha256(full)
+        n_kept += i < n_project
     at = utc_iso()
-    with open(os.path.join(pd, PULLED_AT), "w", encoding="utf-8") as f:
-        f.write(at + "\n")
-    print(f"snapshot  {os.path.relpath(path)}: {n_project} file(s)"
-          + (f" + {len(snap) - n_project} media" if a.include_out else "") + f" · pulled at {at}")
+    with locked_state(pd, fresh=a.force) as st:
+        # An existing snapshot is the record of what is on Drive: a file that differs from its line (or has none)
+        # is work not pushed yet, and rewriting the snapshot would make `plan` report it as already pushed.
+        pending = sorted(k for k, h in snap.items() if st.snap.get(k) != h) if st.existed else []
+        if pending:
+            st.save = False
+        else:
+            st.snap.clear()
+            st.snap.update(snap)
+            st.pulled_at = at
+    if pending:
+        for k in pending[:20]:
+            print(f"  {k}", file=sys.stderr)
+        if len(pending) > 20:
+            print(f"  ... and {len(pending) - 20} more", file=sys.stderr)
+        print(f"{len(pending)} local change(s) not yet pushed would be marked as pulled: push them, or record just "
+              f"the pulled files with: drive_sync.py pulled {a.project} <path>...\n"
+              f"(a file pulled after the snapshot is listed too until `pulled` is run for it; nothing was written; "
+              f"snapshot --force rewrites every line)", file=sys.stderr)
+        return 1
+    print(f"snapshot  {os.path.relpath(os.path.join(pd, SNAPSHOT))}: {n_kept} file(s)"
+          + (f" + {len(snap) - n_kept} media" if a.include_out else "") + f" · pulled at {at}")
+    return 0
+
+
+def cmd_pulled(a):
+    pd = project_dir_of(a.project)
+    files = [state_key(pd, p) for p in a.paths]
+    hashes = [(key, sha256(full)) for key, full in files]
+    with locked_state(pd) as st:
+        if not st.existed:
+            raise SyncError(f"no {SNAPSHOT} yet: after the first pull of a container run "
+                            f"`python3 tools/drive_sync.py snapshot {a.project} --include-out out/<project>`")
+        st.snap.update(hashes)
+    for key, h in hashes:
+        print(f"pulled    {key} {h[:12]}")
     return 0
 
 
@@ -336,7 +472,7 @@ def entry(man, key, full, folder, h, status, stamp, sheet=False):
     lost snapshot), so they get the same search, labelled conditional: archive only what the search finds."""
     title = "TienDo_SanXuat" if sheet else os.path.basename(key)
     fid = folder_id(man, folder)
-    archive = {"search_files": search_query(fid, folder, title),
+    archive = {"search_files": search_query(fid, folder, title), "excludeContentSnippets": True,
                "move": "every result except the new ID", "parentId": folder_id(man, ARCHIVE),
                "title": archive_name(folder, title, stamp),
                "when": "always" if status == "changed" else "if_exists"}
@@ -370,7 +506,14 @@ def build_plan(a):
         warnings.append(f"drive.folders has no ID for {ARCHIVE}: old versions cannot be archived")
 
     candidates, unmapped, skipped = [], [], 0
+    ignored_temp = []                    # pull/editor leftovers: listed once, never planned, never UNMAPPED
+    shot_media, bundled = [], {}         # (media folder, path inside it) of plates/clips; bundle members per folder
     for rel in walk(pd):
+        if is_ledger_copy(rel):
+            continue
+        if is_temp(rel):
+            ignored_temp.append(key_for(pd, os.path.join(pd, rel)))
+            continue
         folder = map_project(rel)
         if folder is None:
             unmapped.append({"local": key_for(pd, os.path.join(pd, rel)),
@@ -379,6 +522,20 @@ def build_plan(a):
             candidates.append((rel, os.path.join(pd, rel), folder, "project"))
     if a.include_out:
         for rel, full in out_files(a.include_out):
+            if is_ledger_copy(rel):
+                continue
+            if is_temp(rel):
+                ignored_temp.append(key_for(pd, full))
+                continue
+            media, _, inside = rel.partition("/")        # out/<project>/<media folder>/<inside>
+            if inside.startswith(("plates/", "clips/")) and RE_SHOT_TAG.search(os.path.basename(inside)):
+                shot_media.append((media, inside))
+            elif inside.startswith("bundles/") and inside.endswith(".zip"):
+                try:
+                    with zipfile.ZipFile(full) as z:
+                        bundled.setdefault(media, set()).update(z.namelist())
+                except (zipfile.BadZipFile, OSError):
+                    pass                                 # unreadable bundle: its media count as not bundled
             folder, why = map_out(rel, pd, man, day)
             if folder:
                 candidates.append((rel, full, folder, "media"))
@@ -406,8 +563,15 @@ def build_plan(a):
                             "not planned; restore it or add a new file")
             continue
         x = entry(man, key, full, folder, h, status, stamp)
-        if origin == "media":
-            x["notes"].append("media: push only after the user approved it (§9)")
+        if origin == "media" and rel.count("/") == 1 and os.path.basename(rel) == LEDGER:
+            # The ledger of a media folder: other sessions may have pushed rows this copy lacks (§11.6 step 3).
+            x["notes"].append(NOTE_LEDGER)
+            x["pre"] = {"ledger_merge": {"into": key,        # paths from the repo root, like "local"
+                                         "copies_glob": f"{os.path.dirname(key)}/{LEDGER_COPIES}",
+                                         "search_files": x["archive"]["search_files"],
+                                         "excludeContentSnippets": True}}
+        elif origin == "media":
+            x["notes"].append(NOTE_MEDIA)
         counts[status] += 1
         actions.append(x)
     # PROJECT.md last: folder IDs added while pushing go up with it.
@@ -416,6 +580,7 @@ def build_plan(a):
     present = {key_for(pd, c[1]) for c in candidates}
     project_prefix = key_for(pd, pd) + "/"
     deleted = [k for k in sorted(snap) if k not in present and not ignored(k)
+               and not is_temp(k) and not is_ledger_copy(k)
                and (a.include_out or k.startswith(project_prefix))
                and not os.path.exists(os.path.join(lab_root(pd), k))]
 
@@ -435,6 +600,8 @@ def build_plan(a):
         "pulled_at": pulled_at, "pushed_ids": pushed_ids(pd),
         "create_folders": to_create, "actions": actions, "sheet": sheet, "deleted": deleted,
         "unmapped": unmapped, "skipped_media": skipped, "warnings": warnings,
+        "ignored_temp": sorted(ignored_temp),
+        "unbundled_media": sum(1 for media, inside in shot_media if inside not in bundled.get(media, ())),
         "counts": dict(counts, unmapped=len(unmapped), deleted=len(deleted), folders_to_create=len(to_create)),
     }
 
@@ -448,17 +615,26 @@ def print_entry(x, label, project_arg, rel):
         first = f["missing"][0]
         print(f"  folder       {f['path']} = MISSING – create folder {first['path']} under "
               f"{first['parent_id'] or first['parent_path'] + ' (also missing)'} first")
+    merge = (x.get("pre") or {}).get("ledger_merge")
+    if merge:
+        local, copies = rel(x["path"]), os.path.join(os.path.dirname(rel(x["path"])), LEDGER_COPIES)
+        print("  pre          merge the Drive copies into this ledger BEFORE uploading (§11.6 push step 3):")
+        print(f"               1) search_files {merge['search_files']}{SNIPPETS_OFF}")
+        print(f"               2) download EVERY result to {copies.replace('*', '<n>')} (no result: skip to the upload)")
+        print(f"               3) python3 tools/ark.py ledger-merge {local} {copies} -o {local}")
+        print("               4) run plan again (the hash changes), then upload")
     print(f"  create_file  title={c['title']}  parentId={c['parentId'] or '<missing>'}  "
           f"contentMimeType={c['contentMimeType']}  "
           f"disableConversionToGoogleType={str(c['disableConversionToGoogleType']).lower()}")
     print(f"               base64Content={c['base64Content']}")
-    print(f"  record       python3 tools/drive_sync.py record {project_arg} --uploaded {rel(x['path'])} --id <new ID>")
+    print(f"  record       python3 tools/drive_sync.py record {project_arg} --uploaded {rel(x['path'])} --id <new ID> "
+          f"--sha256 {x['sha256']}")
     if ar:
         if ar.get("condition"):
             print(f"  archive      {ar['condition']}:")
-            print(f"               search_files {ar['search_files']}")
+            print(f"               search_files {ar['search_files']}{SNIPPETS_OFF}")
         else:
-            print(f"  archive      search_files {ar['search_files']}")
+            print(f"  archive      search_files {ar['search_files']}{SNIPPETS_OFF}")
         print(f"               update_file each result except the new ID: parentId={ar['parentId'] or '<99_LuuTru ID missing>'}"
               f"  title={ar['title']}")
         if ar.get("drive_files_id"):
@@ -480,10 +656,14 @@ def print_plan(plan, project_arg):
             parent = c["parent_id"] or f"<ID of {c['parent_path']} once created>"
             print(f"  {c['path']:<46} parentId={parent}")
         print("  then add each new ID to drive.folders in PROJECT.md and run plan again.")
-    if plan["actions"] and plan["pulled_at"]:
+    if plan["ignored_temp"]:
+        print(f"\nignored temp files ({len(plan['ignored_temp'])}, never pushed; delete them when done): "
+              + ", ".join(plan["ignored_temp"]))
+    planned = plan["actions"] + ([plan["sheet"]] if plan["sheet"] else [])
+    if any(x["status"] == "changed" for x in planned) and plan["pulled_at"]:
         print(f"\nBefore uploading a CHANGED file: its archive search_files result with modifiedTime after "
               f"{plan['pulled_at']} and an ID not in .pushed.log = user edit on Drive → download, merge first (§11.6 step 4).")
-    if any(x["status"] == "new" for x in plan["actions"]):
+    if any(x["status"] == "new" for x in planned):
         print("Before uploading a NEW file: run its archive search_files too; a result whose ID is not in .pushed.log "
               "is a copy never pulled (manual upload, lost snapshot) → download, compare, merge first (§11.6 step 4).")
     n = len(plan["actions"])
@@ -501,7 +681,11 @@ def print_plan(plan, project_arg):
           + (", TienDo_SanXuat changed" if plan["sheet"] else "")
           + (f", {plan['skipped_media']} media file(s) not pushed (plates/clips go in bundles)" if plan["skipped_media"] else ""))
     if not plan["actions"] and not plan["sheet"]:
-        print("Nothing to push.")
+        if plan["unbundled_media"]:
+            print(f"Nothing to push (text). {plan['unbundled_media']} plate/clip file(s) are in no bundle: they exist "
+                  "only in this container (lost when it is reclaimed; bundle approved shots with tools/bundle.py)")
+        else:
+            print("Nothing to push.")
 
 
 def cmd_plan(a):
@@ -517,24 +701,33 @@ def cmd_record(a):
     pd = project_dir_of(a.project)
     if len(a.id) != len(a.uploaded):
         raise SyncError("give one --id per --uploaded, in the same order")
-    snap = read_snapshot(pd) or {}
-    lines = []
-    for p, fid in zip(a.uploaded, a.id):
-        full = p if os.path.isabs(p) or os.path.exists(p) else os.path.join(pd, p)
-        if not os.path.isfile(full):
-            raise SyncError(f"{p}: file not found")
-        key = key_for(pd, full)
-        if ignored(key):
-            raise SyncError(f"{p}: dotfiles and __pycache__ are never pushed")
+    shas = a.sha256 or []
+    if shas and len(shas) != len(a.uploaded):
+        raise SyncError("give one --sha256 per --uploaded, in the same order (or none at all)")
+    for h in shas:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", h):
+            raise SyncError(f"--sha256 {h!r}: expected the 64 hex digits the plan printed")
+    updates, lines, warns = {}, [], []
+    for i, (p, fid) in enumerate(zip(a.uploaded, a.id)):
+        key, full = state_key(pd, p)
         if not fid.strip() or fid.strip().startswith("<"):
             raise SyncError(f"--id {fid!r}: give the ID create_file returned")
-        snap[key] = sha256(full)
+        updates[key] = sha256(full)
+        if shas and shas[i].lower() != updates[key]:
+            # Edited after create_file read it: Drive holds the planned bytes, so the file must stay CHANGED.
+            updates[key] = shas[i].lower()
+            warns.append(f"WARN {key} changed after the upload: still to push")
         lines.append(f"{utc_iso()} {key} {fid.strip()}\n")
-    write_snapshot(pd, snap)
-    with open(os.path.join(pd, PUSHED_LOG), "a", encoding="utf-8") as f:
-        f.writelines(lines)
+    with locked_state(pd) as st:
+        st.snap.update(updates)
+        st.log = lines
     for l in lines:
         print(f"recorded  {l.rstrip()}")
+    for w in warns:
+        print(w)
+    if not shas:
+        print("note      recorded the file's hash as it is now; pass --sha256 <hex> as the plan prints it, so that "
+              "an edit made after the upload stays to push")
     return 0
 
 
@@ -544,6 +737,11 @@ def main(argv=None):
     s = sub.add_parser("snapshot", help="after a pull: hash the working copy, write .pulled.at")
     s.add_argument("project")
     s.add_argument("--include-out", metavar="out/<project>", help="also hash the media folder (e.g. pulled ledger.csv)")
+    s.add_argument("--force", action="store_true",
+                   help="rewrite an existing snapshot even when local changes are not pushed yet (marks them as pulled)")
+    s = sub.add_parser("pulled", help="after pulling more files: set just their snapshot lines (snapshot exists)")
+    s.add_argument("project")
+    s.add_argument("paths", nargs="+", metavar="path", help="file(s) just pulled, under projects/<project>/ or out/<project>/")
     s = sub.add_parser("plan", help="list create_file / update_file calls for new and changed files")
     s.add_argument("project")
     s.add_argument("--include-out", metavar="out/<project>", help="also plan ledger, bundles, renders, key images")
@@ -554,9 +752,11 @@ def main(argv=None):
     s.add_argument("project")
     s.add_argument("--uploaded", action="append", required=True, metavar="PATH")
     s.add_argument("--id", action="append", required=True, metavar="NEW_DRIVE_FILE_ID")
+    s.add_argument("--sha256", action="append", metavar="HEX",
+                   help="hash that was uploaded (the plan prints it), one per --uploaded: a later edit stays CHANGED")
     a = p.parse_args(argv)
     try:
-        return {"snapshot": cmd_snapshot, "plan": cmd_plan, "record": cmd_record}[a.cmd](a)
+        return {"snapshot": cmd_snapshot, "pulled": cmd_pulled, "plan": cmd_plan, "record": cmd_record}[a.cmd](a)
     except SyncError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

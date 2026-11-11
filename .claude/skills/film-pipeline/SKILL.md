@@ -46,13 +46,21 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 
 **Kéo (đầu mỗi phiên, trước mọi việc khác):**
 1. `00_QuanLy/PROJECT.md` trước → `projects/<project>/PROJECT.md` (chưa biết ID: tìm `<ProjectName>` một lần trong gốc lab).
-2. Theo bảng CONVENTIONS §11.3: `02_KinhThu/` (SERIES.md, CHARACTER.md, LOCATION.md, PhongCach) → `projects/<project>/`;
-   tập đang làm `03_KichBan/ep<NN>-<slug>/` (cả `prompts/`, `review/`) → `projects/<project>/ep<NN>-<slug>/`;
+2. Theo bảng CONVENTIONS §11.3, **kéo theo khâu, không kéo cả cây** (đo 2026-11-10: kéo trọn một tập tốn khoảng
+   250 KB ngữ cảnh). Luôn kéo: `PROJECT.md`, `SERIES.md`, `EPISODE.md`, `budget.yaml` của tập đang làm và **mọi** bản
+   `ledger.csv`. File khác của `02_KinhThu/` và `03_KichBan/ep<NN>-<slug>/` (→ `projects/<project>/…`): chỉ những gì
+   khâu sắp chạy cần – các file agent của khâu đó ghi ở dòng `Đầu vào` trong `.claude/agents/<agent>.md` và các file sẽ
+   sửa. Sau mỗi file: `wc -c` phải bằng `fileSize` của Drive, lệch thì tải lại.
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
-   ngân sách cộng dồn từ ledger); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
+   ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
+   `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –
+   CONVENTIONS §7, §11.6); `TienDo_SanXuat` xuất CSV → `projects/<project>/TienDo_SanXuat.csv`.
    Ảnh khóa, gói shot, tài liệu gốc: chỉ kéo khi cần.
-3. Chụp dấu và giờ kéo: `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
-   (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo).
+3. Chụp dấu và giờ kéo, **một lần** sau lần kéo đầu của container:
+   `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
+   (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo). Đã có snapshot
+   (kéo thêm cho khâu sau, container cũ): `python3 tools/drive_sync.py pulled projects/<project> <các file vừa kéo>`.
+   `snapshot` từ chối (mã thoát 1) khi còn thay đổi chưa đẩy: đẩy chúng trước, không dùng `--force` để cho qua.
 4. Có file trong `01_TaiLieuGoc/_ChoPhanLoai/`: đặt tên theo §11.4, chuyển vào đúng thư mục, ghi `DanhMuc.csv`, báo người dùng.
 
 **Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
@@ -65,24 +73,32 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về, gộp trước.
    `create_file` (`title`, `parentId`, `contentMimeType`, `base64Content=sha256:<hex>:<đường dẫn tuyệt đối>`,
    `disableConversionToGoogleType: true`); thành công → ngay
-   `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới>` (thay dòng dấu của file,
-   ghi `.pushed.log`); rồi chạy lại câu `search_files` và `update_file` **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`
+   `python3 tools/drive_sync.py record projects/<project> --uploaded <đường dẫn> --id <ID mới> --sha256 <hex>` đúng
+   như `plan` in (thay dòng dấu của file, ghi `.pushed.log`; `WARN … still to push` = file bị sửa sau lúc tải, lần
+   `plan` sau vẫn là CHANGED); rồi chạy lại câu `search_files` và `update_file` **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`
    với tên `plan` in sẵn (`<thư mục logic, / → __>__<tên>_<YYYYMMDD-HHMM>.<đuôi>`, CONVENTIONS §11.6 – connector không
-   ghi đè nội dung được).
+   ghi đè nội dung được). `ledger.csv`: làm khối `pre` của nó **trước** `create_file` (tải mọi bản trên Drive,
+   `ledger-merge`, chạy lại `plan`); ledger đẩy sau mỗi khâu có tạo ảnh/video, không chờ duyệt.
 3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
    theo §11.6 bước 5.
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy
-   lại phải in `Nothing to push.` trừ file cố ý chưa đẩy. Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+   lại phải in `Nothing to push.` trừ file cố ý chưa đẩy (`Nothing to push (text). N plate/clip file(s) are in no
+   bundle…` = chữ đã đẩy hết nhưng còn plate/clip chỉ có trong container: báo người dùng trước khi dừng). Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
 
 ## 1. Việc đầu tiên mỗi phiên
 
 1. Kéo dự án (mục 0), rồi đọc `projects/<project>/ep<NN>-<slug>/EPISODE.md`. **Không dựa vào lịch sử chat**: chỉ những gì
    ghi trong EPISODE.md và file của tập trên Drive mới là sự thật. Không kéo được (không có Drive connector): dừng, báo
    người dùng; không dựng lại dữ liệu từ trí nhớ.
-2. Đọc `budget.yaml` và `out/<project>/ep<NN>/ledger.csv` (vừa kéo về) để biết còn bao nhiêu ảnh/giây video.
-3. Kiểm `out/<project>/ep<NN>/` còn không. Container có thể đã bị thu hồi: media đã duyệt nằm trên Drive (cột `drive_link`
-   trong `prompts.csv`), media chưa lưu là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
-4. Báo người dùng 3–5 dòng: khâu hiện tại, cổng đã qua, việc tiếp theo, ngân sách còn lại. Rồi làm `## Việc tiếp theo`.
+2. Chạy `python3 tools/status.py projects/<project>/ep<NN>-<slug>` (chỉ đọc, không tốn phí): một màn hình gồm khâu và
+   cổng, việc tiếp theo, ngân sách đã tiêu/trần, request trả phí còn dở, trạng thái từng lớp tranh, media chưa đóng gói.
+3. Xử lý mọi dòng `BLOCKED` / `OPEN` / `MISSING` trước khi làm tiếp (mã thoát 1 = còn việc phải xử lý): `BLOCKED` = khâu
+   đã vượt cổng chưa duyệt, dừng và hỏi người dùng; `OPEN` = request đã ghi `pending` mà chưa có dòng cuối, chạy đúng lệnh
+   in kèm (`--resume-task`, `lambda-job finish`), không tạo lại; dòng ghi `counted as spent` (không có lệnh) là ảnh bị
+   ngắt giữa chừng: đã tính vào ngân sách, báo người dùng, không tự tạo lại; `MISSING` = file đã trả tiền không còn
+   trong container (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu
+   là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
+4. Báo người dùng các dòng `STAGE` / `BUDGET` / `NEXT` (3–5 dòng). Rồi làm `## Việc tiếp theo`.
 
 Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở khâu 0 (mục 3).
 
@@ -113,7 +129,10 @@ Quy tắc cổng:
   (đường dẫn `--out` tính từ thư mục tập; media lấy từ `media:` trong EPISODE.md; từ G3, trước khâu 9 và G4 thêm
   `--probe` để file có số đo ffprobe/LUFS). Mã thoát 1 = còn ERROR: không mở
   cổng, giao lại agent của khâu đó kèm nguyên văn dòng lỗi. WARN thì nêu cho người dùng.
-- Khi trình cổng: đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần, và đúng một câu hỏi duyệt.
+- Khi trình cổng: chạy `python3 tools/status.py projects/<project>/ep<NN>-<slug> --gate <G>` (mã thoát 1 = còn dòng
+  `[MISSING]`: chưa trình; hoặc còn `BLOCKED` / `OPEN` / `MISSING` như mục 1 bước 3: xử lý, cái không xử lý được thì
+  nêu cho người dùng); rồi đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần lấy từ dòng `BUDGET`,
+  và đúng một câu hỏi duyệt.
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.
@@ -153,6 +172,14 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Mã thoát 3 = vượt trần (`refused-budget`): agent dừng và báo; bạn hỏi người dùng nâng trần hay cắt bớt.
   Bạn tự gọi ark.py ở phiên chính cũng dùng `--ledger/--budget` (cột `agent` trống = phiên chính).
   ark.py cũng đọc `FILM_LEDGER`/`FILM_BUDGET` từ môi trường, nhưng hợp đồng giao việc luôn ghi cờ tường minh.
+- **Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm.** Ledger là một bản trong container của từng phiên, nên
+  hai phiên cùng tạo cho một tập thì mỗi phiên tưởng mình còn đủ trần. Trước khi bắt đầu khâu 4–6: đọc `## Nhật ký` của
+  EPISODE.md vừa kéo; có dòng "bắt đầu tạo ảnh/video" của phiên khác chưa có dòng "xong" → dừng, hỏi người dùng. Không có
+  → ghi dòng `bắt đầu tạo ảnh/video – phiên <tên phiên>` và đẩy EPISODE.md ngay; xong khâu thì ghi `xong tạo ảnh/video`,
+  gộp ledger với bản trên Drive (`ark.py ledger-merge`, §11.6 mục đẩy) rồi đẩy. Phiên khác (TTS, hạ tầng, thử nghiệm)
+  không gọi `ark.py image|video|lambda-job` với ledger của tập đó. Từ khâu 4 bật `ledger_required: true` trong `budget.yaml`.
+- Ảnh pro/4K (Lambda đã triển khai 2026-11-10): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
+  (`lambda/README.md`); không Invoke bằng payload tự viết.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
   Mỗi agent song song nhận `FILM_AGENT` riêng (vd. `film-plate-maker-s01-s04`) và hợp đồng ghi rõ: dùng thư mục scratch
   riêng đặt theo `FILM_AGENT`, không dùng chung script phụ (script chung bị ghi đè làm ledger ghi sai agent).
@@ -164,7 +191,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
   Reviewer tự ghi `review/qc-<v>.md` và MEMORY.md của nó (có Write/Edit trong `tools`; `memory: project` không tự cấp).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,
-  `--fast`, Lambda khi đã triển khai).
+  `--fast`; pro/4K qua Lambda ở phiên chính).
 
 ## 5. Ghi chú của người dùng
 
@@ -199,7 +226,7 @@ Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau kh�
 ## 8. Không làm
 
 - Không in, ghi log, đọc hay tìm API key; không yêu cầu người dùng dán khóa.
-- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ qua Lambda (v1.0.0 chưa triển khai → dùng 2K).
+- Không gen thử ngoài yêu cầu; không dùng `--force`; ảnh pro/4K chỉ ở phiên chính qua `ark.py lambda-job prepare` → Invoke → `finish`.
 - Không đặt file trạng thái tên `STATE.md` (tên đó của cinecode).
 - Không làm lại mục đã khóa; không qua cổng thay người dùng.
 - Không commit dữ liệu dự án vào repo; không xoá hay `trash_file` trên Drive (chuyển vào `99_LuuTru/`).

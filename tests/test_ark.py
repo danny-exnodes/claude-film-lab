@@ -186,7 +186,7 @@ class TestLedger(ArkCase):
     def test_guard_exits_are_not_api_calls(self):
         f = self.fake()
         code, _, _ = self.run_ark("image", "x", str(self.tmp / "g.png"), "--size", "4K", *self.cost)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)                 # a local refusal is a usage error: nothing was sent
         self.assertEqual(f.calls, [])
         self.assertFalse(os.path.exists(self.ledger))
 
@@ -482,7 +482,7 @@ class TestBudget(ArkCase):
         self.assertEqual([r["task_id"] for r in rows], ["", "cgt-test-1", "cgt-test-1"])
         r = rows[-1]
         self.assertEqual((r["kind"], r["status"], r["seconds"], r["task_id"], r["size"]),
-                         ("video", "ok", "5", "cgt-test-1", "1080p"))
+                         ("video", "ok", "5", "cgt-test-1", "720p"))      # the CLI default
         self.assertEqual(json.loads(r["usage"]), {"completion_tokens": 7})
 
 
@@ -507,7 +507,8 @@ class TestVideoRows(ArkCase):
         self.assertIn("task creation", r["note"])
 
     def test_polling_error_logged(self):
-        self.fake(polls=[{"status": "running"}, SystemExit("HTTP 500: poll broke")])
+        # a 4xx on a status GET is not retried (transient 5xx / network errors are: test_ark_guards.TestPolling)
+        self.fake(polls=[{"status": "running"}, SystemExit("HTTP 404: poll broke")])
         code, _, err = self.run_ark("video", "x", str(self.tmp / "v.mp4"), *self.cost)
         self.assertEqual(code, 1)
         self.assertIn("poll broke", err)

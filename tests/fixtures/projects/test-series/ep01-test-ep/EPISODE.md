@@ -4,6 +4,7 @@ episode: 1
 slug: test-ep
 style: test-style
 length_s: 30
+method: seedance
 stage: 5
 gates: {G1: 2026-11-01, G2: 2026-11-05, G3: null, G4: null}
 media: out/test-series/ep01

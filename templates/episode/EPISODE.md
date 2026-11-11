@@ -9,6 +9,9 @@ episode: 1                   # số tập (số nguyên; chia quyển thì đán
 slug: <slug>                 # slug tập, thư mục là ep<NN>-<slug> hoặc q<NN>-t<NN>-<slug>
 style: <style-id>            # thường bằng style trong SERIES.md; thư mục styles/<style-id>/
 length_s: 60                 # thời lượng đích (giây); shot cuối trong shots.csv kết thúc đúng số này
+method: layers               # cách dựng: layers = chỉ model ảnh + chuyển động bằng code, không gọi Seedance (ai_motion trống,
+                             # video_seconds: 0); seedance = clip Seedance cho cử động nhân vật. Chọn cùng người dùng ở khâu 0;
+                             # sau G1 không tự đổi, phải hỏi người dùng. Thiếu dòng này = seedance (tập cũ).
 stage: 0                     # khâu hiện tại 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày người dùng duyệt YYYY-MM-DD, hoặc null
 media: out/<project>/q01t01  # thư mục media (git bỏ qua): out/<project>/<mã tập> (ep01 nếu không chia quyển)

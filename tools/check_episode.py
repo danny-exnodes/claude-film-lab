@@ -63,7 +63,8 @@ MEDIA_RULES = {"plates": RE_LAYER_FILE, "clips": RE_CLIP_FILE, "renders": RE_REN
 
 # --- §5 / §6 schema --------------------------------------------------------------
 EPISODE_KEYS = ["series", "episode", "slug", "style", "length_s", "stage", "gates", "media", "drive"]
-EPISODE_OPTIONAL = ["book"]   # set = project split into books: id q<book>t<episode>
+EPISODE_OPTIONAL = ["book", "method"]   # book set = project split into books: id q<book>t<episode>
+METHODS = ("layers", "seedance")        # layers: image models + code motion only; seedance: clips for character motion
 EPISODE_SECTIONS = ["## Ghi chú người dùng (nguyên văn)", "## Đã khóa (không làm lại)", "## Việc tiếp theo", "## Nhật ký"]
 GATES = ["G1", "G2", "G3", "G4"]
 SHOTS_HEADER = ["shot", "from_s", "to_s", "shot_size", "camera", "action", "layers", "code_motion", "ai_motion", "sound", "reuse_of"]
@@ -182,6 +183,16 @@ def fmt_s(x):
 
 
 # ================================================================== episode =====
+def episode_method(front_matter):
+    """(method, explicit) from the EPISODE.md front matter: a missing key means ('seedance', False), so episodes
+    written before the key keep their meaning; a value that is neither layers nor seedance gives (None, True)."""
+    if not isinstance(front_matter, dict) or "method" not in front_matter:
+        return "seedance", False
+    v = front_matter["method"]
+    v = v.strip().lower() if isinstance(v, str) else None
+    return (v if v in METHODS else None), True
+
+
 def check_front_matter(ep_dir, rep):
     import yaml
     path = os.path.join(ep_dir, "EPISODE.md")
@@ -214,6 +225,11 @@ def check_front_matter(ep_dir, rep):
     for k in meta:
         if k not in EPISODE_KEYS and k not in EPISODE_OPTIONAL:
             rep.warn(W, f"unknown front matter key '{k}'")
+    method, explicit = episode_method(meta)
+    if method is None:
+        rep.error(W, f"method must be layers or seedance (got {meta['method']!r})")
+    elif not explicit:
+        rep.warn(W, "EPISODE.md has no method: (treated as seedance); add method: layers or method: seedance")
 
     ep_abs = os.path.abspath(ep_dir)   # abspath first: `episode .` must see the real folder name, not '.'
     folder = os.path.basename(ep_abs)
@@ -396,6 +412,13 @@ def check_budget(ep_dir, meta, rep):
             for mid, cap in models.items():
                 if not is_cap(cap):
                     rep.error(W, f"models.{mid} = {cap!r} must be a number >= 0")
+    if episode_method(meta)[0] == "layers":      # layers never calls Seedance: no video cap may be open
+        caps = [("video_seconds", b.get("video_seconds"))]
+        if isinstance(models, dict):
+            caps += [(f"models.{mid}", cap) for mid, cap in models.items() if "seedance" in str(mid).lower()]
+        for name, cap in caps:
+            if is_cap(cap) and cap > 0:
+                rep.error(W, f"method layers: {name} = {cap!r} must be 0 (no Seedance), or set method: seedance")
     required = b.get("ledger_required")
     if "ledger_required" in b and not isinstance(required, bool):
         rep.error(W, f"ledger_required = {required!r} must be true or false")
@@ -430,6 +453,7 @@ def check_shots(ep_dir, meta, rep):
         return {}
     shots, prev, prev_num, prev_to = {}, None, None, None
     length = meta.get("length_s") if meta else None
+    layers_only = episode_method(meta)[0] == "layers"
     for n, r in rows:
         W = f"shots.csv:{n}"
         sid = r["shot"]
@@ -481,6 +505,8 @@ def check_shots(ep_dir, meta, rep):
             for m in (x.strip() for x in r["code_motion"].split(";")):
                 if m and m not in motions:
                     rep.warn(W, f"{sid} code_motion '{m}' is not in tools/compose/motions.json")
+        if layers_only and r["ai_motion"].strip():
+            rep.error(W, f"method layers: shot {sid} has ai_motion; use code_motion or pose-cycle, or set method: seedance")
         r["_codes"] = codes
         r["_line"] = n
         shots[sid] = r

@@ -174,6 +174,7 @@ episode: 1               # số tập (trong quyển nếu có book)
 slug: bac-thi
 style: thuy-mac
 length_s: 60
+method: layers           # cách dựng: layers | seedance (xem dưới)
 stage: 2                 # 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/q01t01
@@ -184,6 +185,12 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 `media` = `out/<project>/<id>`; `drive` = `ClaudeFilmLab/<ProjectName>/03_KichBan/<thư mục tập>` (`ep<NN>-<slug>` hoặc
 `q<NN>-t<NN>-<slug>`; ID thư mục lấy từ `PROJECT.md`, không tìm theo tên). `media`/`drive` lệch quy ước → WARN;
 `book`/`episode` lệch tên thư mục tập, hoặc thư mục media/tiền tố file khác mã tập → ERROR.
+`method` = cách dựng của tập, chọn cùng người dùng ở khâu 0, sau G1 không tự đổi (phải hỏi người dùng):
+`layers` = chỉ dùng model ảnh, tách lớp, ghép lớp và làm chuyển động từng thành phần bằng code, không gọi Seedance;
+`seedance` = cử động nhân vật bằng clip Seedance. Không phân biệt hoa thường; giá trị khác → ERROR
+`method must be layers or seedance`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
+mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
+hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
@@ -196,6 +203,8 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 - `camera` = một chuyển động (`static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down, drift, handheld`).
   Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
+  Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
+  `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in); id lạ là WARN.

@@ -211,7 +211,8 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
-  strip-warp, eyelid, breath, parallax, push-in); id lạ là WARN.
+  strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp
+  tranh); id lạ là WARN.
 
 `prompts.csv`:
 `file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link`

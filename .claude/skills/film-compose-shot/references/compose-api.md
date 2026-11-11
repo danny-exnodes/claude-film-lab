@@ -3,9 +3,9 @@
 **Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
 
 Mã JS thuần (không ES module, không thư viện), gắn vào `window.COMPOSE`. `inline.py` chèn các file theo thứ tự
-`core → plates → stage → breath → strip-warp → foliage → eyelid → cloth → pose → mist → embers → glow → smoke → fire`
+`core → plates → stage → breath → strip-warp → foliage → eyelid → cloth → pose → ink → figure → mist → embers → glow → smoke → fire`
 thành một khối `<script>` trước script của film.html (`inline.py --lint` in số file được chèn; rig `cloth` và `poses`:
-`references/layers-character.md`). Toạ độ **sân khấu** luôn là 1920x1080 px; khung render khác cỡ (nháp 960x540, biến thể 1:1) được co theo
+`references/layers-character.md`; hình người vẽ bằng code: §5.4 và `references/layers-figure.md`). Toạ độ **sân khấu** luôn là 1920x1080 px; khung render khác cỡ (nháp 960x540, biến thể 1:1) được co theo
 kiểu cover. Toạ độ **ảnh** là px của chính file lớp tranh (như trong `anchors.json`).
 
 ## 1. Nạp lớp: `COMPOSE.load(spec)` (trong `loadPlates`, trước READY)
@@ -224,6 +224,77 @@ nền trong suốt quanh nó; tuỳ chọn điểm `<tên>_root` nếu đường
   mặc định; giá trị ghi đè theo shot cũng được xử lý như vậy (không cảnh báo), nên độ lệch luôn ≤ `amp` · chiều cao.
 - Kiểm: `make.py stills` ở hai thời điểm cách nhau nửa `period`; mép tán không được lộ răng cưa, gốc không được hở.
 
+### 5.4 Hình người vẽ bằng code: `COMPOSE.figure.draw(st, o)`, `COMPOSE.figure.crowd(st, o)` (id `figure`) và nét mực `COMPOSE.ink`
+
+Người nhỏ trong **cảnh rộng**, vẽ hoàn toàn bằng nét mực code, không ảnh; khi nào dùng, tư thế, đường đi, đám đông và
+giới hạn: `references/layers-figure.md`. Thân theo bậc 12 fps, vị trí trên đường và vải mỗi khung; bàn chân đã đặt
+không trượt.
+
+```js
+st.wind = { dir: 'right', strength: 0.6, gust: 0.5 };
+st.plate('L1'); st.plate('L2'); st.plate('L3');
+COMPOSE.figure.draw(st, { on: { plate: 'L3', anchor: 'song_nui' }, height: 120, salt: 1,           // đứng trên sống núi
+                          timeline: [{ at: 3, pose: 'raise-arm' }] });
+COMPOSE.figure.draw(st, { height: 110, salt: 2, head: 'hat',                                       // đi dọc đường
+                          path: [{ at: 1, x: 420, y: 830 }, { at: 6, x: 860, y: 800 }] });
+COMPOSE.figure.crowd(st, { count: 12, area: [300, 760, 1500, 900], height: [70, 110], palette: { paper: '#EFE6D3' } });
+```
+
+`COMPOSE.figure.draw(st, o)` → trạng thái của hình (`null` = không vẽ được); `COMPOSE.figure.state(st, o)` trả cùng dữ
+liệu mà không vẽ (`x, y, h, yaw, tq, pose, feet[{ x, y, planted, lift }], cloth, path{ stride, steps, cadence }`).
+
+| Trường | Mặc định | Khoảng nên dùng | Ý nghĩa |
+|---|---|---|---|
+| `x`, `y` \| `on` | giữa khung, 80 % chiều cao | – | bàn chân, px sân khấu; hoặc `on: { plate, anchor, dx, dy }`: điểm neo của một plate đã nạp (lấy luôn độ sâu của plate). Thiếu plate/điểm → cảnh báo, dùng `x`, `y` nếu có, không thì không vẽ |
+| `depth` | độ sâu của plate trong `on`, không thì 1 | – | độ sâu parallax |
+| `height` | 160 | 40–270 | chiều cao hình, px sân khấu. **Chặn ở 270** (25 % sân khấu, `COMPOSE.figure.CAP`): lớn hơn → thu về 270 + cảnh báo (dùng plate AI + `cloth` / `pose-cycle`) |
+| `view` | `'back'`; có `path` thì theo hướng đường | `'back'`, `'side'`, `'front'`, số độ | 0 = chính diện, 90 = nhìn nghiêng quay phải, 180 = từ sau, 150 = ba phần tư sau |
+| `facing` | `'right'` | `'right'`, `'left'` | hướng mặt khi `view: 'side'` |
+| `pose` | `'stand'` (có `path`: `'walk'`) | `stand`, `walk`, `turn`, `raise-arm`, `bow`, `sit` | tư thế nền; tên lạ → cảnh báo |
+| `timeline` | – | `[{ at, pose, view, facing, arm, dur }]` | đổi tư thế tại `at` giây trong `dur` (0.5; `turn` 0.8), theo bậc 12 fps; `arm: 'right'` \| `'left'` cho `raise-arm` |
+| `path` | – | `[{ at, x, y, h }]` hoặc `[[at, x, y, h], ...]` | đi dọc các điểm sân khấu; `h` tuỳ chọn = chiều cao tại điểm đó. Hai điểm trùng toạ độ = dừng. Bước dài suy từ tốc độ; > 2,6 bước/giây → cảnh báo `impossible stride` |
+| `speed` | 0,36 · `height` px/s | 0,2–0,9 · `height` | chỉ cho `pose: 'walk'` không `path` (bước tại chỗ): tốc độ nền trôi dưới chân |
+| `start` | 0 | – | giờ phim của mốc 0 của `timeline` và `path` |
+| `salt` | 0 | số nguyên | người nào: pha thở, pha vải, nét mực, chân bước trước. Hai hình cùng shot phải khác `salt` |
+| `head` | `'knot'` | `'knot'`, `'hat'`, `'bare'` | búi tóc + dải buộc, nón lá, đầu trần |
+| `ribbon` | 22 | 0–30 | chiều dài dải buộc tóc, đơn vị thân (thân cao 100); 0 = không có |
+| `wind` | `st.wind` | `{ dir, strength, gust }` | gió riêng của hình, chồng lên gió của shot (cùng dạng với `cloth`) |
+| `palette` | `{ ink: '#1a1714', accent: '#b02e22' }` | màu của style | `ink` mọi nét; `accent` cho dải buộc tóc khi `accent: true`; `paper` (không mặc định): tô thân bằng màu giấy trước (độ đục `cover` 0.9) để che thứ phía sau |
+| `tone` | 1 | 0.5–1 | nhân vào độ đậm mọi nét (người ở xa nhạt hơn) |
+| `blend`, `alpha` | `'multiply'`, 1 | – | mực làm tối giấy; nền tối dùng `'source-over'` |
+| `ground` | `true` | – | một nét khô nhạt dưới chân |
+| `boil` | 0 | 0–0.5 | nét mực "sôi" nhẹ theo bậc 12 fps (bề rộng nét, không phải chỗ đứt nét) |
+| `seed`, `t` | `COMPOSE.seed`, `st.t` | – | |
+
+`crowd`: `count` (5; tối đa 60), `area: [x0, y0, x1, y1]` (hộp chứa bàn chân, bắt buộc), `height: n | [xa, gần]` (90),
+`salt`, `each: (i, o) => ghi đè cho người thứ i`, và mọi trường của `draw`. Trả về danh sách trạng thái, xa đến gần.
+
+**Nét mực** – dùng được riêng cho một nét vẽ tay (một nhành cỏ, một vệt chim), vẽ thẳng vào `g` của `st.layer`:
+
+```js
+st.layer(1, (g) => {
+  COMPOSE.ink.stroke(g, [[400, 700], [520, 640], [700, 660]], { id: 'canh-1', w: 9, tone: 'nong', dry: 0.6 });
+  COMPOSE.ink.mass(g, [[300, 800], [600, 760], [640, 840], [320, 860]], { id: 'da-1', tone: 'qing', soft: 3 });
+});
+```
+
+| Trường (`stroke`) | Mặc định | Khoảng nên dùng | Ý nghĩa |
+|---|---|---|---|
+| `id` | – | chuỗi hoặc số | hạt giống của nét: cùng `id` → cùng sợi lông bút và cùng chỗ đứt nét ở mọi khung. **Luôn đặt** |
+| `w` | 4 | 1–40 | bề rộng nét, px |
+| `tone` | `'nong'` | `jiao` 0.96, `nong` 0.82, `zhong` 0.6, `dan` 0.34, `qing` 0.16, hoặc số 0–1 | năm sắc mực (焦濃重淡清) = độ đục |
+| `dry` | 0.25 | 0–1 | 0 = nét ướt liền; 1 = phi bạch (nét khô đứt quãng). Mực cạn dần về cuối nét |
+| `profile` | `'brush'` | `brush`, `even`, `tip`, `lens`, `nail`, `robe`, `dot`, hoặc hàm `u → 0..1` | lực nhấn dọc nét |
+| `rough` | 0.12 | 0–0.3 | nhiễu bề rộng |
+| `side` \| `toward` | 0 | −1…1 \| `[dx, dy]` | bút "ăn mực một bên": mép đó đậm hơn (`toward`: mép quay về hướng đó) |
+| `bristles`, `body`, `hair`, `fade` | theo `w`, 1, 1, `dry`·0.55 | – | số sợi lông; trọng số thân ướt / sợi lông; mực mất dọc nét |
+| `steps`, `span` | theo chiều dài, 10·`w` | – | số đoạn lấy mẫu và chiều dài vân nét: giữ cố định cho một nét chuyển động để chỗ đứt không bò |
+| `color`, `seed`, `alpha` | `'#1a1714'`, `COMPOSE.seed`, 1 | – | |
+| `boil`, `t` | 0, 0 | 0–0.5 | bề rộng nét đổi theo bậc 12 fps |
+
+`mass(g, đa giác, { id, tone: 'qing', soft: 2, passes: 3, color, grad })`: khối mực nhạt mép mềm (tô `passes` lượt, mỗi
+lượt mép lệch ngẫu nhiên có seed tới `soft` px). `COMPOSE.ink.plan(points, o)` trả hình học của nét (thuần, để kiểm).
+
 ## 6. Tiện ích (thuần, có seed)
 
 `COMPOSE.rng(seed, salt)` (dòng số 0–1), `hash(seed, n, salt)`, `noise(seed, x, salt)`, `fbm(seed, x, salt, oct)`,
@@ -245,4 +316,4 @@ nền trong suốt quanh nó; tuỳ chọn điểm `<tên>_root` nếu đường
 - Tất định: `capture.mjs --verify` → `deterministic: yes`; 6 khung render theo thứ tự xuôi/ngược với 1 và 2 worker:
   trùng từng bit.
 - 1920x1080: ~10 khung/s (8 s phim = 20 s). `make.py draft` 8 s: ~20 s cả kiểm tra. `make.py stills` 4–6 khung: ~3 s.
-- Bộ mã inline ~71 KB (v1.1.0, 12 file); READY (giải mã 4 lớp 2K + dựng texture) ~1–2 s.
+- Bộ mã inline ~140 KB (v1.2.0, 16 file); READY (giải mã 4 lớp 2K + dựng texture) ~1–2 s.

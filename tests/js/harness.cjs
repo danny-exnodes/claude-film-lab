@@ -75,8 +75,25 @@ function createEnv(opts = {}) {
     createRadialGradient() { return { addColorStop() {} }; }
     createLinearGradient() { return { addColorStop() {} }; }
     clearRect() {} fillRect() {} strokeRect() {}
-    beginPath() {} closePath() {} moveTo() {} lineTo() {} quadraticCurveTo() {} bezierCurveTo() {}
-    rect() {} ellipse() {} arc() {} clip() {} fill() {} stroke() {}
+    closePath() {} quadraticCurveTo() {} bezierCurveTo() {}
+    rect() {} ellipse() {} arc() {} clip() {}
+    // opts.paths: every fill() / stroke() is logged with its path (device px), for code that draws with paths
+    // (ink.js, figure.js). Off by default: the other suites count drawImage calls only.
+    beginPath() { this.path = []; }
+    point(kind, x, y) {
+      if (!opts.paths) return;
+      const [A, B, C, D, E, F] = this.m;
+      (this.path = this.path || []).push([kind, round(A * x + C * y + E), round(B * x + D * y + F)]);
+    }
+    moveTo(x, y) { this.point('M', x, y); }
+    lineTo(x, y) { this.point('L', x, y); }
+    paint(op, style, extra) {
+      if (!opts.paths) return;
+      env.log.push({ op, on: this.canvas.label, path: (this.path || []).slice(), alpha: round(this.globalAlpha),
+                     comp: this.globalCompositeOperation, style: typeof style === 'string' ? style : 'gradient', ...extra });
+    }
+    fill() { this.paint('fill', this.fillStyle); }
+    stroke() { this.paint('stroke', this.strokeStyle, { width: round(this.lineWidth) }); }
   }
 
   function makeCanvas(w = 300, h = 150, label) {

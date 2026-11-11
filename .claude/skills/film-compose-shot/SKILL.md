@@ -39,7 +39,8 @@ Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì th�
   `sun-glow`, `strip-warp`, `eyelid`, `breath`, `parallax`, `push-in`) và có trong `style.yaml` `motion:`.
 - `method: layers` còn dùng `smoke`, `fire`, `foliage`, `cloth`, `pose-cycle` (cũng phải có trong `motions.json` và
   `style.yaml` `motion:`); `cloth` và `foliage` cần hộp neo, `pose-cycle` cần các plate tư thế ghi ở cột `layers`
-  (`L4b`, `L4c`…) và điểm neo chân chung. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
+  (`L4b`, `L4c`…) và điểm neo chân chung. Người nhỏ trong cảnh rộng (≤ 25 % khung): `figure`, vẽ bằng code, không
+  cần plate (`references/layers-figure.md`); chỉ cần một điểm neo cho bàn chân nếu đứng trên plate. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
 - `strip-warp`, `eyelid`, `breath`, `push-in` cần điểm neo trong `anchors.json` (`tools/layers/anchors.py set`; hộp =
   cặp điểm `<tên>_tl`/`<tên>_br`; chi tiết `references/compose-api.md` §2).
 - Kiểm tra bộ mã: `python3 tools/compose/inline.py --lint`.

@@ -146,6 +146,10 @@ Mười gói việc, mỗi gói có test viết trước và một lượt revie
   chuẩn hóa số/năm/đơn vị, bảng phát âm `term,doc`, chế độ `--audition`. Cài riêng (không vào hook), xem
   `tools/tts/README.md`. Test không cần model: `tests/test_tts.py`.
 
+- `docs/RUNBOOK.md`: bài học từ tập đầu tiên làm trọn (Sơn Hải Kinh Q1·T1): `AccountOverdueError`, `CHROME_PATH` bị ghi
+  đè, người xem độc lập trước `make.py final`, `renders/` chỉ chứa bản dựng, clip Seedance lệch giải phẫu, agent dừng
+  vì giới hạn 5 giờ.
+
 ### Thay đổi
 - **cinecode được ghim** (#16) ở commit `67f9807` (`tools/compose/cinecode.ref` = `CINECODE_REF` trong
   `docs/setup-script.sh`; test so hai giá trị). Setup script `fetch` đúng commit rồi `checkout`, không còn
@@ -198,6 +202,7 @@ Mười gói việc, mỗi gói có test viết trước và một lượt revie
   `02_KinhThu/pronunciation.csv`, cạnh `SERIES.md`; trước đây `drive_sync.py plan` báo UNMAPPED và thoát 1.
 
 ### Sửa
+- `drive_sync.py`: thêm `*.lock`, `*.swp` vào danh sách file tạm không đẩy – trước đây `anchors.json.lock` lọt vào kế hoạch đẩy.
 - `drive_sync.py plan`: file NEW (không có dòng trong `.pulled.sha256`) cũng được in truy vấn `search_files` và tên lưu
   trữ, nhãn "if a file with this title already exists in the folder (first push), archive it" (JSON: `archive.when`
   `if_exists`, CHANGED là `always`), để lần đẩy đầu sau khi tải tay hoặc mất dấu không để lại bản trùng trên Drive.

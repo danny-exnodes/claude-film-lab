@@ -30,6 +30,12 @@ Phương pháp dựng: đọc `method` trong `EPISODE.md` trước khi dựng sh
   trả bản nháp: chạy danh sách kiểm §5 của file đó và ghi kết quả vào báo cáo.
 - **`method: seedance`** hoặc không có khóa: clip Seedance cho cử động lớn theo `references/seedance-layer.md` (như cũ).
 
+Âm thanh bằng code: khi hợp đồng ghi người dùng đã chọn nhạc **code**, hoặc khi foley phải rơi đúng khung hình, viết
+`score.json` trong thư mục tập và dựng bằng `python3 tools/audio/score.py <tập>/score.json --dry-run` rồi
+`--out <media>/audio` (local, miễn phí; `tools/audio/README.md`). Stem đi vào `audio/mix.json`: `music.wav` → bus `music`,
+`foley.wav` → bus `foley`, `ambience.wav` → bus `ambience` (`mix-snippet.json`). Không tự viết phần `music` khi người dùng
+chưa chọn code; mọi sự kiện vẫn phải có trong `review/sound-audit.md`. Báo đạo diễn `score.json` đã đổi (file chữ, đẩy Drive).
+
 Giới hạn:
 - **Không gọi `tools/ark.py image` hay `video`** (Bash của bạn chỉ để dựng, render, đo). Thiếu lớp/clip: báo đạo diễn.
 - `method: seedance`, shot có clip Seedance: chốt bố cục (`place` của L4 trong `PLATES`) và tạo khung đầu bằng `tools/compose/keyframe.py`

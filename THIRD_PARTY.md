@@ -8,6 +8,8 @@ below if it is not there yet.
 |---|---|---|
 | `tools/compose/ink.js` | lemomo-ai/lemo-opuscar, `styles/ink-wash/demo/ink.js` (brush-stroke model: centreline, pressure profiles, bristles with a falling ink load, masses) | MIT |
 | `tools/compose/figure.js` | lemomo-ai/lemo-opuscar, `styles/ink-wash/demo/hero.js` (joint dictionary on a 100-unit body; robe = one mass + loaded strokes) | MIT |
+| `tools/audio/pluck.py` | `core/audio/pluck.py` of [lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (string model, guqin/pipa/koto presets) | MIT, Copyright (c) 2026 LemoLab |
+| `tools/audio/sfx.py` | `core/audio/sfx.py` of [lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (filter, envelope, noise, compress, limit, add helpers; `thump`) | MIT, Copyright (c) 2026 LemoLab |
 
 Only code was adapted. The demo film of that project, its characters, compositions, story, score and assets
 (CC BY) are not used here.

@@ -289,6 +289,45 @@ BASE = {
 }
 
 
+class TestRoomAndTimbre(unittest.TestCase):
+    """Owner's listening notes on the first demo (2026-11-11): the wind read as noise, the gong had no ring."""
+
+    @staticmethod
+    def level(x, at, width=0.1):
+        a = int(at * sfx.SR)
+        return float(np.sqrt(np.mean(x[a:a + int(width * sfx.SR)].astype(np.float64) ** 2)))
+
+    def test_wind_is_a_low_rush_not_hiss(self):
+        x = sfx.wind(dur=10, intensity=0.3, seed=3).astype(np.float64)
+        power = np.abs(np.fft.rfft(x)) ** 2
+        f = np.fft.rfftfreq(len(x), 1 / sfx.SR)
+        self.assertLess(power[f > 1000].sum() / power.sum(), 0.02)          # the first version had 8.6 % up there
+        centroid = (f * power).sum() / power.sum()
+        self.assertTrue(150 < centroid < 500, centroid)                     # audible on small speakers, not a rumble
+        half = sfx.SR // 2
+        gusts = [np.sqrt(np.mean(x[i:i + half] ** 2)) for i in range(sfx.SR, len(x) - sfx.SR, half)]
+        self.assertGreater(20 * np.log10(max(gusts) / min(gusts)), 4)       # it swells and drops, it is not a constant bed
+
+    def test_gong_rings_on(self):
+        g = sfx.gong(dur=6, intensity=0.5, seed=3)
+        first = self.level(g, 0.0)
+        for at in (3, 4):                                                   # the first version was 26-31 dB down here
+            self.assertGreater(20 * np.log10(self.level(g, at) / first), -20, at)
+        self.assertEqual(sfx.SOUNDS["gong"]["dur"], 6.0)
+        self.assertGreater(sfx.SOUNDS["gong"]["reverb"], 0.2)               # score.py gives it a room by default
+
+    def test_reverb_keeps_length_and_peak_and_fills_the_tail(self):
+        x = sfx.drum(dur=2.0, intensity=0.6, seed=1)
+        y = sfx.reverb(x, 0.4, 2.4, seed=1)
+        self.assertEqual((len(y), y.dtype), (len(x), np.float32))
+        self.assertAlmostEqual(float(np.abs(y).max()), float(np.abs(x).max()), places=4)
+        self.assertGreater(self.level(y, 1.2), self.level(x, 1.2) * 3)      # the room is still sounding after the hit
+        self.assertEqual(float(np.abs(y[-1])), 0.0)                         # and is faded out at the sound's end
+        self.assertTrue(np.array_equal(y, sfx.reverb(x, 0.4, 2.4, seed=1)))
+        self.assertFalse(np.array_equal(y, sfx.reverb(x, 0.4, 2.4, seed=2)))
+        self.assertTrue(np.array_equal(sfx.reverb(x, 0.0), x))
+
+
 class ScoreCase(helpers.TmpDirCase, unittest.TestCase):
     def write(self, data, name="score.json"):
         p = self.tmp / name
@@ -437,6 +476,29 @@ class TestScoreValidation(ScoreCase):
         self.assertIn("past length_s", err)
         self.assertNotIn("music[2]", err)                 # D3 harmonic 3 sounds A4: inside D F G A C
         self.assertIn("2 warning(s)", out)
+
+
+class TestScoreReverb(ScoreCase):
+    refused = TestScoreValidation.refused
+
+    def test_reverb_keys_are_checked(self):
+        self.refused(self.variant(music=[{"t": 1, "inst": "guqin", "pitch": "D3", "dur": 2, "reverb": 1.5}]), "music[0]", "reverb")
+        self.refused(self.variant(music=[{"t": 1, "inst": "gong", "room_s": 0.1}]), "music[0]", "room_s")
+
+    def test_a_dry_gong_differs_from_the_default_one_and_plucks_are_dry_by_default(self):
+        np_, pluck_, sfx_ = score._libs()
+        def one(ev, kind="music"):
+            _, cues, _ = score.validate({"length_s": 10, "seed": 1, kind: [ev]})
+            return score._synth(cues[0], pluck_, sfx_), score._synth_dry(cues[0], pluck_, sfx_)
+        wet, dry = one({"t": 0, "inst": "gong", "dur": 3})
+        self.assertFalse(np.array_equal(wet, dry))
+        wet, dry = one({"t": 0, "inst": "gong", "dur": 3, "reverb": 0})
+        self.assertTrue(np.array_equal(wet, dry))
+        wet, dry = one({"t": 0, "inst": "guqin", "pitch": "D3", "dur": 2})
+        self.assertTrue(np.array_equal(wet, dry))
+        wet, dry = one({"t": 0, "inst": "guqin", "pitch": "D3", "dur": 2, "reverb": 0.2})
+        self.assertFalse(np.array_equal(wet, dry))
+        self.assertEqual(len(wet), len(dry))
 
 
 class TestScoreRender(ScoreCase):

@@ -4,15 +4,15 @@
   "seed": 7,
   "scale": ["D", "F", "G", "A", "C"],
   "music": [
-    {"t": 1.0, "inst": "guqin", "pitch": "D3", "dur": 4, "vel": 0.7, "pan": -0.2, "shot": "s01"},
-    {"t": 5.5, "inst": "guqin", "pitch": "A3", "dur": 3, "vel": 0.6, "bend": [[0.5, 0], [1.1, -2]], "shot": "s01"},
-    {"t": 9.0, "inst": "guqin", "pitch": "D3", "dur": 3, "harmonic": 2, "vel": 0.5, "pan": 0.2, "shot": "s02"},
-    {"t": 18.0, "inst": "gong", "dur": 5, "vel": 0.5, "shot": "s03", "note": "đóng triện"}
+    {"t": 1.0, "inst": "guqin", "pitch": "D3", "dur": 4, "vel": 0.7, "pan": -0.2, "shot": "s01", "reverb": 0.18},
+    {"t": 5.5, "inst": "guqin", "pitch": "A3", "dur": 3, "vel": 0.6, "bend": [[0.5, 0], [1.1, -2]], "shot": "s01", "reverb": 0.18},
+    {"t": 9.0, "inst": "guqin", "pitch": "D3", "dur": 3, "harmonic": 2, "vel": 0.5, "pan": 0.2, "shot": "s02", "reverb": 0.18},
+    {"t": 18.0, "inst": "gong", "dur": 6, "vel": 0.5, "shot": "s03", "note": "đóng triện"}
   ],
   "foley": [
-    {"t": 0.0, "sound": "wind", "dur": 13.5, "intensity": 0.3, "gain": 0.25},
-    {"t": 11.2, "sound": "hoof", "gain": 0.6, "pan": -0.3, "shot": "s02"},
-    {"t": 11.9, "sound": "hoof", "gain": 0.55, "pan": -0.1, "shot": "s02"},
+    {"t": 0.0, "sound": "wind", "dur": 13.5, "intensity": 0.3, "gain": 0.12},
+    {"t": 11.2, "sound": "hoof", "gain": 0.6, "pan": -0.3, "shot": "s02", "reverb": 0.2},
+    {"t": 11.9, "sound": "hoof", "gain": 0.55, "pan": -0.1, "shot": "s02", "reverb": 0.2},
     {"t": 12.5, "sound": "brush_air", "gain": 0.4, "pan": 0.2, "shot": "s02"},
     {"t": 17.2, "sound": "ink_drop", "gain": 0.5, "shot": "s03"}
   ],

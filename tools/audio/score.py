@@ -50,7 +50,7 @@ BUS = {"music": "music", "foley": "foley", "ambience": "ambience"}     # bus nam
 STEM_CEIL = 0.97
 PREVIEW_CEIL = 0.9
 TOP_KEYS = {"length_s", "seed", "tempo", "scale", "music", "foley", "silence", "note"}
-COMMON_KEYS = {"t", "beat", "gain", "pan", "shot", "note", "seed", "allow_in_silence", "dur", "pitch"}
+COMMON_KEYS = {"t", "beat", "gain", "pan", "shot", "note", "seed", "allow_in_silence", "dur", "pitch", "reverb", "room_s"}
 PLUCK_KEYS = {"inst", "pitches", "vel", "harmonic", "bend", "vib", "glide", "trem", "release", "spread", "up",
               "t60", "damp", "pos", "bright", "bmix", "noise"}
 MUSIC_SOUNDS = ("gong", "drum", "drum_roll", "drone")
@@ -304,6 +304,8 @@ def validate(score, seed=None):
             ok &= _check_range(P, where, ev, "gain", 0, 4, lo_open=True)
             ok &= _check_range(P, where, ev, "pan", -1, 1)
             ok &= _check_range(P, where, ev, "dur", 0, MAX_LENGTH_S, lo_open=True)
+            ok &= _check_range(P, where, ev, "reverb", 0, 1)
+            ok &= _check_range(P, where, ev, "room_s", 0.3, 8)
             if "seed" in ev and (isinstance(ev["seed"], bool) or not isinstance(ev["seed"], int) or ev["seed"] < 0):
                 P.error(where, "seed must be a whole number >= 0")
                 ok = False
@@ -382,6 +384,17 @@ def validate(score, seed=None):
 
 
 def _synth(cue, pluck, sfx):
+    """The cue's sound, with its room: "reverb" (0..1, default per sound: the gong has one, the rest are dry) and
+    "room_s" (seconds to decay by 60 dB, default 2.4). The room never makes the sound longer than its dur."""
+    x = _synth_dry(cue, pluck, sfx)
+    ev = cue["ev"]
+    mix = ev.get("reverb", 0.0 if cue["pluck"] else sfx.SOUNDS[cue["name"]].get("reverb", 0.0))
+    if mix:
+        x = sfx.reverb(x, mix, ev.get("room_s", 2.4), cue["seed"])
+    return x
+
+
+def _synth_dry(cue, pluck, sfx):
     ev, name = cue["ev"], cue["name"]
     if cue["pluck"]:
         kw = {k: ev[k] for k in ("bend", "vib", "glide", "trem", "release", "t60", "damp", "pos", "bright", "bmix", "noise") if k in ev}

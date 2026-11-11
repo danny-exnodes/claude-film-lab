@@ -24,7 +24,7 @@ import zlib
 
 import numpy as np
 from scipy.ndimage import maximum_filter1d, uniform_filter1d
-from scipy.signal import butter, lfilter, sosfilt
+from scipy.signal import butter, fftconvolve, lfilter, sosfilt
 
 SR = 48000
 PEAK = 0.9          # a sound at intensity 1.0 peaks here
@@ -225,14 +225,19 @@ def hz(m):
 
 # ---------------------------------------------------------------- beds
 def wind(dur=10.0, intensity=0.5, pitch=1.0, seed=0, fade_s=1.5):
-    """Mountain wind bed: low band-passed noise with slow gusts and a faint higher whistle band."""
+    """Mountain wind bed: a low, soft rush that swells in slow gusts, with a faint moving whistle.
+    Built from brown noise (energy falls with frequency) so it does not read as hiss or static: white noise
+    through a wide band-pass, the first version, did."""
     n, a, p = nsamp(dur), _amt(intensity), _mult(pitch)
     rng = rng_for(seed, "wind")
-    gust = 0.45 + 0.55 * _slow(n, 0.35, rng)
-    body = bp(rng.standard_normal(n), 110 * p, (500 + 700 * a) * p) * gust
-    air = bp(rng.standard_normal(n), 900 * p, 2600 * p) * (_slow(n, 0.6, rng) ** 2) * (0.10 + 0.35 * a)
-    return _finish(fade(body / (np.abs(body).max() + 1e-9) + air / (np.abs(air).max() + 1e-9) * (0.15 + 0.3 * a),
-                        fade_s, fade_s), n, intensity, tail=0)
+    d = n / SR
+    gust = 0.25 + 0.75 * _slow(n, 0.22, rng) ** 1.6                     # long swells, quiet between them
+    body = bp(brown(d, rng), 140 * p, (650 + 350 * a) * p, 2) * gust   # a rush, not a rumble: audible on small speakers
+    centre = (420 + 380 * _slow(n, 0.15, rng)) * p                      # the whistle wanders slowly
+    carrier = np.sin(2 * np.pi * np.cumsum(centre) / SR + rng.random() * 6.283)
+    whistle = lp(rng.standard_normal(n), 35, 2) * carrier * gust ** 2
+    y = body / (np.abs(body).max() + 1e-9) + whistle / (np.abs(whistle).max() + 1e-9) * (0.05 + 0.12 * a)
+    return _finish(fade(lp(y, 1500 * p, 2), fade_s, fade_s), n, intensity, tail=0)
 
 
 def fire(dur=10.0, intensity=0.5, pitch=1.0, seed=0, fade_s=1.0):
@@ -331,24 +336,60 @@ def ink_drop(dur=0.5, intensity=0.5, pitch=1.0, seed=0):
     return _finish(y, n, intensity)
 
 
-def gong(dur=4.0, intensity=0.5, pitch=1.0, seed=0):
-    """Small gong, one stroke (a synthesised approximation): inharmonic partials with beating pairs."""
+def gong(dur=6.0, intensity=0.5, pitch=1.0, seed=0):
+    """Small gong, one stroke (a synthesised approximation): inharmonic partials in slowly beating pairs, a low
+    body partial, upper partials that bloom just after the stroke and ring on. Dry here; score.py adds the room
+    (SOUNDS["gong"]["reverb"]), which is most of what makes it sound struck in a space."""
     n, a, p = nsamp(dur), _amt(intensity), _mult(pitch)
     rng = rng_for(seed, "gong")
     t = np.arange(n) / SR
     f0 = 392.0 * p
-    glide = 1 + 0.012 * (1 + a) * np.exp(-t / 0.25)          # the pitch settles after the stroke
-    parts = []
+    glide = 1 + 0.010 * (1 + a) * np.exp(-t / 0.30)          # the pitch settles after the stroke
+    y = _modes(n, [(f0 * 0.5, 0.22, 2.6, rng.random() * 6.283)], glide)        # body, an octave below
+    upper = np.zeros(n)
     for i, r in enumerate((1.0, 1.52, 2.08, 2.71, 3.46, 4.38, 5.47, 6.9)):
-        amp = (1.0 if i == 0 else (0.55 + 0.5 * a) / (i ** (1.35 - 0.6 * a)))
-        tau = 1.5 / (1 + 0.55 * i)
-        for det in (1.0, 1.0 + 0.003 * (1 + rng.random())):
-            parts.append((f0 * r * det, amp * 0.5, tau, rng.random() * 6.283))
-    y = _modes(n, parts, glide)
+        amp = (1.0 if i == 0 else (0.55 + 0.5 * a) / (i ** (1.25 - 0.5 * a)))
+        tau = 2.4 / (1 + 0.30 * i)                           # the upper partials ring on (first version: 1.5 / (1 + 0.55 i))
+        pair = [(f0 * r * det, amp * 0.5, tau, rng.random() * 6.283)
+                for det in (1.0, 1.0 + (0.004 + 0.006 * rng.random()))]       # 1.5-4 Hz beating: the shimmer
+        if i == 0:
+            y += _modes(n, pair, glide)
+        else:
+            upper += _modes(n, pair, glide)
+    y += upper * (1 - 0.75 * np.exp(-t / 0.09))              # bloom: the shimmer arrives a moment after the stroke
     k = min(n, nsamp(0.03))
     y[:k] += bp(rng.standard_normal(k), 600, 5000) * np.exp(-np.arange(k) / (0.004 * SR)) * (0.3 + 0.6 * a) * 2
     y[:min(n, 96)] *= np.linspace(0, 1, min(n, 96))
-    return _finish(y, n, intensity, tail=0.05)
+    return _finish(y, n, intensity, tail=0.25)
+
+
+def reverb(x, mix=0.3, room_s=2.4, seed=0, predelay=0.018):
+    """A room for one sound, same length as the sound (the tail is cut at the sound's end, so give a struck sound
+    enough `dur` to ring). Convolution with a seeded impulse response: a few early reflections, then noise that
+    decays by 60 dB in `room_s` seconds and darkens as it decays. The peak level of the input is kept."""
+    x = np.asarray(x, dtype=np.float64)
+    n = len(x)
+    mix = float(min(1.0, max(0.0, mix)))
+    if n < 64 or mix <= 0:
+        return x.astype(np.float32)
+    rng = rng_for(seed, "reverb")
+    m = min(nsamp(room_s * 1.2), max(64, n))
+    t = np.arange(m) / SR
+    tail = rng.standard_normal(m) * np.exp(-6.9078 * t / room_s)
+    tail = 0.55 * lp(tail, 5200, 1) + 0.45 * lp(tail, 1400, 1)        # highs die first, as in a real room
+    tail[:nsamp(predelay)] = 0
+    for k in range(6):                                        # early reflections: a wall, a floor, a far slope
+        at = nsamp(predelay + 0.011 * (k + 1) * (1 + 0.6 * rng.random()))
+        if at < m:
+            tail[at] += (0.9 - 0.12 * k) * rng.choice([-1.0, 1.0]) * 6
+    tail /= np.sqrt(np.sum(tail ** 2)) + 1e-12
+    wet = fftconvolve(x, tail)[:n]
+    peak = np.abs(x).max()
+    y = x * (1 - 0.35 * mix) + wet * mix * 1.6
+    y = fade(y, 0.0, min(0.25, n / SR / 4))
+    if peak > 0 and np.abs(y).max() > 0:
+        y *= peak / np.abs(y).max()
+    return y.astype(np.float32)
 
 
 def drum(dur=0.8, intensity=0.5, pitch=1.0, seed=0):
@@ -463,7 +504,7 @@ SOUNDS = {
     "whoosh":     dict(fn=whoosh, dur=1.2, bed=False, pitch="mult", extra=("rise",)),
     "hoof":       dict(fn=hoof, dur=0.6, bed=False, pitch="mult", extra=()),
     "ink_drop":   dict(fn=ink_drop, dur=0.5, bed=False, pitch="mult", extra=()),
-    "gong":       dict(fn=gong, dur=4.0, bed=False, pitch="mult", extra=()),
+    "gong":       dict(fn=gong, dur=6.0, bed=False, pitch="mult", extra=(), reverb=0.38),
     "drum":       dict(fn=drum, dur=0.8, bed=False, pitch="mult", extra=()),
     "drum_roll":  dict(fn=drum_roll, dur=2.0, bed=False, pitch="mult", extra=("rate", "swell")),
     "ember":      dict(fn=ember, dur=0.25, bed=False, pitch="mult", extra=()),

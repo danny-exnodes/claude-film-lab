@@ -12,6 +12,9 @@
 - **Nét mực `COMPOSE.ink`** (`tools/compose/ink.js`): `stroke` (lực nhấn, sợi lông bút cạn mực dần, `dry` từ ướt đến phi bạch, năm sắc mực, bút ăn mực một bên) và `mass` (khối nhạt mép mềm), vẽ thẳng vào sân khấu; mỗi nét có `id` nên chỗ đứt nét không bò giữa các khung.
 - `inline.py` chèn 16 file (thêm `ink.js`, `figure.js` sau `pose.js`); `motions.json` và `styles/thuy-mac` có id `figure`. Chạy lại `python3 tools/compose/inline.py film.html` để film cũ nhận bộ mã mới.
 - `THIRD_PARTY.md`: `ink.js` và `figure.js` phỏng theo mã MIT của lemomo-ai/lemo-opuscar (Copyright (c) 2026 LemoLab).
+- `tools/audio` sau lần nghe đầu của chủ dự án: gió viết lại thành luồng trầm có đợt (trước đó nghe như tiếng ồn: 8,6 % năng
+  lượng trên 1 kHz, nay dưới 0,5 %); cồng ngân lâu hơn (ở giây thứ 3 còn −13 dB thay vì −31 dB) và có vang phòng mặc
+  định; khóa mới `reverb` và `room_s` cho mọi sự kiện trong `score.json`.
 - `THIRD_PARTY.md`: ghi công cho mã phỏng theo lemomo-ai/lemo-opuscar (MIT). Chỉ phỏng mã; phim mẫu, nhân vật, bố cục
   và bản nhạc của dự án đó không được dùng.
 

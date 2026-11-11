@@ -740,7 +740,7 @@ def read_jobs(a):
         if not v["out"]:
             bad("out is empty")
         else:
-            key = os.path.normpath(os.path.abspath(v["out"]))
+            key = os.path.realpath(v["out"])        # one file through two paths (a symlinked folder) is one out
             if key in outs:
                 bad(f"out {v['out']} is the same file as row {outs[key]}")
             elif os.path.isdir(key):
@@ -835,6 +835,7 @@ def batch_row(a, job, budget):
     make_out_dir(job["out"])
     rid = new_req()
     reserve(a, req, rid, budget=budget)
+    job["reserved"] = True          # from here on the request counts as sent, whatever goes wrong
     try:
         r = api("POST", "/images/generations", body)
     except BaseException as e:
@@ -849,8 +850,10 @@ def batch_row(a, job, budget):
         stem, ext = os.path.splitext(job["out"])
         for n, d in enumerate(data):
             out = job["out"] if n == 0 else f"{stem}-{n}{ext}"
-            part = f"{os.path.splitext(out)[0]}.part{ext}"      # `out` only ever holds a complete file: a rerun
-            try:                                                # skips a row by its output file
+            # `out` only ever holds a complete file: a rerun skips a row by its output file. The request id keeps
+            # the temporary name clear of every other row's out and of files already in the folder
+            part = f"{os.path.splitext(out)[0]}.{rid}.part{ext}"
+            try:
                 save_image(base64.b64decode(d["b64_json"]), part, quiet=True)
                 os.replace(part, out)
             finally:
@@ -913,6 +916,12 @@ def image_batch(a):
                 if state["stop"] or not queue:
                     return
                 job = queue.pop(0)
+                # the output appeared since validation (a second run of the same CSV): never paid for twice
+                if os.path.exists(job["out"]) and os.path.getsize(job["out"]) > 0:
+                    skipped.append(job)
+                    sys.stdout.write(f"skip {job['id']}: output exists ({job['out']})\n")
+                    sys.stdout.flush()
+                    continue
             t0 = time.time()
             try:
                 status, detail = batch_row(a, job, budget)
@@ -920,8 +929,13 @@ def image_batch(a):
                 code = e.code if isinstance(e.code, int) and e.code else USAGE_EXIT
                 why = "refused by the budget" if code == BUDGET_EXIT else "refused locally"
                 return stop(f"{job['id']}: {why}", code, job)
-            except Exception as e:              # before the request left (e.g. the output folder): not sent
-                return stop(f"{job['id']}: {err_note(e)}", USAGE_EXIT, job)
+            except Exception as e:
+                if not job.get("reserved"):     # before the request left (e.g. the output folder): not sent
+                    return stop(f"{job['id']}: {err_note(e)}", USAGE_EXIT, job)
+                # the request left and its final ledger row could not be written (disk full, ledger gone): it is a
+                # failed request, never a row to run again, and no further request may start without a ledger
+                status, detail = "failed", f"ledger row not written: {err_note(e)} (sent, may have been billed)"
+                stop(f"{job['id']}: {detail}")
             line = f"{status} {job['id']} {job['out']} {time.time() - t0:.1f}s" + (f" · {detail}" if detail else "")
             with lock:
                 count[status] += 1

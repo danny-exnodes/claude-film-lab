@@ -535,3 +535,60 @@ class TestSignals(BatchCase):
         self.assertEqual(code, 130, err)
         self.assertEqual(len(f.calls), 2)
         self.assertIn("3 not started", self.summary(so))
+
+
+class TestPaidFilesAndSentRequests(BatchCase):
+    def test_temporary_name_never_touches_another_file(self):
+        """The file a row is written through is not a name another row or an older file can have."""
+        self.outdir.mkdir()
+        old = self.outdir / "p1_v01.part.png"
+        old.write_bytes(b"KEEP")
+        self.write_jobs([{"id": "b", "prompt": "prompt b", "out": self.out("s.part.png")},
+                         {"id": "a", "prompt": "prompt a", "out": self.out("s.png")}] + self.simple(1))
+        self.scripted()
+        code, so, err = self.batch("--parallel", "1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(old.read_bytes(), b"KEEP")
+        self.assertEqual(sorted(p.name for p in self.outdir.iterdir()),
+                         ["p1_v01.part.png", "p1_v01.png", "s.part.png", "s.png"])
+
+    def test_one_file_through_a_symlinked_folder_is_a_duplicate_out(self):
+        self.outdir.mkdir()
+        link = self.tmp / "link"
+        os.symlink(self.outdir, link)
+        self.write_jobs([{"id": "a", "prompt": "one", "out": self.out("t.png")},
+                         {"id": "b", "prompt": "two", "out": str(link / "t.png")}])
+        f = self.scripted()
+        code, _, err = self.batch()
+        self.assertEqual(code, 2, err)
+        self.assertEqual(f.calls, [])
+        self.assertIn("same file as row a", err)
+        self.assertFalse(os.path.exists(self.ledger))
+
+    def test_output_that_appears_during_the_batch_is_not_paid_for_again(self):
+        """A second run of the same CSV saved p2 meanwhile: the row is skipped when its turn comes."""
+        self.write_jobs(self.simple(3))
+
+        def rival(body):
+            Path(self.out("p2_v01.png")).write_bytes(b"RIVAL")
+            return OK
+        f = self.scripted({"prompt 1": rival})
+        code, so, err = self.batch("--parallel", "1")
+        self.assertEqual(code, 0, err)
+        self.assertEqual([b["prompt"] for b in f.calls], ["prompt 1", "prompt 3"])
+        self.assertEqual(Path(self.out("p2_v01.png")).read_bytes(), b"RIVAL")
+        self.assertIn(f"skip p2: output exists ({self.out('p2_v01.png')})", so)
+        self.assertEqual(self.summary(so), "batch: 2 ok, 0 failed, 0 cut-502, 1 skipped, 0 not started · images used 2/100")
+        self.assertEqual(len(self.requests()), 2)
+
+    def test_sent_request_whose_final_row_cannot_be_written_is_failed_not_unstarted(self):
+        self.write_jobs(self.simple(3))
+        f = self.scripted()
+        with mock.patch.object(ark, "log_row", side_effect=OSError(28, "No space left on device")):
+            code, so, err = self.batch("--parallel", "1")
+        self.assertEqual(code, 1, err)
+        self.assertEqual(len(f.calls), 1)                       # nothing more is sent without a working ledger
+        self.assertRegex(so, r"(?m)^failed p1 .* · ledger row not written: .*sent, may have been billed")
+        self.assertEqual(self.summary(so), "batch: 0 ok, 1 failed, 0 cut-502, 0 skipped, 2 not started · images used 1/100")
+        self.assertEqual(self.requests().popitem()[1], ["pending"])     # still counted against the caps
+        self.assertNotIn("Traceback", err)

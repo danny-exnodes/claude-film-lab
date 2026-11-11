@@ -270,6 +270,16 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
   và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
   Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
+- **Tạo ảnh theo lô** (`ark.py image-batch JOBS.csv --budget B --ledger L [--parallel N] [--dry-run] [--only ID …] [--fast]`):
+  mỗi dòng CSV (`id,prompt,out,size,model,ref,seed,negative`; `prompt` dạng `@file` đọc từ file cạnh CSV, `ref` cách nhau
+  bởi `;`, `model` trống = model mặc định hoặc flash khi có `--fast`) là **một** request `image` với đúng các dòng
+  `pending` + dòng cuối ở trên, không thử lại. Kiểm mọi dòng trước khi gửi (mã 2, liệt kê hết lỗi theo `id`); dòng đã có
+  file đầu ra thì **bỏ qua** (`skip <id>: output exists`) nên chạy lại sau khi bị ngắt không trả tiền hai lần, không có
+  `--overwrite`; cả lô vượt một trần → **một** dòng `refused-budget` (`note` = `batch of N: …`), mã 3, không gửi gì; rồi
+  chạy tối đa `--parallel` request cùng lúc (mặc định 3, tối đa 4), từng request vẫn qua bước nguyên tử. Một dòng lỗi
+  không dừng các dòng khác; bị từ chối ngân sách giữa chừng, HTTP 401/403, lỗi số dư tài khoản hoặc SIGINT/SIGTERM
+  (mã 130/143) thì thôi không bắt đầu dòng mới, dòng đang chạy vẫn ghi dòng cuối. Mã 1 = có request đã rời máy và lỗi.
+  `--dry-run` chỉ kiểm và in kế hoạch, không ghi ledger. Chi tiết: `ark.py image-batch --help`.
 - **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
   `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
   của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay

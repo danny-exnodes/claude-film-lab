@@ -16,7 +16,8 @@ Biến các lớp tranh đã duyệt (L1 nền, L2 tầng giữa, L3 tiền cả
 rồi thành bản dựng của cả tập, bằng **cinecode Quick mode** + bộ mã dùng chung `tools/compose/`.
 
 **Nguyên tắc:** tranh AI lo chất liệu; code lo máy quay, không khí, thời gian, âm thanh; Seedance chỉ cho cử động code
-không làm được (quay đầu, đứng dậy, vỗ cánh). **Không vẽ nhân vật hay dị thú bằng nét code** (đã thử: luôn phẳng và giả).
+không làm được (quay đầu, đứng dậy, vỗ cánh). **Không vẽ nhân vật hay dị thú bằng nét code** (đã thử: luôn phẳng và giả);
+ngoại lệ duy nhất: người nhỏ ≤ 25 % khung trong cảnh rộng bằng `figure` (`references/layers-figure.md`).
 
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.

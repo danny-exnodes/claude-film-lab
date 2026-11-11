@@ -476,6 +476,56 @@ test('figure: t = 0, a huge t, an empty path, a missing anchor: a warning, never
   assert.ok(k.env.warned.length >= C.warnings.length);
 });
 
+test('figure: a timeline entry that keeps the pose does not restart an in-place walk', () => {
+  const { C } = kit();
+  const o = { x: 500, y: 800, height: 200, pose: 'walk', salt: 1 };
+  for (const e of [{ at: 5, arm: 'left' }, { at: 5, view: 'side' }, { at: 5, pose: 'walk' }]) {
+    for (const t of [5, 5.25, 6, 9]) {
+      const a = C.figure.state({ t }, o), b = C.figure.state({ t }, { ...o, timeline: [e] });
+      assert.equal(b.path.phase, a.path.phase, `the step count goes on at t=${t} with ${JSON.stringify(e)}`);
+      assert.deepEqual(b.feet.map((f) => [f.planted, f.plant, f.lift]), a.feet.map((f) => [f.planted, f.plant, f.lift]));
+    }
+  }
+  // a walk that starts later still counts its steps from its own entry
+  const late = (t) => C.figure.state({ t }, { x: 500, y: 800, height: 200, salt: 1, timeline: [{ at: 4, pose: 'walk' }, { at: 6, view: 'side' }] });
+  assert.equal(late(4).path.phase, 0);
+  assert.ok(Math.abs(late(7).path.phase - C.figure.state({ t: 3 }, o).path.phase) < 1e-9);
+});
+
+test('figure and ink: null options, on as a plate name, a crowd with on / a junk each, junk stroke options', async () => {
+  const k = kit({ sizeOf: () => [1920, 1080] }), { C } = k;
+  C.ANCHORS = { 'l3.png': { feet: [1024, 900] } };
+  await C.load({ seed: 7, plates: { L3: { src: 'p/l3.png', depth: 0.45 } } });
+  const want = C.anchor('L3', 'feet');
+  let s, crowd, junk;
+  const calls = frame(k, 1, (st) => {
+    assert.ok(C.figure.draw(st, null), 'null options: the default figure');
+    assert.deepEqual(C.figure.crowd(st, null), []);
+    s = C.figure.draw(st, { on: 'L3', height: 100 });
+    crowd = C.figure.crowd(st, { count: 5, area: [300, 760, 1500, 900], on: { plate: 'L3', anchor: 'feet' }, each: 'nope' });
+    junk = C.figure.crowd(st, { count: 2, area: [300, 760, 1500, 900], on: 'L9' });
+  });
+  assert.ok(finite(calls));
+  assert.deepEqual([s.x, s.y, s.depth], [want[0], want[1], 0.45], 'on: "L3" is the point `feet` of that plate');
+  assert.equal(crowd.length, 5);
+  assert.equal(new Set(crowd.map((f) => f.x)).size, 5, 'a crowd is spread over its area, not stacked on the anchor');
+  assert.ok(crowd.every((f) => f.depth === 0.45), 'at the depth of the plate');
+  assert.ok(junk.every((f) => f && f.depth === C.DEPTH.char));
+  assert.deepEqual(C.warnings.map((w) => w.replace(/;.*/, '')), ['figure.crowd needs area: [x0, y0, x1, y1]', 'figure.crowd: no plate "L9" for the depth']);
+  // a point height on a path that is not a size: the feet are scaled like the body
+  const st = C.figure.state({ t: 3 }, { height: 100, salt: 2, path: [{ at: 0, x: 100, y: 800, h: -40 }, { at: 8, x: 600, y: 800, h: -40 }] });
+  assert.equal(st.h, 160);
+  const plain = C.figure.state({ t: 3 }, { height: 160, salt: 2, path: [{ at: 0, x: 100, y: 800 }, { at: 8, x: 600, y: 800 }] });
+  assert.notEqual(plain.feet[0].y, plain.feet[1].y, 'seen from the side the two feet are apart in depth');
+  assert.deepEqual(st.feet.map((f) => f.y - 800), plain.feet.map((f) => f.y - 800));
+  // ink
+  const { g } = k.screen();
+  assert.ok(C.ink.stroke(g, LINE, null));
+  assert.equal(C.ink.mass(g, [[0, 0], [50, 0], [50, 50]], null), true);
+  assert.equal(C.ink.plan(LINE, { steps: 1e7 }).n, 513, 'the resampling is capped');
+  assert.ok(C.ink.plan(LINE, { profile: () => NaN }).ws.every((w) => Number.isFinite(w) && w > 0));
+});
+
 test('figure: the docs and the registry name what the code has', () => {
   const api = fs.readFileSync(path.join(REPO, '.claude', 'skills', 'film-compose-shot', 'references', 'compose-api.md'), 'utf8');
   for (const needle of ['COMPOSE.figure.draw', 'COMPOSE.figure.crowd', 'COMPOSE.ink.stroke', 'COMPOSE.ink.mass']) assert.ok(api.includes(needle), needle);

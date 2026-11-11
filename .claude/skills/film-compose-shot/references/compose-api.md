@@ -245,7 +245,7 @@ liệu mà không vẽ (`x, y, h, yaw, tq, pose, feet[{ x, y, planted, lift }], 
 
 | Trường | Mặc định | Khoảng nên dùng | Ý nghĩa |
 |---|---|---|---|
-| `x`, `y` \| `on` | giữa khung, 80 % chiều cao | – | bàn chân, px sân khấu; hoặc `on: { plate, anchor, dx, dy }`: điểm neo của một plate đã nạp (lấy luôn độ sâu của plate). Thiếu plate/điểm → cảnh báo, dùng `x`, `y` nếu có, không thì không vẽ |
+| `x`, `y` \| `on` | giữa khung, 80 % chiều cao | – | bàn chân, px sân khấu; hoặc `on: { plate, anchor, dx, dy }`: điểm neo của một plate đã nạp (lấy luôn độ sâu của plate); `on: 'L3'` = điểm `feet` của plate đó. Thiếu plate/điểm → cảnh báo, dùng `x`, `y` nếu có, không thì không vẽ |
 | `depth` | độ sâu của plate trong `on`, không thì 1 | – | độ sâu parallax |
 | `height` | 160 | 40–270 | chiều cao hình, px sân khấu. **Chặn ở 270** (25 % sân khấu, `COMPOSE.figure.CAP`): lớn hơn → thu về 270 + cảnh báo (dùng plate AI + `cloth` / `pose-cycle`) |
 | `view` | `'back'`; có `path` thì theo hướng đường | `'back'`, `'side'`, `'front'`, số độ | 0 = chính diện, 90 = nhìn nghiêng quay phải, 180 = từ sau, 150 = ba phần tư sau |
@@ -267,7 +267,8 @@ liệu mà không vẽ (`x, y, h, yaw, tq, pose, feet[{ x, y, planted, lift }], 
 | `seed`, `t` | `COMPOSE.seed`, `st.t` | – | |
 
 `crowd`: `count` (5; tối đa 60), `area: [x0, y0, x1, y1]` (hộp chứa bàn chân, bắt buộc), `height: n | [xa, gần]` (90),
-`salt`, `each: (i, o) => ghi đè cho người thứ i`, và mọi trường của `draw`. Trả về danh sách trạng thái, xa đến gần.
+`salt`, `each: (i, o) => ghi đè cho người thứ i`, và mọi trường của `draw` (riêng `on` chỉ cho **độ sâu** của plate:
+chỗ đứng do `area` quyết định). Trả về danh sách trạng thái, xa đến gần.
 
 **Nét mực** – dùng được riêng cho một nét vẽ tay (một nhành cỏ, một vệt chim), vẽ thẳng vào `g` của `st.layer`:
 

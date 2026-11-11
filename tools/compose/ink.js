@@ -78,7 +78,7 @@
     for (let i = 1; i < D.length; i++) acc.push(acc[i - 1] + Math.hypot(D[i][0] - D[i - 1][0], D[i][1] - D[i - 1][1]));
     const len = acc[acc.length - 1];
     // steps not given: from the length, in powers of two, so a stroke that stretches a little keeps its sampling
-    const n = 1 + (steps > 0 ? Math.round(steps) : C.clamp(Math.pow(2, Math.round(Math.log2(Math.max(1, len) / 4))), 8, 256));
+    const n = 1 + (steps > 0 ? C.clamp(Math.round(steps), 1, 512) : C.clamp(Math.pow(2, Math.round(Math.log2(Math.max(1, len) / 4))), 8, 256));
     const P = [];
     for (let i = 0, j = 0; i < n; i++) {
       const s = (len * i) / (n - 1);
@@ -92,7 +92,8 @@
   // The geometry of one stroke, a pure function of (points, options): { P, n, len, ws (width per point), nx, ny,
   // bristles: [{ off, bw, a, runs: [[i0, i1], ...] }], gaps: [[[u0, u1], ...] per bristle], ... }. `runs` are the
   // stretches where the bristle still carries ink; they depend only on (seed, id, dry, w, span, steps).
-  function plan(points, o = {}) {
+  function plan(points, o) {
+    o = o && typeof o === 'object' ? o : {};
     const pts = finite(points);
     if (pts.length < 2) return null;
     const w = Math.max(0.2, num(o.w, 4)), dry = C.clamp(num(o.dry, 0.25)), seed = (o.seed ?? C.seed) | 0, id = idOf(o.id);
@@ -104,7 +105,7 @@
     let ax = 0, ay = 0;
     for (let i = 0; i < n; i++) {
       const u = i / (n - 1), wob = C.noise(seed, (u * span) / (w * 1.3 + 1) + boil, id ^ SALT) * 2 - 1;
-      ws.push(Math.max(w * 0.04, w * prof(u) * P[i][2] * (1 + rough * wob)));
+      ws.push(Math.max(w * 0.04, w * num(prof(u), 0) * P[i][2] * (1 + rough * wob)));
       const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
       nx.push(-dy / L); ny.push(dx / L);
       ax += nx[i]; ay += ny[i];
@@ -135,7 +136,8 @@
              body: num(o.body, 1), hair: num(o.hair, 1), fade: C.clamp(num(o.fade, dry * 0.55)), seed, id, span };
   }
 
-  function stroke(g, points, o = {}) {
+  function stroke(g, points, o) {
+    o = o && typeof o === 'object' ? o : {};
     const s = plan(points, o);
     if (!s) return null;
     const { P, n, ws, nx, ny } = s, col = s.rgb.join(','), am = C.clamp(num(o.alpha, 1));
@@ -174,7 +176,8 @@
 
   // A soft-edged pale body: the polygon is filled `passes` times, each with its own seeded edge jitter of up to
   // `soft` px, so the passes add up to the tone inside and thin out toward an irregular edge.
-  function mass(g, poly, o = {}) {
+  function mass(g, poly, o) {
+    o = o && typeof o === 'object' ? o : {};
     const pts = finite(poly);
     if (pts.length < 3) return false;
     const a = toneOf(o.tone, TONE.qing) * C.clamp(num(o.alpha, 1)), soft = Math.max(0, num(o.soft, 2));

@@ -96,10 +96,11 @@
       const yaw = yawOf(nominal, e.facing, cur.yaw), dur = Math.max(0, num(e.dur, turn ? 0.8 : 0.5));
       const k = dur > 0 ? C.clamp((tl - e.at) / dur) : 1, next = turn ? 'stand' : name, J = POSES[next](e);
       const fixed = cur.fixed || turn || e.view != null;
-      if (k >= 1) cur = { name: next, J, yaw, headYaw: yaw, since: e.at, turn: 0, fixed };
+      const since = next === cur.name ? cur.since : e.at;                 // the same pose goes on: an in-place walk keeps its steps
+      if (k >= 1) cur = { name: next, J, yaw, headYaw: yaw, since, turn: 0, fixed };
       else {
         cur = { name: next, J: mix(cur.J, J, C.ease.inOut(k)), yaw: turnTo(cur.yaw, yaw, C.ease.inOut(C.clamp(k * 1.5 - 0.5))),
-                headYaw: turnTo(cur.yaw, yaw, C.ease.inOut(C.clamp(k * 1.5))), since: e.at, turn: Math.abs(turnTo(cur.yaw, yaw, 1) - cur.yaw) > 1 ? k : 0, fixed };
+                headYaw: turnTo(cur.yaw, yaw, C.ease.inOut(C.clamp(k * 1.5))), since, turn: Math.abs(turnTo(cur.yaw, yaw, 1) - cur.yaw) > 1 ? k : 0, fixed };
       }
     }
     return cur;
@@ -166,18 +167,20 @@
 
   // Everything the figure is at film time t, as plain data (no drawing): position and scale on every frame, the pose
   // on twos, both feet in stage px, the cloth offsets in body units. null when the figure cannot be placed.
-  function state(st, o = {}) {
+  function state(st, o) {
+    o = o && typeof o === 'object' ? o : {};
     const seed = (o.seed ?? C.seed) | 0, salt = num(o.salt, 0) | 0, name = o.name || 'figure ' + salt;
     const warn = (m, key, value) => C.warn(`${name}: ${m}`, `figure:${salt}:${key}`, value);
     const t = num(o.t, num(st && st.t, 0)), start = num(o.start, 0), tq = Math.floor(t * FPS + EPS) / FPS;
     let x = o.x, y = o.y, depth = o.depth;
     if (o.on) {
+      const on = typeof o.on === 'object' ? o.on : { plate: o.on };       // on: 'L3' = the point `feet` of that plate
       try {
-        const p = C.get(o.on.plate), a = C.anchor(o.on.plate, o.on.anchor || 'feet');
-        x = a[0] + num(o.on.dx, 0); y = a[1] + num(o.on.dy, 0);
+        const p = C.get(on.plate), a = C.anchor(on.plate, on.anchor || 'feet');
+        x = a[0] + num(on.dx, 0); y = a[1] + num(on.dy, 0);
         if (depth == null) depth = p.depth;
       } catch (e) {
-        warn(`no anchor "${o.on.anchor || 'feet'}" on plate "${o.on.plate}"${Number.isFinite(+x) && Number.isFinite(+y) ? '; x, y used' : '; not drawn'}`, 'anchor');
+        warn(`no anchor "${on.anchor || 'feet'}" on plate "${on.plate}"${Number.isFinite(+x) && Number.isFinite(+y) ? '; x, y used' : '; not drawn'}`, 'anchor');
       }
     }
     const path = pathOf(o, warn), cap = CAP * C.STAGE.H;
@@ -230,7 +233,7 @@
         heading = [(ahead.x - behind.x) / d, (ahead.y - behind.y) / d];
         steps.feet.forEach((f, i) => {
           const arc = leg.a0 + f.arc, p = path.at(arc), at = yawAt(arc) ?? yaw, off = ground(foot[i][0], 0, pose.fixed ? yaw : at);
-          const sc = (p.h != null ? Math.min(cap, p.h) : h0) / 100;
+          const sc = (p.h != null ? sized(p.h) : h0) / 100;
           feet[i] = { x: p.x + off[0] * sc, y: p.y + off[1] * sc, lift: f.lift, planted: f.planted, plant: f.plant == null ? null : leg.base + f.plant };
         });
       }
@@ -407,7 +410,8 @@
   C.figure = {
     CAP, FPS, LIMIT, STEP, POSES: Object.keys(POSES), state, local: { wind: windOf, gust: gustOf },
     // Draws the figure through the camera at its depth; returns its state (null: nothing was drawn).
-    draw(st, o = {}) {
+    draw(st, o) {
+      o = o && typeof o === 'object' ? o : {};
       const s = state(st, o);
       if (!s) return null;
       if (!C.ink) { C.warn('figure.js needs ink.js loaded before it; nothing drawn', 'figure:ink'); return null; }
@@ -421,12 +425,17 @@
     // A small crowd: `count` figures placed by seed inside area [x0, y0, x1, y1] (the feet), far to near, each with
     // its own salt (phase, texture, view jitter). height: n | [far, near] (by y inside the area). Every other option
     // goes to draw; each(i, options) may return per-figure overrides. Returns the states.
-    crowd(st, o = {}) {
+    crowd(st, o) {
+      o = o && typeof o === 'object' ? o : {};
       const a = Array.isArray(o.area) && o.area.length === 4 && o.area.every(Number.isFinite) ? o.area : null;
       if (!a) { C.warn('figure.crowd needs area: [x0, y0, x1, y1]; nothing drawn', 'figure:crowd-area'); return []; }
       let count = Math.max(0, Math.round(num(o.count, 5)));
       if (count > LIMIT.crowd) { C.warn(`figure.crowd: ${count} figures is over the cap; ${LIMIT.crowd} drawn`, 'figure:crowd-count'); count = LIMIT.crowd; }
-      const { count: _n, area: _a, each, height, ...rest } = o, salt = num(o.salt, 0) | 0, r = C.rng((o.seed ?? C.seed) | 0, salt + 8191), list = [];
+      const { count: _n, area: _a, each, height, on, ...rest } = o, salt = num(o.salt, 0) | 0, r = C.rng((o.seed ?? C.seed) | 0, salt + 8191), list = [];
+      if (on && rest.depth == null) {      // on: the depth of its plate only (the area places the feet; one anchor would stack the crowd)
+        const plate = typeof on === 'object' ? on.plate : on;
+        try { rest.depth = C.get(plate).depth; } catch (e) { C.warn(`figure.crowd: no plate "${plate}" for the depth; ${C.DEPTH.char} used`, 'figure:crowd-on'); }
+      }
       for (let i = 0; i < count; i++) {
         const fx = r(), fy = r(), hk = r(), vk = r(), y = C.lerp(a[1], a[3], fy);
         const h = Array.isArray(height) ? C.lerp(height[0], height[1], fy) * (0.94 + 0.12 * hk) : num(height, 90) * (0.9 + 0.2 * hk);
@@ -434,7 +443,7 @@
         list.push({ ...rest, x: C.lerp(a[0], a[2], fx), y, height: h, view: yaw, salt: salt * 101 + i + 1, name: `crowd ${salt} #${i}` });
       }
       list.sort((p, q) => p.y - q.y);
-      return list.map((f, i) => C.figure.draw(st, each ? { ...f, ...(each(i, f) || {}) } : f));
+      return list.map((f, i) => C.figure.draw(st, typeof each === 'function' ? { ...f, ...(each(i, f) || {}) } : f));
     },
   };
 })(typeof window !== 'undefined' ? window : globalThis);

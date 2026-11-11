@@ -8,6 +8,8 @@
 What it does (idempotent; run it again after any change to tools/compose/ or anchors.json):
   1. Inlines the kit as one <script> block before the film's own script (between compose-kit markers), with
      anchors.json embedded as COMPOSE.ANCHORS. film.html stays one self-contained file (cinecode Quick mode).
+     Files are inlined in ORDER; an OPTIONAL one (cloth.js, pose.js) that is not there yet is skipped, any other
+     missing file is `FAILED`. --lint prints how many files were inlined.
   2. Sets the page's default size to 1920x1080 (the template's default is 1080x1920); --size WxH for another.
   3. Chains the plates into READY: loadType(TYPE).then(loadFormulas).then(loadPlates), so every plate is decoded and
      every texture prebuilt before READY resolves (else capture reports `deterministic: NO`).
@@ -36,7 +38,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 TEMPLATE = REPO / ".claude" / "skills" / "film-compose-shot" / "templates" / "plates-film-section.js"
-ORDER = ["core.js", "plates.js", "stage.js", "breath.js", "strip-warp.js", "eyelid.js", "mist.js", "embers.js", "glow.js"]
+ORDER = ["core.js", "plates.js", "stage.js", "breath.js", "strip-warp.js", "cloth.js", "pose.js", "foliage.js",
+         "eyelid.js", "mist.js", "embers.js", "glow.js", "smoke.js", "fire.js"]
+# Registered in ORDER and in motions.json ahead of their files: skipped while the file is not there. Any other file
+# of ORDER that is missing fails the run.
+OPTIONAL = {"cloth.js", "pose.js"}
 BEGIN, END = "<!-- compose-kit begin", "<!-- compose-kit end -->"
 # the begin marker: version, and where the embedded anchors came from (absent in films inlined by kit 1.0.0)
 MARKER = re.compile(re.escape(BEGIN) + r" v(\S+?)(?: anchors=(.*?) sha=([0-9a-f]{8}))?: ")
@@ -64,12 +70,21 @@ def lint(name, src):
 
 
 def kit_source():
-    parts, errors = [], []
+    """-> (the kit as one script, lint errors, files inlined, optional files that are not there)."""
+    parts, errors, used, skipped = [], [], [], []
     for f in ORDER:
-        src = (HERE / f).read_text(encoding="utf-8")
+        path = HERE / f
+        if f in OPTIONAL and not path.is_file():
+            skipped.append(f)
+            continue
+        try:
+            src = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            fail(f"kit file tools/compose/{f}: cannot be read ({getattr(e, 'strerror', None) or e})")
         errors += lint(f, src)
         parts.append(f"// ---- tools/compose/{f}\n{src.rstrip()}\n")
-    return "\n".join(parts), errors
+        used.append(f)
+    return "\n".join(parts), errors, used, skipped
 
 
 def version():
@@ -110,11 +125,12 @@ def main():
     ap.add_argument("--lint", action="store_true", help="only check the kit")
     a = ap.parse_args()
 
-    kit, errors = kit_source()
+    kit, errors, used, skipped = kit_source()
     if errors:
         sys.exit("FAILED: the kit uses time or randomness that is not seeded:\n  " + "\n  ".join(errors))
     if a.lint:
-        print(f"compose kit v{version()}: {len(ORDER)} files, lint ok")
+        print(f"compose kit v{version()}: {len(used)} files, lint ok"
+              + (f" (optional, not there yet: {', '.join(skipped)})" if skipped else ""))
         return
     if not a.film:
         ap.error("film.html is required (or --lint)")
@@ -200,7 +216,7 @@ def main():
             sys.exit("FAILED: no <script> after <body> in film.html")
         html = html[:k] + block + html[k:]
     came_from = f"v{old_version} -> " if old_version and old_version != version() else ""
-    notes.append(f"kit {came_from}v{version()} inlined ({len(kit) // 1024} KB)")
+    notes.append(f"kit {came_from}v{version()} inlined ({len(used)} files, {len(kit) // 1024} KB)")
 
     # 2. default size
     size_re = re.compile(r"const W = \+q\.get\('w'\) \|\| (\d+), H = \+q\.get\('h'\) \|\| (\d+)")

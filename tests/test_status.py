@@ -607,7 +607,7 @@ class MethodTest(ForecastCase):
     def test_the_fixture_episode_prints_method_and_forecast(self):
         code, out, err = run_main(st.main, [str(EPISODE_FIX)])
         self.assertNotIn("Traceback", out + err)
-        self.assertRegex(out, r"(?m)^METHOD seedance \(default")
+        self.assertRegex(out, r"(?m)^METHOD seedance$")   # the fixture states its method explicitly
         self.assertRegex(out, r"(?m)^FORECAST")
         self.assertRegex(out, r"(?m)^  images: \d+ to make of 9 layers")
         self.assertRegex(out, r"(?m)^  video_seconds: 10 planned in 1 clip\(s\) \(s03 10\)")

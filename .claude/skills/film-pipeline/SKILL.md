@@ -145,7 +145,7 @@ hỏi người dùng (kịch bản và shot list viết theo nhánh).
 
 | | `layers` | `seedance` |
 |---|---|---|
-| Chuyển động | chỉ code trên lớp tranh: `cloth`, `strip-warp`, `foliage`, `smoke`, `fire`, `embers`, `mist-bands`, `pose-cycle` (đổi bậc 2–4 plate tư thế), máy quay | như `layers`, cộng clip Seedance cho cử động lớn của nhân vật |
+| Chuyển động | chỉ code trên lớp tranh: `cloth`, `strip-warp`, `foliage`, `smoke`, `fire`, `embers`, `mist-bands`, `pose-cycle` (đổi bậc 2–4 plate tư thế), máy quay | như `layers` trừ `pose-cycle` (không plate tư thế), cộng clip Seedance cho cử động lớn của nhân vật |
 | Trả tiền | chỉ ảnh, tạo theo lô | ảnh + giây video |
 | Khâu 6 (clip AI) | **bỏ qua**; không giao `film-animator` | chạy như bảng trên |
 | `budget.yaml` | `video_seconds: 0`, không trần cho model seedance | `video_seconds` do người dùng chốt |

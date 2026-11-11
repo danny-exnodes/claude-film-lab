@@ -26,7 +26,7 @@ API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `refere
 | `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |
 |---|---|---|---|
 | `layers` | code: `pose-cycle` (đổi bậc 2–4 plate tư thế), `cloth`, `strip-warp`, `foliage`; không khí `smoke`, `fire`, `embers`, `mist-bands`; máy quay | `references/layers-method.md` (quy tắc dàn cảnh, bảng tra, danh sách kiểm trước G3), `references/layers-character.md` | mục 4 của file này và `references/seedance-layer.md`: **không bao giờ yêu cầu clip**, không `keyframe.py`, không `matte_seq.py`, không lớp `seq` |
-| `seedance` (hoặc không có khóa) | clip Seedance đã tách nền (mục 4) | `references/seedance-layer.md` | plate tư thế `L4b`… và `pose-cycle` |
+| `seedance` (hoặc không có khóa) | clip Seedance đã tách nền (mục 4) | `references/seedance-layer.md` | plate tư thế `L4b`… và `pose-cycle` (khóa `L4b: { seq: … }` trong `PLATES` của `seedance-layer.md` là lớp clip, không phải plate tư thế) |
 
 Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì thêm chuyển động code hoặc cắt ngắn, và báo đạo diễn khi
 `shots.csv` đòi thứ `layers` không làm được (nước chảy, bay lượn); không tự chuyển sang clip.
@@ -125,7 +125,8 @@ Trước khi chuyển sang clip Seedance trong cùng shot (chỉ `method: seedan
 
 ## 3a. Phương pháp `layers`: cử động và không khí bằng code
 
-Chỉ khi `method: layers`. Chữ ký và tham số: `references/compose-api.md` (khói, lửa, tán cây),
+`pose-cycle` chỉ khi `method: layers`; `cloth`, `foliage`, `smoke`, `fire` là code nên tập `seedance` cũng dùng được khi
+style khai báo chúng. Chữ ký và tham số: `references/compose-api.md` (khói, lửa, tán cây),
 `references/layers-character.md` (vải, tư thế); số liệu của style: `styles/<id>/motion.md`.
 - **cloth** (rig `cloth` trên L4: áo choàng, tay áo, đai, tóc): sóng chạy từ mép dính vào thân ra mép tự do, mép dính
   đứng yên; mọi vùng vải của một shot chung một hướng gió, lệch pha.

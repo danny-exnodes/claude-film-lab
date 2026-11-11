@@ -20,8 +20,9 @@
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
   const EPS = 1e-6;
-  const fpsOf = (cfg) => C.clamp(cfg.fps ?? 8, 8, 12);
-  const blendOf = (cfg) => Math.round(C.clamp(cfg.blend ?? 0, 0, 2));
+  const num = (v, d) => (v != null && v !== '' && Number.isFinite(+v) ? +v : d);   // NaN would freeze the last frame
+  const fpsOf = (cfg) => C.clamp(num(cfg.fps, 8), 8, 12);
+  const blendOf = (cfg) => Math.round(C.clamp(num(cfg.blend, 0), 0, 2));
   const stepOf = (t, cfg) => Math.floor((t - (cfg.start ?? 0)) * fpsOf(cfg) + EPS);
 
   function prepare(p) {
@@ -67,7 +68,7 @@
     if (!views[0]) views[0] = view(p, 0, hostPt, p.place.s);
     for (let i = 1; i < views.length; i++) if (!views[i]) views[i] = views[0];
     for (const e of cfg.timeline || []) {
-      if (e.frame !== 'hold' && !(Number.isInteger(e.frame) && e.frame >= 0 && e.frame < views.length)) {
+      if (e && e.frame !== 'hold' && !(Number.isInteger(e.frame) && e.frame >= 0 && e.frame < views.length)) {
         warn(`timeline frame ${e.frame} at ${e.at} s is not one of ${views.length} frames; frame 0 is shown`);
       }
     }
@@ -83,10 +84,13 @@
       let step = Math.max(0, k);
       if (cfg.loop > 0) step %= Math.max(1, Math.round(cfg.loop * fps));
       const tq = step / fps;
-      let f = 0;
+      // the entry with the latest `at` that is not after tq (of equal times the later one in the list); the list need
+      // not be sorted, and an empty slot or a 'hold' changes nothing
+      let f = 0, best = -Infinity;
       for (const e of cfg.timeline || []) {
-        if (e.at > tq + EPS) break;
-        if (e.frame !== 'hold') f = e.frame;
+        const at = e ? num(e.at, 0) : NaN;
+        if (!(at <= tq + EPS) || at < best || e.frame === 'hold') continue;
+        f = e.frame; best = at;
       }
       return Number.isInteger(f) && f >= 0 && f < n ? f : 0;
     },

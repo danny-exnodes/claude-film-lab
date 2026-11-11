@@ -58,14 +58,19 @@ function s03(g, k, t, S) {
 
 - Gió: đặt `st.wind = {...}` một lần trong shot (hoặc `st.plate(id, { wind })`). Cơn giật là nhiễu chậm **chung** cho mọi
   hộp: áo choàng và tay áo cùng nghiêng, cùng căng một lúc, nhưng nếp gợn lệch pha. Hướng gió phải khớp với khói, tàn lửa,
-  sương của shot.
+  sương của shot. Thứ tự ưu tiên: `wind` khai trong rig của hộp < gió của shot (`st.wind`, rồi `st.plate(id, { wind })`)
+  < `wind` của riêng một hộp trong shot đó (`{ cloth: { cloak: { wind: { strength: 0.2 } } } }`).
 - Theo shot: `st.plate('L4', { cloth: false })` giữ yên mọi hộp; `{ cloth: { cloak: { amp: 0.06 }, sleeve: false } }`.
 - Vẽ hộp: hộp chỉ chứa phần vải được bay **và khoảng trong suốt quanh nó** (ít nhất 10 % chiều dài mỗi bên theo hướng
   lệch); phần lệch ra ngoài hộp bị cắt, điểm ảnh ngoài hộp không bao giờ đổi. Mép `root` của hộp đặt **trên phần vải
   còn dính thân** (đường vai, khuỷu tay, chân tóc), không đặt giữa khoảng trống.
-- Hộp không được chứa tay, mặt, vũ khí: mọi thứ trong hộp đều bị uốn theo.
+- Hộp không được chứa tay, mặt, vũ khí: mọi thứ trong hộp đều bị uốn theo. Hai hộp `cloth` của một tranh không chồng lên
+  nhau (điểm ảnh chung chỉ thuộc hộp khai trước).
+- Vùng vải nên **đặc** (tách nền kiểu thân đặc, như `rembg` của L4): ở `feather` đầu tiên thân và vải đè lên nhau, nên vải
+  bán trong suốt (lụa mỏng, mực loang tách bằng luminance) sẽ đậm hơn một chút ở đoạn sát mép `root`.
+- Tham số không phải số (hoặc `gain` ≤ 0) không làm hỏng khung hình: giá trị mặc định được dùng, `gain` tối thiểu 0.1.
 - Cảnh báo (`compose:` trong `qc` của `make.py`): `cloth <tên> has no anchor box; held still`, `box is too small`,
-  `amp ... is over the cap`.
+  `amp ... is over the cap`, `has no anchor point for its root or tip; held still`.
 - Thứ tự file trong bộ mã: `cloth.js` và `pose.js` đứng sau `stage.js`, `strip-warp.js`, `eyelid.js`.
 
 ## 3. `pose-cycle`: đổi tư thế theo bậc
@@ -87,7 +92,7 @@ const PLATES = {
   cần `place`**: rig đặt điểm `align` (mặc định `feet`) của nó trùng điểm `feet` của tranh chủ và co giãn theo tranh chủ
   (theo chiều cao tranh; hoặc `span: 'head'` → theo khoảng cách `feet`–`head`, dùng khi các tranh bị cắt khung khác nhau).
 - `timeline: [{ at: <giây>, frame: <chỉ số> | 'hold' }]`; thời gian được lượng tử hoá trước (`floor(t * fps) / fps`), khung
-  là mục cuối cùng có `at` ≤ thời điểm đó; trước mục đầu là khung 0; sau mục cuối giữ nguyên khung cuối. `loop: <giây>`
+  là mục có `at` muộn nhất mà ≤ thời điểm đó (không cần xếp sẵn theo `at`; `'hold'` không đổi khung); trước mục đầu là khung 0; sau mục cuối giữ nguyên khung cuối. `loop: <giây>`
   lặp lại timeline. `start: <giây>` dời gốc thời gian (theo shot: `st.plate('L4', { poses: { start: 41.5 } })`).
 - `fps`: 8–12 (mặc định 8; ngoài khoảng → cảnh báo và bị kẹp). `blend`: 0 = đổi cứng (mặc định, đúng chất limited
   animation); 1–2 = hoà tan ngắn tính bằng khung của lưới fps (tối đa 2).
@@ -132,8 +137,8 @@ Mọi tranh tư thế của một hành động phải chồng khít lên nhau, 
    cho **từng** tranh bằng `tools/layers/anchors.py set` → rig căn theo điểm neo nên lệch vài px giữa các tranh vẫn khớp.
 3. **Cùng ảnh khoá làm `--ref`**: mọi tranh tư thế đều tham chiếu ảnh khoá nhân vật đã duyệt (và tranh tư thế nghỉ), không
    tham chiếu dây chuyền tranh này sang tranh kia (sai lệch cộng dồn).
-4. **Nền phẳng một màu** (`matte.key_bg` của style pack), không bóng đổ, không sàn → tách nền cùng một phương pháp, cùng
-   tham số cho cả bộ.
+4. **Nền phẳng một màu** theo quyết định nền L4 của style pack (`matte.paper_bg` với `rembg`/luminance như `thuy-mac`,
+   `matte.key_bg` khi lớp dùng `chroma`), không bóng đổ, không sàn → tách nền cùng một phương pháp, cùng tham số cho cả bộ.
 5. Chỉ đổi đúng phần phải đổi (đầu, cánh tay, chân bước); trang phục, nét viền, bảng màu, hướng sáng giữ nguyên. Áo choàng
    và tóc vẽ ở dáng trung tính trong mọi tranh: phần bay do `cloth` làm.
 6. Tạo cả bộ trong **một lô** (`python3 tools/ark.py image-batch <jobs.csv>`, có `--budget` và `--ledger`), xem cạnh nhau

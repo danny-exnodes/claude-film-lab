@@ -228,6 +228,68 @@ test('cloth rig: an anchor-point root, the amp cap, a missing or tiny box, a seq
   assert.equal(strips[strips.length - 1].args[5], 0, 'the strip on the hair root');
 });
 
+test('cloth rig: the strips tile the region once, so no pixel is drawn twice (soft edges keep their alpha)', async () => {
+  const kit = await clothKit(TWO);
+  const { C } = kit, p = C.plates.L4, { g, S } = kit.screen();
+  const calls = kit.record(() => C.stage(g, S, C.camera(1.3), (st) => st.plate('L4')));
+  for (const c of p.cloths) {
+    const along = c.axis === 'x' ? 0 : 1, sp = C.cloth.strip(p, c.cfg);
+    const strips = calls.filter((k) => k.op === 'drawImage' && k.on === c.scratch.label);
+    let end = 0;
+    for (const k of strips) {
+      assert.equal(k.args[along], end, `${c.name}: a strip starts where the one before ends`);
+      assert.ok(k.args[2 + along] <= sp);
+      end += k.args[2 + along];
+    }
+    assert.equal(end, c.len, `${c.name}: the strips cover the whole length`);
+  }
+});
+
+test('cloth: a zero, negative or non-numeric parameter never moves the root or loses the cloth', async () => {
+  const { C } = loadRigs();
+  const wind = { dir: 0, strength: 1, gust: 1 };
+  for (const gain of [0, -1, NaN, 'x', null]) {
+    assert.equal(C.cloth.envelope(0, { gain }), 0, `gain ${gain}`);
+    assert.equal(C.cloth.envelope(1, { gain }), 1);
+    for (const t of TIMES.slice(0, 20)) assert.equal(C.cloth.offset(0, t, { gain, amp: 0.1 }, wind, 800, 7), 0, `gain ${gain}, t ${t}`);
+  }
+  for (const bad of [NaN, 'x', {}, Infinity]) {
+    for (const key of ['amp', 'wavelength', 'speed', 'gain', 'salt']) {
+      const o = C.cloth.parts(0.7, 1.3, { [key]: bad }, wind, 7);
+      assert.ok(Number.isFinite(o.offset) && Math.abs(o.offset) <= C.cloth.CAP, `${key}: ${bad} gives ${o.offset}`);
+    }
+    assert.deepEqual(C.cloth.parts(0.7, 1.3, { amp: bad }, wind, 7), C.cloth.parts(0.7, 1.3, {}, wind, 7), 'the default is used');
+  }
+  assert.ok(Number.isFinite(C.cloth.parts(NaN, 1.3, {}, wind, 7).offset));
+  // on a plate: a bad amp in the rig, a bad strip in the shot; every strip is still drawn at a finite place
+  const kit = await clothKit([{ box: 'cloak', root: 'top', amp: 'wide', gain: 0 }]);
+  const p = kit.C.plates.L4, c = p.cloths[0], { g, S } = kit.screen();
+  assert.equal(c.cfg.amp, 0.04);
+  for (const strip of [NaN, 'x', 0, -3]) {
+    const sp = kit.C.cloth.strip(p, { strip });
+    assert.ok(Number.isInteger(sp) && sp >= 1, `strip ${strip} gives ${sp}`);
+    const calls = kit.record(() => kit.C.stage(g, S, kit.C.camera(2), (st) => st.plate('L4', { cloth: { cloak: { strip, speed: NaN } } })));
+    const strips = calls.filter((k) => k.on === c.scratch.label);
+    assert.equal(strips.length, Math.ceil(c.len / sp));
+    assert.ok(strips.every((k) => k.args.every(Number.isFinite)));
+    assert.equal(strips[0].args[4], 0, 'the root strip');
+  }
+});
+
+test('cloth rig: the wind of the rig, then of the shot, then of this shot for one box', async () => {
+  const kit = await clothKit([{ box: 'cloak', root: 'top', amp: 0.1, wind: { dir: 'left', strength: 1, gust: 0 } }, { box: 'sleeve', root: 'right' }]);
+  const { C } = kit, p = C.plates.L4, { g, S } = kit.screen();
+  const tipX = (wind, o) => {
+    const calls = kit.record(() => C.stage(g, S, C.camera(2), (st) => { if (wind) st.wind = wind; st.plate('L4', o); }));
+    const strips = calls.filter((k) => k.on === p.cloths[0].scratch.label);
+    return strips[strips.length - 1].args[4];
+  };
+  const rig = tipX(), shot = tipX({ dir: 'right' }), box = tipX({ dir: 'right' }, { cloth: { cloak: { wind: { dir: 'left' } } } });
+  assert.ok(shot > rig, 'the shot wind turns the rig wind around');
+  assert.equal(box, rig, 'the wind given for this box in this shot wins over the shot wind');
+  assert.equal(tipX({ dir: 'right' }, { wind: { dir: 'left' } }), rig, 'st.plate(id, { wind }) wins over st.wind');
+});
+
 // ---- pose
 
 const CFG = { fps: 8, timeline: [{ at: 1, frame: 1 }, { at: 1.5, frame: 'hold' }, { at: 2, frame: 2 }, { at: 3.3, frame: 0 }] };
@@ -267,6 +329,22 @@ test('pose: the frame for a timeline at many t (boundaries, holds, the end, the 
   assert.deepEqual([0, 0.24, 0.25, 0.74, 0.99, 1, 1.3, 7.8, 123.5].map((t) => C.pose.frame(t, walk)), [0, 0, 1, 2, 3, 0, 1, 3, 2]);
   assert.equal(C.pose.frame(2.5, CFG, 2), 0, 'frame 2 of 2 frames');
   assert.equal(C.pose.frame(5, {}), 0);
+});
+
+test('pose: an unsorted timeline, an empty slot and a non-numeric fps still give the frame of the latest entry', () => {
+  const { C } = loadRigs();
+  const sorted = { fps: 8, timeline: [{ at: 0, frame: 0 }, { at: 1, frame: 1 }, { at: 1.5, frame: 'hold' }, { at: 2, frame: 2 }, { at: 3, frame: 0 }] };
+  const mixed = { fps: 8, timeline: [sorted.timeline[3], null, sorted.timeline[4], sorted.timeline[0], undefined, sorted.timeline[2], sorted.timeline[1]] };
+  for (const t of TIMES) assert.equal(C.pose.frame(t, mixed, 3), C.pose.frame(t, sorted, 3), `t ${t}`);
+  assert.deepEqual([0.5, 1, 1.7, 2, 2.9, 3, 50].map((t) => C.pose.frame(t, mixed, 3)), [0, 1, 1, 2, 2, 0, 0]);
+  // of two entries at the same time the later one in the list is shown
+  assert.equal(C.pose.frame(1, { timeline: [{ at: 1, frame: 1 }, { at: 1, frame: 2 }] }, 3), 2);
+  // an entry without `at` counts from 0
+  assert.equal(C.pose.frame(0.5, { timeline: [{ frame: 1 }] }, 3), 1);
+  for (const fps of [NaN, 'fast', {}]) {
+    for (const t of [0, 0.99, 1, 1.99, 2.5]) assert.equal(C.pose.frame(t, { ...sorted, fps }, 3), C.pose.frame(t, sorted, 3), `fps ${fps}, t ${t}`);
+    assert.equal(C.pose.at(1, { ...sorted, fps, blend: NaN }, 3).length, 1);
+  }
 });
 
 test('pose: a hard step by default; cross-dissolve weights sum to 1 and last at most 2 frames', () => {

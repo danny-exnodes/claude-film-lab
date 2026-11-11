@@ -17,7 +17,8 @@
 //
 // Root on a side: strips run across the cloth and shift sideways (root top/bottom) or up and down (root left/right).
 // The strip that touches the root has offset exactly 0 and the body fades out under the first strips, so the cloth
-// never tears from the body and no hard cut shows. The region is redrawn on a scratch canvas of its own size, then
+// never tears from the body and no hard cut shows (where the plate is translucent the first `feather` px are a little
+// denser: body and cloth overlap there). The region is redrawn on a scratch canvas of its own size, then
 // drawn once into the plate: pixels outside the box are never touched (keep transparent space in the box for the
 // swing). Load cloth.js after stage.js, strip-warp.js and eyelid.js (their cut-outs are sampled first).
 (function (root) {
@@ -26,6 +27,8 @@
   const CAP = 0.10, WIND_SALT = 4409;
   const DIRS = { right: 0, down: 90, left: 180, up: 270 };
   const WAVES = [[1, 1, 0.58], [1.7, 1.6, 0.28], [2.9, 2.3, 0.14]];   // [1 / wavelength, speed, weight]; weights sum 1
+  // A parameter as a finite number, else its default: one NaN would make every strip's offset NaN (nothing is drawn).
+  const num = (v, d) => (v != null && v !== '' && Number.isFinite(+v) ? +v : d);
 
   function windOf(...layers) {
     const w = { dir: 0, strength: 0.5, gust: 0.5 };
@@ -70,7 +73,7 @@
       }
       const w = x1 - x0, h = y1 - y0, len = axis === 'x' ? w : h;
       if (w < 8 || h < 8) { C.warn(`plate ${p.id}: cloth ${name} box is too small`); return; }
-      let amp = cfg.amp ?? 0.04;
+      let amp = num(cfg.amp, 0.04);
       if (!(amp >= 0)) amp = 0.04;
       if (amp > CAP) { C.warn(`plate ${p.id}: cloth ${name} amp ${amp} is over the cap; ${CAP} used`); amp = CAP; }
       const crop = C.canvas(w, h);
@@ -101,8 +104,9 @@
   C.cloth = {
     CAP,
     wind: windOf,
-    // 0 at the root .. 1 at the free edge; never decreases with u.
-    envelope: (u, cfg = {}) => Math.pow(C.clamp(u), cfg.gain ?? 1.5),
+    // 0 at the root .. 1 at the free edge; never decreases with u. The exponent is held at 0.1 or more: with 0 (or
+    // less) the envelope would be 1 (or infinite) on the root itself and the cloth would tear from the body.
+    envelope: (u, cfg = {}) => Math.pow(C.clamp(u), Math.max(0.1, num(cfg.gain, 1.5))),
     // The wind level every cloth of the shot shares at time t: 0 calm, about `strength` on average, up to 2 x in a gust.
     gust(t, wind, seed = C.seed) {
       const w = wind && wind.rad !== undefined ? wind : windOf(wind);
@@ -112,8 +116,8 @@
     // { env, flutter, lean, offset }. axis: 'y' (root top/bottom, the cloth shifts along x) | 'x' (it shifts along y).
     parts(u, t, cfg = {}, wind, seed = C.seed, axis = 'y') {
       const w = wind && wind.rad !== undefined ? wind : windOf(cfg.wind, wind);
-      const amp = Math.min(CAP, cfg.amp ?? 0.04), lambda = Math.max(0.05, cfg.wavelength ?? 0.9), speed = cfg.speed ?? 0.6;
-      const salt = cfg.salt ?? 31, uc = C.clamp(u), env = C.cloth.envelope(uc, cfg);
+      const amp = Math.min(CAP, num(cfg.amp, 0.04)), lambda = Math.max(0.05, num(cfg.wavelength, 0.9)), speed = num(cfg.speed, 0.6);
+      const salt = num(cfg.salt, 31), uc = C.clamp(num(u, 0)), env = C.cloth.envelope(uc, cfg);
       let wave = 0;
       WAVES.forEach(([k, sk, weight], i) => {
         const phase = C.hash(seed, 5 + i, salt) * C.TAU;
@@ -130,20 +134,23 @@
     offset: (u, t, cfg, wind, len = 1, seed = C.seed, axis = 'y') => len * C.cloth.parts(u, t, cfg, wind, seed, axis).offset,
     // Strip thickness in plate px: at most 4 stage px (about 4 px on screen at full size), whatever the plate's
     // resolution, and for the place the plate is drawn at (a pose plate is placed by its host).
-    strip: (p, cfg = {}) => Math.max(1, Math.round(C.clamp(cfg.strip ?? 3, 1, 4) / p.place.s)),
+    strip: (p, cfg = {}) => Math.max(1, Math.round(C.clamp(num(cfg.strip, 3), 1, 4) / p.place.s)),
     active: (p, o) => !!(p && !p.seq && p.cloths && p.cloths.length) && !(p.poses && o && o.poses !== false),
     // Drawn inside the plate's own pixel space, after the body. o: false | { <name>: {...} | false }.
     draw(g, p, t, o, wind) {
       for (const c of p.cloths || []) {
         const over = o && typeof o === 'object' ? o[c.name] : null;
         if (o === false || over === false) { g.drawImage(c.crop, c.x0, c.y0); continue; }
-        const cfg = over ? { ...c.cfg, ...over } : c.cfg, w = windOf(cfg.wind, wind);
+        // the wind: the rig's own, then the shot's (st.wind, st.plate(id, { wind })), then this shot's for this box
+        const cfg = over ? { ...c.cfg, ...over } : c.cfg, w = windOf(c.cfg.wind, wind, over && over.wind);
         const s = c.scratch.getContext('2d'), sp = C.cloth.strip(p, cfg);
         s.clearRect(0, 0, c.w, c.h);
         for (let pos = 0; pos < c.len; pos += sp) {
           // u is taken at the strip's edge nearest the root: the strip on the root has u = 0, offset exactly 0.
-          // Each strip is drawn two strips long; the next one covers its second half (no hairline seams).
-          const sw = Math.min(2 * sp, c.len - pos);
+          // The strips tile the scratch canvas without overlap: it is in the plate's own pixels (whole px along the
+          // root axis), so there is no hairline seam to cover, and a pixel drawn twice would double the alpha of every
+          // soft edge and translucent area (and shift the root strip when the root is the far edge).
+          const sw = Math.min(sp, c.len - pos);
           const edge = c.dir > 0 ? pos : Math.min(c.len, pos + sp);
           const u = (c.dir > 0 ? edge : c.len - edge) / c.len;
           const off = C.cloth.offset(u, t, cfg, w, c.len, C.seed, c.axis);

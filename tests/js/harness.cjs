@@ -1,6 +1,6 @@
 // Browser-free harness for the COMPOSE kit (tools/compose/*.js): a fake canvas whose 2D context tracks the transform
 // matrix, globalAlpha and globalCompositeOperation and records every drawImage, a fake Image that resolves
-// onload/decode with a given size, and a loader that evaluates the nine kit files in inline.py's ORDER.
+// onload/decode with a given size, and a loader that evaluates the kit files in inline.py's ORDER (an OPTIONAL file that is not there is skipped, as inline.py does).
 //
 // The kit is evaluated with `new Function` in the MAIN realm on purpose: under vm.createContext COMPOSE.load is
 // about 40 times slower (typed arrays and closures cross the realm boundary on every access).
@@ -18,6 +18,12 @@ function kitOrder() {
   const m = py.match(/^ORDER = \[([^\]]+)\]/m);
   if (!m) throw new Error('harness: ORDER not found in tools/compose/inline.py');
   return m[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, ''));
+}
+// inline.py's OPTIONAL set: files registered in ORDER before they exist.
+function kitOptional() {
+  const py = fs.readFileSync(path.join(KIT_DIR, 'inline.py'), 'utf8');
+  const m = py.match(/^OPTIONAL = \{([^}]*)\}/m);
+  return new Set(m ? m[1].split(',').map((s) => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean) : []);
 }
 
 const round = (v) => (typeof v === 'number' ? Math.round(v * 1e6) / 1e6 : v);
@@ -106,7 +112,9 @@ function createEnv(opts = {}) {
 // Evaluate the kit against a fresh fake window. Returns { C (= COMPOSE), env, screen(w, h), draws(from) }.
 function loadKit(opts = {}) {
   const env = createEnv(opts);
+  const optional = kitOptional();
   for (const f of kitOrder()) {
+    if (optional.has(f) && !fs.existsSync(path.join(KIT_DIR, f))) continue;
     const src = fs.readFileSync(path.join(KIT_DIR, f), 'utf8');
     new Function('window', 'Image', `${src}\n//# sourceURL=tools/compose/${f}`)(env.window, env.Image);
   }

@@ -349,8 +349,8 @@ class BudgetTest(StatusCase):
         code, out = self.run_status()
         jcode, d = self.data()
         self.assertEqual(code, jcode)
-        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "gate", "gates", "media", "next", "notes",
-                                     "shots", "stage"])
+        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "forecast", "gate", "gates", "media", "method",
+                                     "next", "notes", "shots", "stage"])
         for c in d["budget"]["caps"]:
             self.assertIn(f"{c['name']} {c['used']:g}/{c['cap']:g} ({c['left']:g} left)", out)
         self.assertEqual(len(d["attention"]["open"]), len(re.findall(r"^\s*OPEN\b", out, re.M)))
@@ -558,6 +558,242 @@ class GateTest(StatusCase):
         self.episode(stage=2)
         code, out = self.run_status("--gate", "G1")
         self.assertRegex(out, r"\[(ok|MISSING)\] check_episode: Summary: \d+ error\(s\), \d+ warning\(s\)")
+
+
+class ForecastCase(StatusCase):
+    HEADER = "shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of\n"
+
+    def method(self, value):
+        """Write `method: <value>` into the front matter (None removes the key)."""
+        md = re.sub(r"(?m)^method:.*\n", "", (self.ep / "EPISODE.md").read_text(encoding="utf-8"))
+        if value is not None:
+            md = md.replace("\nstage:", f"\nmethod: {value}\nstage:", 1)
+        (self.ep / "EPISODE.md").write_text(md, encoding="utf-8")
+
+    def shots(self, *lines):
+        (self.ep / "shots.csv").write_text(self.HEADER + "".join(l + "\n" for l in lines), encoding="utf-8")
+
+    def budget(self, images=40, video_seconds=30):
+        (self.ep / "budget.yaml").write_text(f"images: {images}\nvideo_seconds: {video_seconds}\n",
+                                             encoding="utf-8")
+
+
+class MethodTest(ForecastCase):
+    def test_missing_method_is_seedance_by_default(self):
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertIn("METHOD seedance (default, no method: in EPISODE.md)\n", out)
+        self.assertEqual(self.data()[1]["method"], {"name": "seedance", "source": "default", "raw": None})
+
+    def test_method_from_the_front_matter(self):
+        for value in ("layers", "seedance"):
+            self.method(value)
+            code, out = self.run_status()
+            self.assertEqual(code, 0, out)
+            self.assertIn(f"METHOD {value}\n", out)
+            self.assertEqual(self.data()[1]["method"], {"name": value, "source": "episode", "raw": value})
+
+    def test_invalid_method_is_shown_as_invalid_with_a_note(self):
+        for value, raw in (("paper", "paper"), ("Layers", "Layers"), ("[layers, seedance]", ["layers", "seedance"]),
+                           ("3", 3), ("", None)):
+            self.method(value)
+            code, out = self.run_status()
+            self.assertEqual(code, 0, value)
+            self.assertRegex(out, r"METHOD invalid \(.*\)", value)
+            self.assertRegex(out, r"note: EPISODE\.md: method = .* is not layers \| seedance", value)
+            m = self.data()[1]["method"]
+            self.assertEqual((m["name"], m["source"], m["raw"]), ("seedance", "invalid", raw), value)
+
+    def test_the_fixture_episode_prints_method_and_forecast(self):
+        code, out, err = run_main(st.main, [str(EPISODE_FIX)])
+        self.assertNotIn("Traceback", out + err)
+        self.assertRegex(out, r"(?m)^METHOD seedance$")   # the fixture states its method explicitly
+        self.assertRegex(out, r"(?m)^FORECAST")
+        self.assertRegex(out, r"(?m)^  images: \d+ to make of 9 layers")
+        self.assertRegex(out, r"(?m)^  video_seconds: 10 planned in 1 clip\(s\) \(s03 10\)")
+
+
+class ForecastTest(ForecastCase):
+    def test_layers_method_with_all_code_shots_plans_no_video(self):
+        self.method("layers")
+        self.shots("s01,0,8,wide,static,Núi,L1;L2,mist-bands,,wind,",
+                   "s02,8,15,medium,push-in,Nhân vật,L1;L4;P1-duoi,cloth,,drum,",
+                   "s03,15,30,wide,pan-left,Khép lại,L1;L2,mist-bands,,wind,s01")
+        self.prompts([("ep01_s01_L1_nui_v01.png", "s01", "L1", USAGE, "yes"),      # approved
+                      ("ep01_s01_L2_suong_v01.png", "s01", "L2", USAGE, ""),       # made, not reviewed yet
+                      ("ep01_s02_L1_nui_v01.png", "s02", "L1", "", ""),            # todo
+                      ("ep01_s02_L4_bac-thi_v01.png", "s02", "L4", USAGE, "no")])  # rejected -> one more image
+        self.put("plates", "ep01_s01_L1_nui_v01.png", "ep01_s01_L2_suong_v01.png", "ep01_s02_L4_bac-thi_v01.png")
+        code, d = self.data()
+        self.assertEqual(code, 0)
+        f = d["forecast"]
+        self.assertEqual(f["method"], "layers")
+        self.assertEqual({k: f["images"][k] for k in ("layers", "approved", "made", "lost", "to_make")},
+                         {"layers": 5, "approved": 1, "made": 1, "lost": 0, "to_make": 3})   # reuse shot not counted
+        self.assertEqual((f["images"]["left"], f["images"]["verdict"]), (40, "fits"))
+        self.assertEqual((f["video_seconds"]["planned"], f["video_seconds"]["clips"]), (0, []))
+        self.assertEqual(f["video_seconds"]["verdict"], "fits")
+        self.assertEqual((f["conflicts"], f["fits"]), ([], True))
+        code, out = self.run_status()
+        self.assertIn("FORECAST (method layers)\n", out)
+        self.assertIn("  images: 3 to make of 5 layers (1 approved, 1 made) · 40 left · fits\n", out)
+        self.assertIn("  video_seconds: 0 planned · 30 left · fits\n", out)
+        self.assertNotIn("CONFLICT", out)
+
+    def test_seedance_seconds_round_up_and_clamp_to_the_minimum(self):
+        self.shots("s01,0,3,wide,static,Núi,L1,,mist rolls,,",          # 3 s   -> 4 (Seedance minimum)
+                   "s02,3,9.2,medium,push-in,Thú,L1;L4,,tail sways,,",  # 6.2 s -> 7
+                   "s03,9.2,20,close,drift,Cận,L1;L4,,slow blink,,",    # has a clip already: not planned
+                   "s04,20,30,wide,static,Khép,L1,mist-bands,,,")       # code motion only
+        self.put("clips", "ep01_s03_seedance25_v01.mp4")
+        code, d = self.data()
+        v = d["forecast"]["video_seconds"]
+        self.assertEqual(v["planned"], 11)
+        self.assertEqual(v["clips"], [{"shot": "s01", "seconds": 4}, {"shot": "s02", "seconds": 7}])
+        self.assertEqual((v["left"], v["verdict"], d["forecast"]["fits"]), (30, "fits", True))
+        self.assertEqual(d["forecast"]["images"]["to_make"], 6)
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)                                   # a forecast never changes the exit code
+        self.assertIn("  video_seconds: 11 planned in 2 clip(s) (s01 4, s02 7) · 30 left · fits\n", out)
+
+    def test_whole_seconds_are_not_rounded_up_by_float_noise(self):
+        self.shots("s01,0.1,5.1,wide,static,Núi,L1,,mist rolls,,",      # 5.1 - 0.1 is not exactly 5.0 in floats
+                   "s02,5.1,10.2,wide,static,Núi,L1,,mist rolls,,")     # 5.1 s (give or take) -> 6
+        code, d = self.data()
+        self.assertEqual([c["seconds"] for c in d["forecast"]["video_seconds"]["clips"]], [5, 6])
+
+    def test_what_is_already_spent_counts_against_the_budget(self):
+        self.budget(images=8, video_seconds=12)
+        self.put("plates", "ep01_s01_L1_nui_v01.png")
+        self.rows([self.img("ep01_s01_L1_nui_v01.png", "ok", "aa01"),
+                   self.img("ep01_s01_L1_nui_v02.png", "cut-502", "aa02"),
+                   self.vid("ep01_s09_seedance25_v01.mp4", "failed", "bb01", seconds=5)])
+        self.prompts([("ep01_s01_L1_nui_v01.png", "s01", "L1", USAGE, "yes")])
+        code, d = self.data()
+        f = d["forecast"]                                                # SHOTS: 7 layers, s03 9.5 s of ai_motion
+        self.assertEqual((f["images"]["to_make"], f["images"]["left"], f["images"]["verdict"]), (6, 6, "fits"))
+        self.assertEqual((f["video_seconds"]["planned"], f["video_seconds"]["left"]), (10, 7))
+        self.assertEqual((f["video_seconds"]["verdict"], f["video_seconds"]["over"]), ("OVER by 3", 3))
+        self.assertIs(f["fits"], False)
+
+    def test_over_budget(self):
+        self.budget(images=5, video_seconds=8)
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertIn("  images: 7 to make of 7 layers · 5 left · OVER by 2\n", out)
+        self.assertIn("  video_seconds: 10 planned in 1 clip(s) (s03 10) · 8 left · OVER by 2\n", out)
+        f = self.data()[1]["forecast"]
+        self.assertEqual((f["images"]["over"], f["video_seconds"]["over"], f["fits"]), (2, 2, False))
+
+    def test_no_cap_is_not_over(self):
+        (self.ep / "budget.yaml").unlink()
+        code, d = self.data()
+        f = d["forecast"]
+        self.assertEqual((f["images"]["left"], f["images"]["verdict"], f["fits"]), (None, "no cap", True))
+        self.assertIn("  images: 7 to make of 7 layers · no cap\n", self.run_status()[1])
+
+    def test_layers_method_lists_ai_motion_shots_as_conflicts(self):
+        self.method("layers")
+        self.budget(video_seconds=0)
+        code, d = self.data()
+        f = d["forecast"]
+        self.assertEqual(f["conflicts"], ["method layers but s03 has ai_motion"])
+        self.assertEqual((f["video_seconds"]["planned"], f["video_seconds"]["clips"]), (0, []))
+        self.assertEqual(f["video_seconds"]["verdict"], "fits")
+        code, out = self.run_status()
+        self.assertIn("  CONFLICT: method layers but s03 has ai_motion\n", out)
+        self.method("seedance")
+        self.assertNotIn("CONFLICT", self.run_status()[1])
+
+    def test_pose_plates_are_separate_layers(self):
+        self.method("layers")
+        self.shots("s01,0,8,medium,static,Thú vồ mồi,L1;L4;L4b;L4c,pose-cycle,,roar,")
+        self.prompts([("ep01_s01_L4_bac-thi_v01.png", "s01", "L4", USAGE, "yes"),
+                      ("ep01_s01_L4b_bac-thi_v01.png", "s01", "L4b", USAGE, "")])
+        self.put("plates", "ep01_s01_L4_bac-thi_v01.png", "ep01_s01_L4b_bac-thi_v01.png")
+        code, d = self.data()
+        self.assertEqual({l["layer"]: l["state"] for l in d["shots"]["shots"][0]["layers"]},
+                         {"L1": "no-prompt", "L4": "approved", "L4b": "made", "L4c": "no-prompt"})
+        i = d["forecast"]["images"]
+        self.assertEqual((i["layers"], i["approved"], i["made"], i["to_make"]), (4, 1, 1, 2))
+
+    def test_malformed_numbers_are_noted_and_skipped(self):
+        self.shots("s01,0,soon,wide,static,Núi,L1,,mist rolls,,",
+                   "s02,,9,medium,push-in,Thú,L1,,tail sways,,",
+                   "s03,9,9,close,drift,Cận,L1,,slow blink,,",
+                   "s04,12,10,close,drift,Cận,L1,,slow blink,,",
+                   "s05,nan,inf,close,drift,Cận,L1,,slow blink,,",
+                   "s06,20,25,wide,static,Khép,L1,,mist rolls,,",
+                   "s07,x,y,wide,static,Không cần clip,L1,mist-bands,,,")   # no ai_motion: numbers not read
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        for shot in ("s01", "s02", "s03", "s04", "s05"):
+            self.assertRegex(out, rf"note: shots\.csv: {shot} .*not counted", shot)
+        self.assertNotRegex(out, r"note: shots\.csv: s0[67]")
+        self.assertIn("  video_seconds: 5 planned in 1 clip(s) (s06 5) · 30 left · fits\n", out)
+        code, d = self.data()
+        self.assertEqual(len(d["forecast"]["skipped"]), 5)
+        self.assertEqual(d["forecast"]["images"]["to_make"], 7)
+
+    def test_short_rows_and_a_missing_column_do_not_crash(self):
+        (self.ep / "shots.csv").write_text("shot,layers,ai_motion\ns01,L1,blink\ns02\n", encoding="utf-8")
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertRegex(out, r"note: shots\.csv: s01 .*not counted")
+        self.assertIn("  images: 1 to make of 1 layers", out)
+
+    def test_no_shots_csv_no_forecast(self):
+        (self.ep / "shots.csv").unlink()
+        code, out = self.run_status()
+        self.assertNotIn("FORECAST", out)
+        self.assertIsNone(self.data()[1]["forecast"])
+
+    def test_json_keys(self):
+        code, d = self.data()
+        self.assertEqual(set(d["method"]), {"name", "source", "raw"})
+        f = d["forecast"]
+        self.assertEqual(set(f), {"method", "images", "video_seconds", "conflicts", "skipped", "fits"})
+        self.assertEqual(set(f["images"]), {"layers", "approved", "made", "lost", "to_make", "left", "verdict",
+                                            "over"})
+        self.assertEqual(set(f["video_seconds"]), {"planned", "clips", "left", "verdict", "over"})
+
+    def test_gate_g2_checks_the_forecast(self):
+        self.episode(stage=4, G1=True)
+        self.prompts(ALL_APPROVED[:2])
+        self.put("plates", *[r[0] for r in ALL_APPROVED[:2]])
+        self.rows([self.img(ALL_APPROVED[0][0], "ok", "aa01")])
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("  [ok] forecast fits the budget (images 5 to make, 39 left; video_seconds 10 planned, "
+                      "30 left)\n", out)
+        self.budget(images=5, video_seconds=30)                          # 1 spent, 4 left, 5 to make
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("  [MISSING] forecast fits the budget (images 5 to make, 4 left: OVER by 1; "
+                      "video_seconds 10 planned, 30 left)\n", out)
+        self.assertIn("Gate G2: NOT READY (1 missing)", out)
+        code, g = self.gate("--gate", "G1")                              # only G2 asks for it
+        self.assertFalse([r for r in g["requirements"] if "forecast" in r["text"]])
+        (self.ep / "shots.csv").unlink()
+        code, g = self.gate("--gate", "G2")
+        self.assertIn("forecast fits the budget (no shots.csv)", self.missing(g))
+
+    def test_gate_g2_is_not_ready_when_a_clip_could_not_be_counted(self):
+        self.episode(stage=4, G1=True)
+        self.prompts(ALL_APPROVED[:2])
+        self.put("plates", *[r[0] for r in ALL_APPROVED[:2]])
+        self.rows([self.img(ALL_APPROVED[0][0], "ok", "aa01")])
+        self.shots("s01,0,8,wide,static,Núi,L1;L2,mist-bands,,,",
+                   "s02,8,soon,close,drift,Cận,L1,,slow blink,,")       # the forecast cannot price this clip
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("  [MISSING] forecast fits the budget (images 1 to make, 39 left; video_seconds 0 planned, "
+                      "30 left; clip of s02 not counted: fix from_s/to_s in shots.csv)\n", out)
+        self.shots("s01,0,8,wide,static,Núi,L1;L2,mist-bands,,,",
+                   "s02,8,12,close,drift,Cận,L1,,slow blink,,")
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("  [ok] forecast fits the budget (", out)
 
 
 class DegradeTest(StatusCase):

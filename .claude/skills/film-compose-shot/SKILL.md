@@ -21,12 +21,25 @@ không làm được (quay đầu, đứng dậy, vỗ cánh). **Không vẽ nh�
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.
 
+**Hai phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.**
+
+| `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |
+|---|---|---|---|
+| `layers` | code: `pose-cycle` (đổi bậc 2–4 plate tư thế), `cloth`, `strip-warp`, `foliage`; không khí `smoke`, `fire`, `embers`, `mist-bands`; máy quay | `references/layers-method.md` (quy tắc dàn cảnh, bảng tra, danh sách kiểm trước G3), `references/layers-character.md` | mục 4 của file này và `references/seedance-layer.md`: **không bao giờ yêu cầu clip**, không `keyframe.py`, không `matte_seq.py`, không lớp `seq` |
+| `seedance` (hoặc không có khóa) | clip Seedance đã tách nền (mục 4) | `references/seedance-layer.md` | plate tư thế `L4b`… và `pose-cycle` (khóa `L4b: { seq: … }` trong `PLATES` của `seedance-layer.md` là lớp clip, không phải plate tư thế) |
+
+Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì thêm chuyển động code hoặc cắt ngắn, và báo đạo diễn khi
+`shots.csv` đòi thứ `layers` không làm được (nước chảy, bay lượn); không tự chuyển sang clip.
+
 ## 0. Trước khi dựng (miễn phí)
 
 - Đầu vào: `projects/<project>/ep<NN>-<slug>/{EPISODE.md, shots.csv, anchors.json}`, lớp tranh đã duyệt trong
   `out/<project>/ep<NN>/plates/`, `styles/<id>/{style.yaml, motion.md, sound.md}`.
 - Mỗi `code_motion` trong `shots.csv` phải là id có trong `tools/compose/motions.json` (`mist-bands`, `embers`,
   `sun-glow`, `strip-warp`, `eyelid`, `breath`, `parallax`, `push-in`) và có trong `style.yaml` `motion:`.
+- `method: layers` còn dùng `smoke`, `fire`, `foliage`, `cloth`, `pose-cycle` (cũng phải có trong `motions.json` và
+  `style.yaml` `motion:`); `cloth` và `foliage` cần hộp neo, `pose-cycle` cần các plate tư thế ghi ở cột `layers`
+  (`L4b`, `L4c`…) và điểm neo chân chung. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
 - `strip-warp`, `eyelid`, `breath`, `push-in` cần điểm neo trong `anchors.json` (`tools/layers/anchors.py set`; hộp =
   cặp điểm `<tên>_tl`/`<tên>_br`; chi tiết `references/compose-api.md` §2).
 - Kiểm tra bộ mã: `python3 tools/compose/inline.py --lint`.
@@ -107,10 +120,28 @@ Khai trong `PLATES.<id>.rig`, chỉnh theo shot bằng tham số của `st.plate
   `blinks: [{ at, dur: 0.3 }]` hoặc `keys: [[t, 1], [t2, 0]]` (mắt mở dần một lần).
 - **breath**: phóng dọc 0,8 % quanh chân (`pivot: 'feet'`), chu kỳ 3–4 s.
 
-Trước khi chuyển sang clip Seedance trong cùng shot, đưa rig về nghỉ trong 0,5 s cuối
+Trước khi chuyển sang clip Seedance trong cùng shot (chỉ `method: seedance`), đưa rig về nghỉ trong 0,5 s cuối
 (`warp: { tail: { amp: 34 * (1 - COMPOSE.smooth((t - T + 0.5) / 0.5)) } }`), để cú chuyển không giật.
 
+## 3a. Phương pháp `layers`: cử động và không khí bằng code
+
+`pose-cycle` chỉ khi `method: layers`; `cloth`, `foliage`, `smoke`, `fire` là code nên tập `seedance` cũng dùng được khi
+style khai báo chúng. Chữ ký và tham số: `references/compose-api.md` (khói, lửa, tán cây),
+`references/layers-character.md` (vải, tư thế); số liệu của style: `styles/<id>/motion.md`.
+- **cloth** (rig `cloth` trên L4: áo choàng, tay áo, đai, tóc): sóng chạy từ mép dính vào thân ra mép tự do, mép dính
+  đứng yên; mọi vùng vải của một shot chung một hướng gió, lệch pha.
+- **pose-cycle** (rig `poses` trên L4): mỗi thời điểm vẽ đúng **một** plate tư thế, cắt thẳng trên lưới 8–12 fps, canh
+  theo điểm neo chân; không nội suy vị trí hay góc xoay của thân. Dịch chuyển chậm của cả hình là việc của máy quay.
+- **foliage** (rig trên vùng tán cây, bụi, cỏ của L2/L3): nghiêng nhẹ tăng theo chiều cao, gốc đứng yên.
+- **smoke** (`COMPOSE.smoke.plume`): cột khói từ một điểm gốc có độ sâu; nhiều cột lệch pha. Vẽ sau lớp chứa nguồn khói.
+- **fire** (`COMPOSE.fire.flames`, `COMPOSE.fire.glow`): lưỡi lửa blend `lighter` + ánh hắt lên lớp gần; đi cùng
+  `embers`. Không bao giờ chớp cả khung.
+- Mỗi shot giữ khung: ít nhất hai chuyển động độc lập cộng máy quay. Trước G3 chạy danh sách kiểm
+  `references/layers-method.md` §5.
+
 ## 4. Clip Seedance (cử động lớn)
+
+**Chỉ khi `method: seedance`** (hoặc `EPISODE.md` không có khóa `method`). Với `method: layers` bỏ qua cả mục này.
 
 Chỉ khi shot cần cử động code không làm được; mỗi clip tính phí: theo `references/seedance-layer.md`. Tóm tắt:
 khung đầu = nhân vật trên nền key phẳng đúng vị trí trên sân khấu 16:9 (`tools/compose/keyframe.py`, miễn phí) →
@@ -153,7 +184,7 @@ nhấp nháy và dòng `PLATES`; `--method rembg` chỉ để dự phòng: viề
 **"TOO STILL":** `make.py` đo phần thay đổi còn lại sau khi trừ chuyển động máy quay (ngưỡng 1,0 mức xám, mẫu 4
 khung/s, ảnh thu nhỏ). Cử động nhỏ trên lớp tranh nhạt màu gần như không lọt ngưỡng: shot thử 8 s qua được ở 2 s
 đầu (sương mở khung) nhưng sau đó chỉ đo được 0,2–0,45, và tăng gấp đôi đuôi, sương, tàn lửa cũng chỉ 0,5–0,8. Vì
-vậy một shot chỉ có lớp tranh giữ khung dài sẽ bị báo. Cách xử lý trong phim thật: cắt shot ngắn lại (3–5 s), thêm một hành động thật (clip Seedance, một vật
+vậy một shot chỉ có lớp tranh giữ khung dài sẽ bị báo. Cách xử lý trong phim thật: cắt shot ngắn lại (3–5 s), thêm một hành động thật (`method: seedance`: clip Seedance; `method: layers`: `pose-cycle`, `cloth`, khói hoặc lửa; cả hai: một vật
 lớn đi ngang khung, sương trước dày quét qua chủ thể), hoặc ghi vào `STATE.md` là cố ý (khoảng lặng trước sự kiện)
 và nói với người dùng trong một dòng. `make.py` chỉ giữ một lượt sửa; bản sau được giao kèm điều còn lại.
 

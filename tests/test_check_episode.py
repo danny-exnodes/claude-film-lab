@@ -554,6 +554,122 @@ class TestEpisodeBudget(EpisodeCase):
         self.assertNotIn("ledger_required", out)
 
 
+class TestEpisodeMethod(EpisodeCase):
+    """EPISODE.md `method: layers | seedance` (docs/CONVENTIONS.md §5): layers never uses Seedance."""
+    WARN = "WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers or method: seedance"
+
+    def method(self, value):
+        s = (self.ep / "EPISODE.md").read_text(encoding="utf-8")
+        s = re.sub(r"(?m)^method:.*\n", "", s)
+        if value is not None:
+            s = s.replace("stage: 5\n", f"method: {value}\nstage: 5\n", 1)
+        (self.ep / "EPISODE.md").write_text(s, encoding="utf-8")
+
+    def layers_clean(self, value="layers"):
+        self.method(value)
+        self.edit("shots.csv", ",,slow blink,,", ",breathe-test-id,,,")
+        (self.ep / "budget.yaml").write_text("images: 40\nvideo_seconds: 0\nledger_required: true\n", encoding="utf-8")
+
+    def test_helper(self):
+        self.assertEqual(ce.episode_method({}), ("seedance", False))
+        self.assertEqual(ce.episode_method({"method": "seedance"}), ("seedance", True))
+        self.assertEqual(ce.episode_method({"method": "  LAYERS "}), ("layers", True))
+        for bad in ("layer", "", None, 3, ["layers"], True):
+            self.assertEqual(ce.episode_method({"method": bad}), (None, True), bad)
+
+    def test_missing_key_is_one_warn_and_no_error(self):
+        self.method(None)
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertEqual(out.count(self.WARN), 1, out)
+        self.assertEqual(out.count("method"), 3, out)      # that one line only: s03 keeps its ai_motion
+
+    def test_fixture_states_its_method(self):
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("method", out)
+
+    def test_seedance_explicit_with_ai_motion_passes(self):
+        self.method("seedance")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("method", out)
+
+    def test_layers_with_ai_motion_is_error(self):
+        self.layers_clean()
+        self.edit("shots.csv", ",breathe-test-id,,,", ",,slow blink,,")
+        self.edit("shots.csv", "strip-warp,,drum", "strip-warp,  ,drum")       # blank ai_motion is empty
+        out = self.assert_error(r"shots\.csv:4: method layers: shot s03 has ai_motion; use code_motion or pose-cycle, "
+                                r"or set method: seedance$")
+        self.assertEqual(out.count("has ai_motion"), 1, out)
+
+    def test_layers_with_video_seconds_is_error(self):
+        self.layers_clean()
+        (self.ep / "budget.yaml").write_text("images: 40\nvideo_seconds: 30\nledger_required: true\n", encoding="utf-8")
+        out = self.assert_error(r"budget\.yaml: method layers: video_seconds = 30 must be 0")
+        self.assertEqual(out.count("ERROR"), 1, out)
+
+    def test_layers_with_seedance_model_cap_is_error(self):
+        self.layers_clean()
+        (self.ep / "budget.yaml").write_text(
+            "images: 40\nvideo_seconds: 0\nledger_required: true\n"
+            "models: {dola-SeeDance-2-0: 10, seedance-zero: 0, dola-seedream-5-0-pro: 6}\n", encoding="utf-8")
+        out = self.assert_error(r"budget\.yaml: method layers: models\.dola-SeeDance-2-0 = 10 must be 0")
+        self.assertEqual(out.count("ERROR"), 1, out)       # a 0 cap and an image model are fine
+
+    def test_layers_clean_passes(self):
+        self.layers_clean()
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("method", out)
+
+    def test_layers_budget_without_video_seconds_adds_no_method_error(self):
+        self.layers_clean()
+        (self.ep / "budget.yaml").write_text("images: 40\nledger_required: true\n", encoding="utf-8")
+        code, out, _ = self.check()
+        self.assertNotIn("method layers", out)
+
+    def test_invalid_value_is_error(self):
+        for bad in ("layer", "both", "", "[layers]"):
+            with self.subTest(value=bad):
+                self.method(bad)
+                out = self.assert_error(r"EPISODE\.md: method must be layers or seedance")
+                self.assertNotIn("method layers", out)      # no layers rule is applied on an invalid value
+                self.assertNotIn("has no method", out)
+
+    def test_case_and_whitespace_tolerant(self):
+        self.layers_clean('"  Layers "')
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.method("LAYERS   # comment")
+        self.edit("shots.csv", ",breathe-test-id,,,", ",,slow blink,,")
+        self.assert_error(r"method layers: shot s03 has ai_motion")
+        self.method(" SeeDance")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("method", out)
+
+    def test_broken_front_matter_does_not_add_the_warn(self):
+        self.edit("EPISODE.md", "series: test-series", "series: [test-series")
+        code, out, _ = self.check()
+        self.assertNotIn("has no method", out)
+
+    def test_episode_template_says_layers(self):
+        fm, _ = ce.split_front_matter(Path(ce.LAB, "templates/episode/EPISODE.md").read_text(encoding="utf-8"))
+        import yaml
+        self.assertEqual(ce.episode_method(yaml.safe_load(fm)), ("layers", True))
+
+    def test_templates_pass_together(self):
+        """EPISODE.md + budget.yaml copied from templates/episode must not contradict each other."""
+        shutil.copy(ce.LAB + "/templates/episode/budget.yaml", self.ep / "budget.yaml")
+        self.method("layers")
+        self.edit("shots.csv", ",,slow blink,,", ",,,,")
+        self.edit("EPISODE.md", "stage: 5", "stage: 3")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("budget.yaml", out)
+
+
 class TestEpisodeStageGates(EpisodeCase):
     def gates(self, stage, g1="null", g2="null", g3="null", g4="null"):
         self.edit("EPISODE.md", "stage: 5", f"stage: {stage}")

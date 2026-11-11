@@ -19,7 +19,8 @@ cho thấy thay vì kể, kiểm người xem lần đầu): tham chiếu `/root
 
 ## 0. Đọc trước
 
-1. `EPISODE.md` của tập: `length_s`, `style`, ghi chú người dùng, mục đã khóa (không viết lại câu đã khóa).
+1. `EPISODE.md` của tập: **`method` trước tiên** (`layers` hoặc `seedance`; không có khóa = `seedance`; mục 4a), rồi
+   `length_s`, `style`, ghi chú người dùng, mục đã khóa (không viết lại câu đã khóa).
 2. `projects/<project>/SERIES.md`: khán giả, ngôn ngữ, quy ước riêng.
 3. `styles/<style>/STYLE.md`, mục **`## Giọng kể và nhịp`**: giọng, tốc độ đọc, motif quen, nhịp cắt. Mục này thắng các
    mặc định dưới đây khi khác. Chưa có mục đó: dùng mặc định ở đây và ghi "chưa có giọng kể của style" vào báo cáo.
@@ -99,10 +100,40 @@ Mốc tăng dần, nằm trong `length_s`. Không dùng dấu gạch ngang ở b
   `ai_motion` trống = không dùng Seedance; chỉ dùng khi code không làm được (thân thú bước đi, nước chảy thật).
 - Trường có dấu phẩy phải đặt trong ngoặc kép. Danh sách tài sản dùng lại thể hiện qua `reuse_of` và mục Ghi chú.
 
+## 4a. Hai phương pháp dựng: viết theo đúng một nhánh
+
+`method` trong `EPISODE.md` do người dùng chọn ở khâu 0. Cả tập theo **một** nhánh; không trộn, không tự đổi. Thấy kịch
+bản cần thứ nhánh đang dùng không làm được: ghi vào báo cáo cho đạo diễn, không lén dùng nhánh kia.
+
+**`method: layers`** (chỉ ảnh + code, không Seedance; bảng tra đầy đủ:
+`.claude/skills/film-compose-shot/references/layers-method.md` §1–§2):
+- Cột `ai_motion` **để trống ở mọi shot** (`check_episode.py` báo ERROR nếu có).
+- Cột `action` viết bằng **tư thế giữ + chuyển động code có tên**, không viết động tác liên tục. Ví dụ: "kiếm khách
+  đứng quay lưng trên gờ đá, áo choàng và tóc bay (cloth), khói làng cháy bốc sau núi (smoke), máy đẩy vào chậm" thay
+  cho "kiếm khách bước tới mép đá".
+- `code_motion` dùng id của style: ngoài `mist-bands`, `embers`, `sun-glow`, `strip-warp`, `breath`, `eyelid`,
+  `parallax`, `push-in` còn có `cloth` (áo, tay áo, tóc), `foliage` (cây, bụi), `smoke`, `fire`, `pose-cycle`.
+- Hành động lớn (quay đầu, giơ tay, bước) = **đổi bậc giữa các plate tư thế**: ghi mỗi plate tư thế thành một mã lớp
+  thêm trong `layers` (`L4;L4b;L4c`…, `L4` là tư thế gốc) và `pose-cycle` trong `code_motion`; trong `action` gọi tên
+  từng tư thế ("L4 đứng nhìn xa · L4b ngoảnh đầu sang trái"). Mỗi plate thêm là một ảnh trả tiền: 1–2 cho một cử chỉ,
+  2–3 cho chu kỳ bước, và chỉ ở shot mà câu chuyện cần.
+- Mỗi shot giữ khung có ít nhất hai chuyển động code độc lập và một chuyển động máy (`camera` khác `static`, trừ
+  khoảng lặng cố ý ghi trong Ghi chú).
+- Nhịp: phần lớn shot **3–6 s** giữ tư thế có máy quay; dài hơn chỉ cho cảnh rộng có lia. Cần thấy "đang đi": cắt giữa
+  hai tư thế giữ ở hai nơi, hoặc chu kỳ bước tại chỗ với nền trôi. Nhân vật mặc định nhìn từ sau lưng hoặc ba phần tư sau.
+- Nước chảy, bay lượn, vật lộn, biến hình liên tục: không viết; đổi thành sương phủ mặt nước, tư thế trước và sau, cắt.
+- Dùng lại nền: một bối cảnh một bộ L1/L2/L3 cho nhiều shot (`reuse_of`), đổi khung bằng cỡ cảnh và máy quay.
+
+**`method: seedance`** (hoặc không có khóa): giữ nguyên quy tắc mục 4. `ai_motion` chỉ điền khi code không làm được
+(thân thú bước đi, quay đầu, vỗ cánh), mỗi clip **một** chuyển động, thời lượng clip gần bằng thời lượng shot; không dùng
+mã lớp `L4b`… hay `pose-cycle`.
+
 ## 5. Tự kiểm trước G1
 
 - Có Bash (phiên chính): `python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>` → sửa hết ERROR.
 - Không có Bash (agent `film-writer`): tự kiểm theo danh sách dưới, báo "chưa chạy check_episode"; đạo diễn chạy.
+- [ ] `method` của `EPISODE.md` đã đọc; `layers`: không shot nào có `ai_motion`, mọi hành động là tư thế giữ + id
+      `code_motion`, plate tư thế ghi thành `L4b`… kèm `pose-cycle`; `seedance`: không có `L4b`/`pose-cycle`.
 - [ ] Tổng thời lượng shot = `length_s`; shot 3–13 s; không hai shot liền nhau trùng cả cỡ cảnh và máy.
 - [ ] Mỗi câu có mốc, cách nhau ≥ 3 s; không dấu gạch ngang; một câu luận đề; kết có giây không lời.
 - [ ] Mỗi mệnh đề nguồn dùng trong phim có trong `research.md` nguyên văn + link; diễn giải được đánh dấu.

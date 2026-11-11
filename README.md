@@ -30,7 +30,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/ark.py` | CLI Ark: `ping`, `image`, `video`, có `--budget`/`--ledger`; `lambda-job prepare/finish` (ảnh qua Lambda vào ledger), `ledger-merge` |
 | `tools/check_episode.py` | Kiểm tra tập và style pack (schema, nhịp, tên file) |
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
-| `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, đung đưa, chớp mắt, thở |
+| `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, khói, lửa, lá lay, đung đưa, vải bay, đổi tư thế theo khung, chớp mắt, thở |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
 | `tools/layers/matte_seq.py` | Tách nền cả clip Seedance thành chuỗi khung, kèm số đo nhấp nháy |

@@ -70,7 +70,8 @@ models:
   pro: dola-seedream-5-0-pro-260628    # > 30 s: chỉ qua Lambda (lambda/README.md)
   video: dreamina-seedance-2-5-260628
 
-motion: [mist-bands, embers, sun-glow, strip-warp]   # id module trong tools/compose/, cách dùng: motion.md
+motion: [mist-bands, embers, sun-glow, strip-warp,     # id module trong tools/compose/, cách dùng: motion.md
+         smoke, fire, foliage, cloth, pose-cycle]       # năm id của method layers (motion.md)
 
 sound:
   scale: "D minor pentatonic"

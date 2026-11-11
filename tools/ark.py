@@ -5,6 +5,8 @@
   python3 ark.py image "prompt" out.png [--model seedream-5-0-lite-260128 | --fast] [--size 2K|2560x1440] [--ref a.png ...]
                        [--seed N] [--negative TEXT ...] [--guidance F] [--force] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
+  python3 ark.py image-batch JOBS.csv [--parallel N (default 3, max 4)] [--dry-run] [--only ID ...] [--fast]
+                       (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])     (`image-batch --help`: the CSV)
   python3 ark.py video "prompt" out.mp4 [--image first.png] [--model dreamina-seedance-2-5-260628]
                        [--ratio 16:9 (text-only; with --image the image decides)] [--duration 5]
                        [--resolution 480p|720p|1080p (default 720p)] [--no-audio] [--overwrite]
@@ -14,6 +16,11 @@
                        [--refs-dir DIR] [--payload FILE] [--overwrite] --ledger L.csv (--budget B.yaml | --no-budget)
   python3 ark.py lambda-job finish --status-json jobs/<job_id>.json [--job ID] [--image downloaded.jpg] [--out out.png] --ledger L.csv
   python3 ark.py ledger-merge A.csv B.csv [...] -o OUT.csv
+
+image-batch: every row of a CSV is one `image` request (same ledger rows, same guards, never retried). All rows are
+validated before anything is sent (exit 2 lists every problem), rows whose output file exists are skipped, the batch
+is checked against the caps as a whole before the first request (exit 3, one refused-budget row), then up to
+--parallel requests run at a time; each one still passes the atomic check below.
 
 lambda-job (lambda/README.md): pro and 4K images run on the AWS Lambda worker, outside the proxy. `prepare` does the
 same atomic budget check + 'pending' row as `image` and prints the Lambda payload (job_id = the request id);
@@ -40,8 +47,8 @@ Credentials: in a Claude cloud session the agent proxy injects the real Ark key
 for ark.ap-southeast.bytepluses.com, so this script sends a placeholder. Outside
 that proxy, set ARK_API_KEY. Never print, log or search for the key.
 """
-import argparse, base64, csv, datetime, difflib, fcntl, http.client, io, json, mimetypes, os, re, signal, sys, time
-import uuid
+import argparse, base64, contextlib, csv, datetime, difflib, fcntl, http.client, io, json, mimetypes, os, re, signal
+import sys, threading, time, uuid
 import urllib.request, urllib.error
 
 BASE = os.environ.get("ARK_BASE", "https://ark.ap-southeast.bytepluses.com/api/v3")
@@ -159,7 +166,7 @@ EXT_FORMAT = {".png": ("PNG", "image/png"), ".jpg": ("JPEG", "image/jpeg"),
               ".jpeg": ("JPEG", "image/jpeg"), ".webp": ("WEBP", "image/webp")}
 
 
-def save_image(raw, out):
+def save_image(raw, out, quiet=False):
     """Write raw bytes, converting so the content matches the file extension."""
     want = EXT_FORMAT.get(os.path.splitext(out)[1].lower())
     got = sniff_mime(raw)
@@ -169,7 +176,8 @@ def save_image(raw, out):
         if want[0] == "JPEG" and im.mode not in ("RGB", "L"):
             im = im.convert("RGB")
         im.save(out, want[0])
-        print(f"converted {got} -> {want[1]}")
+        if not quiet:
+            print(f"converted {got} -> {want[1]}")
     else:
         open(out, "wb").write(raw)
 
@@ -358,16 +366,26 @@ def checked_budget(a, kind, model):
     if a.no_budget:
         return None
     budget = load_budget(a.budget)
+    need_cap(a, budget, kind, model)
+    need_ledger(a, budget)
+    return budget
+
+
+def need_cap(a, budget, kind, model):
+    """Exit 2 when no cap of the budget covers a request of this kind and model."""
     cap = "images" if kind == "image" else "video_seconds"
     if budget[cap] is None and budget["models"].get(model) is None:
         usage_error(f"budget {a.budget} has no cap for {kind} ({model}): add `{cap}:` or `models: {{{model}: N}}`")
+
+
+def need_ledger(a, budget):
+    """Exit 2 for `ledger_required: true` without a ledger file."""
     if budget["ledger_required"] and not (os.path.exists(a.ledger) and os.path.getsize(a.ledger)):
         print(f"error: {a.budget} has ledger_required: true but {a.ledger} does not exist (or is empty).\n"
               "Pull the episode's ledger.csv from Drive first (04_SanXuat/ep<NN>-<slug>/ledger.csv, "
               "docs/CONVENTIONS.md §11.6). Only when Drive has none yet (no image/video made for this episode): "
               f"python3 tools/ark.py ledger-merge -o {a.ledger}", file=sys.stderr)
         sys.exit(USAGE_EXIT)
-    return budget
 
 
 def _num(x):
@@ -605,6 +623,357 @@ def image(a):
         raise
     log_row(a, req, rid, "ok", **final)
     print("usage", json.dumps(r.get("usage", {})))
+
+
+# --- image-batch: a CSV of plates, one `image` request per row -------------------
+# Not implemented on purpose (GitHub issue #28): Ark's asynchronous Batch API (cheaper batch pricing) and Seedream's
+# sequential / group image generation. Neither has been verified on this account and both need paid requests to
+# test, so a batch here is N ordinary synchronous requests at the normal price (docs/MODELS.md).
+BATCH_COLUMNS = ("id", "prompt", "out", "size", "model", "ref", "seed", "negative")
+BATCH_REQUIRED = ("id", "prompt", "out")
+BATCH_PARALLEL = 3
+BATCH_MAX_PARALLEL = 4
+FORCE_HINT = " (--force sends it anyway)"      # guard_proxy_cut's hint; a batch has no --force
+# a failed request after which every further request would fail the same way: stop scheduling new rows
+BATCH_STOP_RE = re.compile(r"^HTTP 40[13]\b|overdue|arrears|insufficient.{0,20}balance|"
+                           r"balance.{0,20}(insufficient|not enough)", re.I)
+
+BATCH_HELP = f"""\
+Generate every row of JOBS.csv as one `ark.py image` request (same ledger rows, same guards, never retried).
+
+JOBS.csv is UTF-8 with a header row. Columns (any other column is an error):
+  id        required, unique; names the row in every message and in --only
+  prompt    required; the prompt text, or @FILE to read it from a file (path relative to the CSV)
+  out       required; output file, relative to the current directory like `image` (not to the CSV); unique
+  size      1K, 2K or <W>x<H> up to about 2K (default 2K)
+  model     model id; empty = {IMAGE_DEFAULT}, or {IMAGE_FAST} with --fast
+  ref       reference image paths separated by ';' (relative to the current directory)
+  seed      integer, sent as 'seed'
+  negative  text, sent as 'negative_prompt'
+
+1. Every row is validated before anything is sent or written; exit 2 lists every problem with its row id.
+   A row whose output file already exists (size > 0) is not a problem: it is skipped (`skip <id>: output exists`),
+   so a batch can be run again after an interruption without paying twice. There is no --overwrite: to redo a
+   plate, give the row a new out (_v<NN> + 1).
+2. The rows left are counted against every cap of the budget before the first request; over a cap: the numbers,
+   one refused-budget ledger row for the batch, exit 3, nothing sent.
+3. Up to --parallel requests run at a time. Each one is checked against the budget again when it starts (the same
+   atomic check as `image`) and writes its pending and final ledger rows. A failed row does not stop the others;
+   a budget refusal, HTTP 401/403 or an account-balance error stops new rows from starting (rows in flight finish),
+   and so does SIGINT/SIGTERM (exit 130/143). One line per finished row:
+     ok|failed|cut-502 <id> <out> <seconds>s
+   then `batch: N ok, N failed, N cut-502, N skipped, N not started · images used U/CAP`.
+
+Exit codes: 0 nothing failed · 1 at least one request left this machine and failed (see its ledger row; it may
+have been billed, do not rerun blindly) · 2 validation, nothing sent · 3 budget.
+--dry-run does steps 1 and 2 only: prints the plan and the budget after the batch, writes nothing.
+"""
+
+
+def _refusal(fn, *args):
+    """Run a local guard that exits through usage_error(); return (its message or None, its return value)."""
+    buf = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(buf):
+            return None, fn(*args)
+    except SystemExit:
+        msg = buf.getvalue().strip()
+        return (msg[7:] if msg.startswith("error: ") else msg).replace(FORCE_HINT, ""), None
+
+
+def read_jobs(a):
+    """Phase 1: parse and validate every row of the jobs CSV. Returns (to send, skipped), each a list of job dicts
+    in CSV order; any problem in any row is exit 2 with all of them listed. Nothing is written or sent here."""
+    try:
+        with open(a.jobs, newline="", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            header = reader.fieldnames
+            raw = []
+            for r in reader:
+                raw.append((reader.line_num, r))
+    except (OSError, UnicodeDecodeError, csv.Error) as e:
+        usage_error(f"cannot read {a.jobs} ({getattr(e, 'strerror', None) or type(e).__name__}): "
+                    "a UTF-8 CSV with a header row is expected")
+    if not header:
+        usage_error(f"{a.jobs}: no header row (columns: {','.join(BATCH_COLUMNS)})")
+    header = [h.strip() for h in header]
+    unknown = [h for h in header if h not in BATCH_COLUMNS]
+    if unknown:
+        usage_error(f"{a.jobs}: unknown column(s) {', '.join(repr(h) for h in unknown)} "
+                    f"(allowed: {','.join(BATCH_COLUMNS)})")
+    missing = [h for h in BATCH_REQUIRED if h not in header]
+    if missing or len(set(header)) != len(header):
+        usage_error(f"{a.jobs}: " + (f"missing column(s) {', '.join(missing)}" if missing else "a column is repeated")
+                    + f" (required: {','.join(BATCH_REQUIRED)})")
+    if not raw:
+        usage_error(f"{a.jobs}: no rows")
+    base = os.path.dirname(os.path.abspath(a.jobs))
+    default_model = IMAGE_FAST if a.fast else IMAGE_DEFAULT
+    problems, jobs, ids, outs = [], [], {}, {}
+    for line, r in raw:
+        v = {h.strip(): (x or "").strip() for h, x in r.items() if h is not None}
+        v = {k: v.get(k, "") for k in BATCH_COLUMNS}
+        label = v["id"] or f"line {line}"
+
+        def bad(msg, label=label):
+            problems.append(f"{label}: {msg}")
+        if r.get(None):
+            bad("more cells than the header has columns (quote a prompt that contains a comma)")
+        if not v["id"]:
+            bad("id is empty")
+        elif v["id"] in ids:
+            problems.append(f"line {line}: duplicate id {v['id']!r} (first on line {ids[v['id']]})")
+        else:
+            ids[v["id"]] = line
+        prompt = v["prompt"]
+        if prompt.startswith("@"):
+            path = os.path.join(base, prompt[1:])
+            try:
+                with open(path, encoding="utf-8") as f:
+                    prompt = f.read().strip()
+            except (OSError, UnicodeDecodeError) as e:
+                bad(f"prompt file {path}: cannot read it ({getattr(e, 'strerror', None) or type(e).__name__})")
+                prompt = None
+        if prompt == "":
+            bad("prompt is empty")
+        exists = False
+        if not v["out"]:
+            bad("out is empty")
+        else:
+            key = os.path.realpath(v["out"])        # one file through two paths (a symlinked folder) is one out
+            if key in outs:
+                bad(f"out {v['out']} is the same file as row {outs[key]}")
+            elif os.path.isdir(key):
+                bad(f"out {v['out']} is a directory")
+            else:
+                outs[key] = label
+                exists = os.path.exists(key) and os.path.getsize(key) > 0
+        size, model = v["size"] or "2K", v["model"] or default_model
+        msg, _ = _refusal(guard_proxy_cut, model, size)
+        if msg:
+            bad(msg)
+        refs = [x.strip() for x in v["ref"].split(";") if x.strip()]
+        for path in refs:
+            msg, _ = _refusal(need_files, [path])
+            if msg:
+                bad(msg)
+        seed = None
+        if v["seed"]:
+            try:
+                seed = int(v["seed"])
+            except ValueError:
+                bad(f"seed must be an integer, not {v['seed']!r}")
+        jobs.append({"id": v["id"], "prompt": prompt, "out": v["out"], "size": size, "model": model, "refs": refs,
+                     "seed": seed, "negative": v["negative"], "exists": exists})
+    for wanted in a.only or []:
+        if wanted not in ids:
+            problems.append(f"--only: no row with id {wanted!r}")
+    chosen = [j for j in jobs if not a.only or j["id"] in a.only]
+    todo, skipped = [j for j in chosen if not j["exists"]], [j for j in chosen if j["exists"]]
+    # refs of the rows that will be sent are re-encoded now, once per file: a file that is not an image is a
+    # validation problem, not a request that fails after its neighbours were paid for
+    uris, notes = {}, []
+    for j in todo:
+        for path in j["refs"]:
+            if path in uris or not os.path.isfile(path):
+                continue
+            msg, got = _refusal(encode_ref, path)
+            if msg:
+                problems.append(f"{j['id'] or '?'}: {msg}")
+                uris[path] = None
+            else:
+                uris[path] = "data:image/jpeg;base64," + base64.b64encode(got[0]).decode()
+                notes.append(got[1])
+        j["ref_uris"] = [uris.get(path) for path in j["refs"]]
+    if problems:
+        print(f"error: {a.jobs}: {len(problems)} problem(s), nothing sent, nothing written:\n  "
+              + "\n  ".join(problems), file=sys.stderr)
+        sys.exit(USAGE_EXIT)
+    for note in notes:
+        print("ref", note)
+    return todo, skipped
+
+
+def _image_units(rows, model=None):
+    """Billed image units in ledger rows; with `model`, the units of that model (any kind, like budget_check)."""
+    return sum(units(r) for r in billed_requests(rows)
+               if (r.get("model") == model if model else r.get("kind") == "image"))
+
+
+def batch_caps(budget, rows, todo):
+    """Phase 2 numbers: [(cap name, used, needed, cap)] for every cap the batch touches."""
+    caps = []
+    if budget and todo:
+        if budget["images"] is not None:
+            caps.append(("images", _image_units(rows), len(todo), budget["images"]))
+        for model in sorted({j["model"] for j in todo}):
+            if budget["models"].get(model) is not None:
+                caps.append((f"models.{model}", _image_units(rows, model),
+                             sum(1 for j in todo if j["model"] == model), budget["models"][model]))
+    return caps
+
+
+def batch_ledger_rows(a):
+    try:
+        return ledger_rows(a.ledger)
+    except (OSError, UnicodeDecodeError) as e:
+        _unreadable_ledger(a.ledger, e)
+
+
+def batch_row(a, job, budget):
+    """One row = one `image` request: pending row (atomic budget check), POST, save, final row. Never retried.
+    Returns (ok|failed|cut-502, detail). A SystemExit out of reserve() means nothing was sent."""
+    req = {"kind": "image", "model": job["model"], "size": job["size"], "count": 1, "out": job["out"]}
+    body = {"model": job["model"], "prompt": job["prompt"], "size": job["size"], "response_format": "b64_json",
+            "watermark": False}
+    if job["seed"] is not None:
+        body["seed"] = job["seed"]
+    if job["negative"]:
+        body["negative_prompt"] = job["negative"]
+    if job["ref_uris"]:
+        body["image"] = job["ref_uris"] if len(job["ref_uris"]) > 1 else job["ref_uris"][0]
+    make_out_dir(job["out"])
+    rid = new_req()
+    reserve(a, req, rid, budget=budget)
+    job["reserved"] = True          # from here on the request counts as sent, whatever goes wrong
+    try:
+        r = api("POST", "/images/generations", body)
+    except BaseException as e:
+        log_row(a, req, rid, fail_status(e), err_note(e))
+        return fail_status(e), err_note(e)
+    final = {}
+    try:
+        data = r.get("data") or []
+        final = dict(count=max(1, len(data)), usage=json.dumps(r.get("usage", {}), separators=(",", ":")))
+        if not data:
+            raise ValueError("no image in the response")
+        stem, ext = os.path.splitext(job["out"])
+        for n, d in enumerate(data):
+            out = job["out"] if n == 0 else f"{stem}-{n}{ext}"
+            # `out` only ever holds a complete file: a rerun skips a row by its output file. The request id keeps
+            # the temporary name clear of every other row's out and of files already in the folder
+            part = f"{os.path.splitext(out)[0]}.{rid}.part{ext}"
+            try:
+                save_image(base64.b64decode(d["b64_json"]), part, quiet=True)
+                os.replace(part, out)
+            finally:
+                if os.path.exists(part):
+                    os.remove(part)
+    except BaseException as e:
+        log_row(a, req, rid, "failed", "save-failed: " + err_note(e), **final)
+        return "failed", f"save-failed: {err_note(e)} (generated and billed, not saved)"
+    log_row(a, req, rid, "ok", **final)
+    return "ok", ""
+
+
+def image_batch(a):
+    todo, skipped = read_jobs(a)                                    # phase 1: exit 2
+    check_ledger_header(a.ledger)
+    budget = None if a.no_budget else load_budget(a.budget)
+    if budget and todo:
+        for model in sorted({j["model"] for j in todo}):
+            need_cap(a, budget, "image", model)
+        need_ledger(a, budget)
+    for j in skipped:
+        print(f"skip {j['id']}: output exists ({j['out']})")
+    if a.dry_run:
+        for j in todo:
+            print(f"send {j['id']} {j['model']} {j['size']} {j['out']}")
+    caps = batch_caps(budget, batch_ledger_rows(a), todo)           # phase 2: exit 3
+    over = [f"{name}: {used:g} used + {need:g} requested > cap {cap}" for name, used, need, cap in caps
+            if used + need > cap]
+    if over:
+        note = f"batch of {len(todo)}: " + "; ".join(over)
+        if not a.dry_run:
+            models = {j["model"] for j in todo}
+            ledger_append(a.ledger, {"kind": "image", "model": models.pop() if len(models) == 1 else "",
+                                     "count": len(todo), "status": "refused-budget", "out": a.jobs, "note": note})
+        print(f"REFUSED (budget {a.budget}): {note}\nNothing was sent to the API. Shrink the batch (--only) or ask "
+              "the user (main session) to raise the cap in budget.yaml.", file=sys.stderr)
+        sys.exit(BUDGET_EXIT)
+    if a.dry_run:
+        after = "; ".join(f"{name} {used:g} used + {need:g} = {used + need:g}/{cap}" for name, used, need, cap in caps)
+        print(f"dry-run: {len(todo)} to send, {len(skipped)} skipped · budget after the batch: "
+              + (after or ("no budget (--no-budget)" if not budget else "nothing to send")))
+        return 0
+
+    # phase 3: bounded parallelism; every request does its own atomic reserve()
+    lock = threading.Lock()
+    queue = list(todo)
+    count = {"ok": 0, "failed": 0, "cut-502": 0}
+    state = {"stop": None, "code": 0, "signal": None}
+
+    def stop(reason, code=0, unsent=None):
+        with lock:
+            if unsent:
+                queue.insert(0, unsent)
+            state["stop"] = state["stop"] or reason
+            state["code"] = state["code"] or code
+
+    def worker():
+        while True:
+            with lock:
+                if state["stop"] or not queue:
+                    return
+                job = queue.pop(0)
+                # the output appeared since validation (a second run of the same CSV): never paid for twice
+                if os.path.exists(job["out"]) and os.path.getsize(job["out"]) > 0:
+                    skipped.append(job)
+                    sys.stdout.write(f"skip {job['id']}: output exists ({job['out']})\n")
+                    sys.stdout.flush()
+                    continue
+            t0 = time.time()
+            try:
+                status, detail = batch_row(a, job, budget)
+            except SystemExit as e:             # reserve(): over a cap (3) or a ledger it cannot count (2); not sent
+                code = e.code if isinstance(e.code, int) and e.code else USAGE_EXIT
+                why = "refused by the budget" if code == BUDGET_EXIT else "refused locally"
+                return stop(f"{job['id']}: {why}", code, job)
+            except Exception as e:
+                if not job.get("reserved"):     # before the request left (e.g. the output folder): not sent
+                    return stop(f"{job['id']}: {err_note(e)}", USAGE_EXIT, job)
+                # the request left and its final ledger row could not be written (disk full, ledger gone): it is a
+                # failed request, never a row to run again, and no further request may start without a ledger
+                status, detail = "failed", f"ledger row not written: {err_note(e)} (sent, may have been billed)"
+                stop(f"{job['id']}: {detail}")
+            line = f"{status} {job['id']} {job['out']} {time.time() - t0:.1f}s" + (f" · {detail}" if detail else "")
+            with lock:
+                count[status] += 1
+                sys.stdout.write(line + "\n")
+                sys.stdout.flush()
+            if status != "ok" and BATCH_STOP_RE.search(detail):
+                stop(f"{job['id']}: {detail}")
+
+    def on_signal(signum, frame):       # no lock here: the handler may interrupt the main thread anywhere
+        state["signal"] = state["signal"] or signum
+        state["stop"] = state["stop"] or f"interrupted by {signal.Signals(signum).name}"
+
+    sys.stdout.flush()
+    try:
+        prev = {s: signal.signal(s, on_signal) for s in (signal.SIGTERM, signal.SIGINT)}
+    except ValueError:                  # not the main thread: no handler, the default behaviour stays
+        prev = {}
+    try:
+        threads = [threading.Thread(target=worker, name=f"image-batch-{n}") for n in range(min(a.parallel, len(todo)))]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()                    # in-flight rows always finish and write their final rows
+    finally:
+        for s, h in prev.items():
+            signal.signal(s, h)
+    if state["stop"]:
+        print(f"stopped: {state['stop']}; {len(queue)} row(s) not started (run the same command again for them "
+              "once the cause is fixed)", file=sys.stderr)
+    used = f"{_image_units(batch_ledger_rows(a)):g}" if a.ledger else "-"
+    cap = budget["images"] if budget and budget["images"] is not None else "-"
+    print(f"batch: {count['ok']} ok, {count['failed']} failed, {count['cut-502']} cut-502, {len(skipped)} skipped, "
+          f"{len(queue)} not started · images used {used}/{cap}")
+    if state["signal"]:
+        return 128 + state["signal"]
+    if count["failed"] or count["cut-502"]:
+        return 1
+    return state["code"]
 
 
 def video(a):
@@ -894,7 +1263,7 @@ def ledger_merge(a):
           f"{sum(units(r) for r in billed if r.get('kind') == 'video'):g} video second(s)")
 
 
-def add_cost_args(sp):
+def add_cost_args(sp, overwrite=True):
     sp.add_argument("--ledger", default=None,
                     help="ledger.csv: a pending row before the call and a final row after it (env FILM_LEDGER); "
                          "see docs/CONVENTIONS.md §7")
@@ -903,8 +1272,16 @@ def add_cost_args(sp):
                          "(env FILM_BUDGET). Required together with --ledger unless --no-budget")
     sp.add_argument("--no-budget", action="store_true",
                     help="run without a budget (ad-hoc tests in the main session only; --ledger optional)")
-    sp.add_argument("--overwrite", action="store_true",
-                    help="replace an existing output file (ad-hoc use; a plate or clip gets a new _v<NN> instead)")
+    if overwrite:
+        sp.add_argument("--overwrite", action="store_true",
+                        help="replace an existing output file (ad-hoc use; a plate or clip gets a new _v<NN> instead)")
+
+
+def batch_parallel(text):
+    n = int(text)
+    if not 1 <= n <= BATCH_MAX_PARALLEL:
+        raise argparse.ArgumentTypeError(f"must be 1..{BATCH_MAX_PARALLEL}, not {n}")
+    return n
 
 
 def positive_int(text):
@@ -931,6 +1308,18 @@ i.add_argument("--guidance", type=float, default=None, help="sent as 'guidance_s
 i.add_argument("--force", action="store_true",
                help="send a size above 2K, an unknown size or a pro model despite the proxy cutoff")
 add_cost_args(i)
+ib = sp.add_parser("image-batch", help="one `image` request per row of a CSV: validated first, budget checked for "
+                    "the whole batch, bounded parallelism, existing outputs skipped",
+                    description=BATCH_HELP, formatter_class=argparse.RawDescriptionHelpFormatter)
+ib.add_argument("jobs", metavar="JOBS.csv", help="the jobs CSV (columns above)")
+ib.add_argument("--parallel", type=batch_parallel, default=BATCH_PARALLEL, metavar="N",
+                help=f"requests in flight at a time, 1..{BATCH_MAX_PARALLEL} (default {BATCH_PARALLEL}; 1 = sequential)")
+ib.add_argument("--dry-run", action="store_true",
+                help="validate, print the plan and the budget after the batch; sends nothing, writes nothing")
+ib.add_argument("--only", nargs="+", metavar="ID", default=None,
+                help="only these row ids (put JOBS.csv before --only); the whole CSV is still validated")
+ib.add_argument("--fast", action="store_true", help=f"rows with an empty model column use {IMAGE_FAST}")
+add_cost_args(ib, overwrite=False)
 v = sp.add_parser("video")
 v.add_argument("prompt", nargs="?", help="text prompt (omit with --resume-task)")
 v.add_argument("out", nargs="?", help="output .mp4 (with --resume-task: optional, default the out in the ledger)")
@@ -1011,6 +1400,12 @@ def main(argv=None):
             return lambda_finish(a)
         check_cost_args(a)
         return lambda_prepare(a)
+    if a.cmd == "image-batch":
+        check_cost_args(a)
+        code = image_batch(a)
+        if code:
+            sys.exit(code)
+        return
     if a.cmd not in ("image", "video"):
         return ping(a)
     check_cost_args(a)

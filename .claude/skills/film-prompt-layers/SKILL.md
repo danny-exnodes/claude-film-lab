@@ -12,7 +12,7 @@ description: >-
 **Mã tập (`docs/CONVENTIONS.md` §2):** ví dụ dưới đây viết `ep<NN>` (dự án không chia quyển: thư mục `ep01-<slug>`, media `out/<project>/ep01/`, file `ep01_s03_...`). Dự án chia quyển dùng `q<NN>t<NN>`: thư mục tập `q01-t01-<slug>`, media `out/<project>/q01t01/`, file `q01t01_s03_L4_bac-di_v02.png`, clip `q01t01_s03_seedance25_v01.mp4`, bản dựng `q01t01_draft_v01.mp4`. Đọc mã tập từ `EPISODE.md` (`book` + `episode`) / tên thư mục tập, không tự đổi.
 
 Ai dùng: `film-art-director` (khâu 3: viết thiết kế và prompt, **không tạo ảnh**), `film-plate-maker` (khâu 4–5: tạo ảnh,
-tách nền, neo). Hợp đồng file: `docs/CONVENTIONS.md` §2, §3, §6, §7. Model và giới hạn: `docs/MODELS.md`.
+tách nền, neo). Hai phương pháp dựng (`method` trong `EPISODE.md`): `seedance` theo mục 3–4, `layers` thêm mục 4a. Hợp đồng file: `docs/CONVENTIONS.md` §2, §3, §6, §7. Model và giới hạn: `docs/MODELS.md`.
 
 ## 1. style.yaml quyết định mọi thứ
 
@@ -77,6 +77,44 @@ FILM_AGENT=film-plate-maker python3 tools/ark.py image "$(cat <prompt_file>)" \
 - **502 sau ~30 s:** ledger ghi `cut-502`; **không thử lại** (có thể đã tính phí). Báo đạo diễn.
 - Mã thoát 3 (`refused-budget`): dừng ngay, báo đạo diễn số đã dùng và trần.
 - Phiên bản luôn tăng (`_v01`, `_v02`…), không ghi đè. Song song tối đa 3 plate-maker, mỗi agent nhóm shot riêng.
+
+## 4a. Phương pháp `layers`: bộ tư thế và tạo theo lô
+
+Đọc `method` trong `EPISODE.md` trước. Mục này **chỉ** áp dụng khi `method: layers`; với `method: seedance` (hoặc không
+có khóa) làm đúng mục 3–4 như cũ, không thiết kế bộ tư thế, không viết `jobs.csv`. Quy tắc dàn cảnh và bảng tra:
+`.claude/skills/film-compose-shot/references/layers-method.md`.
+
+**Bộ tư thế (khâu 3, art-director).** Shot có `pose-cycle` trong `code_motion` liệt kê plate tư thế thành mã lớp thêm
+(`L4` gốc, `L4b`, `L4c`…). Mỗi plate tư thế:
+- cùng khung vẽ (cùng `size`), cùng tỉ lệ nhân vật, **cùng vị trí bàn chân** với L4 gốc (ghi điểm neo `feet` chung);
+- ảnh khóa (hoặc L4 gốc của shot) làm `--ref`; nền phẳng đúng `matte.per_layer.L4` của style; không bóng đổ, không mặt đất;
+- **chỉ đổi một chi hoặc một mảng áo** so với plate trước (đầu ngoảnh, một tay giơ, một chân bước); mọi thứ khác giữ nguyên;
+- số plate: ngoảnh đầu 2 · giơ tay, rút kiếm 2–3 · bước đi nhìn từ sau 3–4 (tính cả `L4` gốc);
+- mẫu prompt của style nếu có: `prompts/character-cel.txt` (nhân vật 2D tô phẳng, mặc định nhìn từ sau), `prompts/pose-set.txt`
+  (`{subject}` = đúng một thay đổi, vd. "the head turned to the left"). Tên file: `<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`.
+- Vải, tóc, đuôi, cây lay động **không** cần plate: đó là `cloth`, `strip-warp`, `foliage` trên chính lớp đó; chỉ cần
+  hộp neo. Không viết prompt lớp `P` cho thứ chỉ lay nhẹ.
+
+**`jobs.csv` (khâu 3 viết, khâu 4–5 chạy).** Một file cho mỗi nhóm shot, lưu `<thư mục tập>/prompts/jobs-<nhóm>.csv`,
+header đúng thứ tự: `id,prompt,out,size,model,ref,seed,negative`
+- `id` duy nhất trong file (vd. `s03-L4b`); `prompt` là nguyên văn prompt đã ghép, hoặc `@<file prompt>` (đường dẫn
+  tương đối với file CSV); `out` = đường dẫn ảnh theo CONVENTIONS §2; `size` theo `layers.<lớp>.size`; `ref` cách nhau
+  bởi `;`; `negative` từ `style.yaml`.
+- **Dòng có `ref` dùng model flash** (`models.draft` của style, ghi id vào cột `model`): lite + `--ref` ở 2K bị proxy
+  cắt 502 (mục 4). Dòng không `ref` để trống `model` (mặc định `models.image`). Không pro, không 4K trong lô.
+- Xếp nền dùng chung (L1/L2/L3 của một bối cảnh) vào lô của shot đầu tiên dùng nó; shot `reuse_of` không có dòng nào.
+- Mỗi dòng vẫn có một file prompt trong `prompts/` và một dòng `prompts.csv` như mục 3.5.
+
+**Chạy lô (khâu 4–5, plate-maker):**
+```
+FILM_AGENT=<tên-agent> python3 tools/ark.py image-batch <jobs.csv> --budget B --ledger L --dry-run
+FILM_AGENT=<tên-agent> python3 tools/ark.py image-batch <jobs.csv> --budget B --ledger L [--parallel N]
+```
+`--dry-run` (miễn phí) in kế hoạch và số ảnh sau lô: chạy trước, sửa mọi lỗi dòng. Ảnh đã có trên đĩa được bỏ qua nên
+chạy lại sau khi bị ngắt không tạo lại. Mã thoát như `ark.py image` (2 sửa `jobs.csv`, 3 vượt trần, 1 có request lỗi);
+dòng `cut-502` không thử lại. Sau lô: tách alpha từng plate (mục 5; plate tư thế `L4b`… tách với `--layer L4`, cùng
+cách tách với L4 gốc), và kiểm bộ tư thế bằng cách chồng các plate đã tách
+lên nhau: bàn chân trùng, cỡ thân trùng; lệch thì báo đạo diễn, không tự tạo lại.
 
 ## 5. Tách alpha, kiểm, neo
 

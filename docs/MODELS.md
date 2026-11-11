@@ -29,6 +29,11 @@ Kiểm tra ngày 2026-11-10 trên tài khoản Ark của Film Lab. Model trong C
   vẫn tính phí); `dola-seedream-5-0-flash` ở 2K/2560x1440 kèm `--ref` chạy ~75 ảnh không một lần 502.
   → **Lớp tranh sản xuất dùng flash (`--fast`)**; lite chỉ dùng khi không có `--ref`.
 - Link video (`*.tos-ap-southeast-1.volces.com`) có hạn dùng → tải về ngay (ark.py đã làm).
+- `ark.py image-batch` gửi N request `image` đồng bộ thông thường (tối đa 4 cùng lúc), **giá từng ảnh như cũ**: nó giảm
+  chi phí nhờ không tạo lại ảnh đã có và chặn cả lô trước khi vượt trần, không nhờ giá lô. **Chưa xác minh** (issue #28,
+  cần request trả tiền để thử, nên chưa làm): Batch API bất đồng bộ của Ark (giá lô) và chế độ tạo chuỗi ảnh
+  (sequential / group image generation) của Seedream. Giới hạn tốc độ (HTTP 429) khi chạy 3–4 request song song cũng
+  chưa đo; gặp 429 thì chạy lại với `--parallel 1`.
 
 ## Kiểm tra miễn phí
 - Video: gửi tham số sai (vd. `resolution: "9999p"`) → `InvalidParameter` = đã kích hoạt, `ModelNotOpen` = chưa.

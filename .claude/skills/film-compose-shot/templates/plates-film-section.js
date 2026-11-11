@@ -6,6 +6,7 @@
 // Motion ids (style.yaml `motion:`, shots.csv `code_motion`) -> calls:
 //   mist-bands -> COMPOSE.mist.band / bands / open · embers -> COMPOSE.embers.draw · sun-glow -> COMPOSE.glow.sun
 //   strip-warp -> PLATES.<id>.rig.warp · eyelid -> PLATES.<id>.rig.eyes · breath -> PLATES.<id>.rig.breath
+//   smoke -> COMPOSE.smoke.plume · fire -> COMPOSE.fire.flames / glow · foliage -> PLATES.<id>.rig.sway
 // Everything is a pure function of (t, SEED): no Math.random, Date or performance.now (inline.py refuses them).
 
 // Cues are shared by picture and sound, so a hit on screen and its sound land on the same frame.

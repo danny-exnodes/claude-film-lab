@@ -6,6 +6,8 @@ title: <Tên dự án>
 style: <style-id>                # style mặc định của mọi tập, styles/<style-id>/
 audience: "<ai xem, độ tuổi, nền tảng, khung hình>"
 language: vi
+# method: layers                # (tuỳ chọn, chỉ để ghi nhớ) cách dựng mặc định của dự án: layers | seedance. Công cụ chỉ đọc
+                                 # method: trong EPISODE.md của từng tập (docs/CONVENTIONS.md §5)
 format: {width: 1920, height: 1080, fps: 24}
 ---
 

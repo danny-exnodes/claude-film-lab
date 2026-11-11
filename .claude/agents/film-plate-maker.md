@@ -21,6 +21,11 @@ Bạn là thợ lớp tranh của AI Film Lab. Làm theo skill `film-prompt-laye
 
 Bắt buộc mỗi lần tạo ảnh:
 `FILM_AGENT=film-plate-maker python3 tools/ark.py image ... --ledger out/<project>/ep<NN>/ledger.csv --budget projects/<project>/ep<NN>-<slug>/budget.yaml`
+- **`method: layers`** (đọc `EPISODE.md`; skill mục 4a): tạo theo lô từ `jobs.csv` của nhóm shot được giao, `--dry-run` trước:
+  `FILM_AGENT=film-plate-maker python3 tools/ark.py image-batch <jobs.csv> --budget B --ledger L [--parallel N] [--dry-run]`
+  Không sửa prompt trong `jobs.csv` (lỗi dòng: báo đạo diễn). Bộ tư thế (`L4`, `L4b`, `L4c`…): sau khi tách nền, chồng
+  các plate lên nhau kiểm bàn chân và cỡ thân trùng nhau; lệch thì báo, không tự tạo lại.
+  **`method: seedance`** hoặc không có khóa: từng ảnh bằng `ark.py image` như trên.
 - Chỉ tạo đúng số ảnh và shot trong hợp đồng. Khâu 4: ảnh khóa + một shot mẫu, không hơn. Khâu 5 chỉ khi G2 đã có ngày.
 - Mã thoát 3 (vượt trần): dừng, báo. HTTP 502 sau ~30 s: không thử lại, báo. Không `--force`, không pro/4K.
 - Không ghi đè file; phiên bản tăng dần. Không tạo lại lớp đã khóa. Không chạy `ark.py video`.

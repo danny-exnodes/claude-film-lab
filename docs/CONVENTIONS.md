@@ -80,6 +80,10 @@ Regex chuẩn (dùng trong `tools/check_episode.py`; `<ID>` = `(?:ep\d{2}|q\d{2}
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
+Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
+`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4`
+(`matte.py --layer L4`). Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/<id>/{plates,clips,renders}/`.
 Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1); khung gốc trước khi
 tách nền: `clips/<tên clip không đuôi>/raw/000001.png`.
@@ -174,6 +178,7 @@ episode: 1               # số tập (trong quyển nếu có book)
 slug: bac-thi
 style: thuy-mac
 length_s: 60
+method: layers           # cách dựng: layers | seedance (xem dưới)
 stage: 2                 # 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/q01t01
@@ -184,6 +189,12 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 `media` = `out/<project>/<id>`; `drive` = `ClaudeFilmLab/<ProjectName>/03_KichBan/<thư mục tập>` (`ep<NN>-<slug>` hoặc
 `q<NN>-t<NN>-<slug>`; ID thư mục lấy từ `PROJECT.md`, không tìm theo tên). `media`/`drive` lệch quy ước → WARN;
 `book`/`episode` lệch tên thư mục tập, hoặc thư mục media/tiền tố file khác mã tập → ERROR.
+`method` = cách dựng của tập, chọn cùng người dùng ở khâu 0, sau G1 không tự đổi (phải hỏi người dùng):
+`layers` = chỉ dùng model ảnh, tách lớp, ghép lớp và làm chuyển động từng thành phần bằng code, không gọi Seedance;
+`seedance` = cử động nhân vật bằng clip Seedance. Không phân biệt hoa thường; giá trị khác → ERROR
+`method must be layers or seedance`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
+mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
+hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
@@ -196,6 +207,8 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 - `camera` = một chuyển động (`static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down, drift, handheld`).
   Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
+  Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
+  `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in); id lạ là WARN.
@@ -210,7 +223,7 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 `budget.yaml`:
 ```yaml
 images: 40               # tổng số ảnh tối đa (mọi model)
-video_seconds: 60        # tổng giây video tối đa
+video_seconds: 60        # tổng giây video tối đa; tập `method: layers` (§5) phải ghi 0
 models:                  # (tuỳ chọn) trần riêng theo model, đơn vị ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6
 ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có: buộc kéo ledger từ Drive trước; bật từ khâu 4
@@ -257,6 +270,16 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
   và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
   Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
+- **Tạo ảnh theo lô** (`ark.py image-batch JOBS.csv --budget B --ledger L [--parallel N] [--dry-run] [--only ID …] [--fast]`):
+  mỗi dòng CSV (`id,prompt,out,size,model,ref,seed,negative`; `prompt` dạng `@file` đọc từ file cạnh CSV, `ref` cách nhau
+  bởi `;`, `model` trống = model mặc định hoặc flash khi có `--fast`) là **một** request `image` với đúng các dòng
+  `pending` + dòng cuối ở trên, không thử lại. Kiểm mọi dòng trước khi gửi (mã 2, liệt kê hết lỗi theo `id`); dòng đã có
+  file đầu ra thì **bỏ qua** (`skip <id>: output exists`) nên chạy lại sau khi bị ngắt không trả tiền hai lần, không có
+  `--overwrite`; cả lô vượt một trần → **một** dòng `refused-budget` (`note` = `batch of N: …`), mã 3, không gửi gì; rồi
+  chạy tối đa `--parallel` request cùng lúc (mặc định 3, tối đa 4), từng request vẫn qua bước nguyên tử. Một dòng lỗi
+  không dừng các dòng khác; bị từ chối ngân sách giữa chừng, HTTP 401/403, lỗi số dư tài khoản hoặc SIGINT/SIGTERM
+  (mã 130/143) thì thôi không bắt đầu dòng mới, dòng đang chạy vẫn ghi dòng cuối. Mã 1 = có request đã rời máy và lỗi.
+  `--dry-run` chỉ kiểm và in kế hoạch, không ghi ledger. Chi tiết: `ark.py image-batch --help`.
 - **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
   `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
   của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay

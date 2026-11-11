@@ -33,13 +33,13 @@ flowchart TD
 
 | # | Khâu | Ai làm | Đầu ra | Cổng |
 |---|---|---|---|---|
-| 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, trần chi phí |
+| 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, **phương pháp dựng**, trần chi phí |
 | 1 | Nghiên cứu nguồn | `film-researcher` | `research.md` (nguyên văn, link, cách đọc tên) | – |
 | 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
-| 5 | Lớp tranh | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
-| 6 | Clip AI | `film-animator` (nền) | `out/.../clips/` | – |
+| 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
+| 6 | Clip AI (**chỉ `method: seedance`**; `layers` bỏ qua khâu này) | `film-animator` (nền) | `out/.../clips/` | – |
 | 7 | Dựng shot, âm thanh | `film-compositor` | film.html theo shot, `review/sound-audit.md` | – |
 | 8 | Dựng cả tập | `film-compositor` | bản nháp 960×540 | **G3** (tối đa 2 vòng sửa) |
 | 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc sản phẩm, ghi qc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
@@ -50,6 +50,26 @@ Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, khôn
 `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe` từ G3; file chỉ được ghi
 khi có `--out`); còn ERROR thì chưa trình duyệt.
 
+### Hai phương pháp dựng
+
+Mỗi tập chọn **một** phương pháp ở khâu 0, ghi `method: layers | seedance` trong `EPISODE.md` (không có khóa = `seedance`;
+tập mới từ mẫu = `layers`). Không trộn trong một tập. Cả hai dùng chung khâu 0–5 và 7–11, cổng G1–G4, ledger, quy trình
+sửa theo ghi chú và lưu lịch sử.
+
+| | `layers` | `seedance` |
+|---|---|---|
+| Cái gì tạo chuyển động | code trên lớp tranh: vải, tóc (`cloth`), đuôi, cỏ (`strip-warp`), cây (`foliage`), khói (`smoke`), lửa (`fire`, `embers`), sương (`mist-bands`), máy quay; hành động lớn = đổi bậc 2–4 plate tư thế (`pose-cycle`, 8–12 fps) | như `layers` cho không khí và máy quay; cử động lớn của nhân vật là clip Seedance đã tách nền |
+| Trả tiền cho | ảnh (model giá thấp, tạo theo lô `ark.py image-batch`, nền dùng lại giữa các shot) | ảnh + giây video (phần đắt nhất của tập đầu tiên) |
+| Khâu chạy | 0–5, 7–11; **khâu 6 bỏ qua** | 0–11 |
+| `budget.yaml` | `video_seconds: 0` | `video_seconds` > 0 |
+| `shots.csv` | `ai_motion` trống; plate tư thế = mã lớp `L4b`, `L4c`… | `ai_motion` ở shot cần clip |
+| Nhân vật | giữ tư thế, không trượt, không xoay; thường nhìn từ sau lưng | cử động liên tục được (bước, quay đầu, vỗ cánh) |
+| Chọn khi | cần chi phí thấp; chuyện kể bằng không khí, máy quay, tư thế; phong cách tranh + nhân vật 2D tô phẳng | tập cần cử động thân thể liên tục mà code không làm được (đi, bay, vật lộn) và có ngân sách video |
+
+Trước G2 đạo diễn đưa người dùng mục `FORECAST` của `python3 tools/status.py <thư mục tập>` (ảnh còn phải tạo, giây
+video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản muốn gì → làm thế nào" và danh sách kiểm trước G3 của
+`layers`: `.claude/skills/film-compose-shot/references/layers-method.md`.
+
 ## 3. Agents
 
 | Agent | Vai | Skill nạp sẵn | Công cụ | Model | Ghi chú |
@@ -59,7 +79,7 @@ khi có `--out`); còn ERROR thì chưa trình duyệt.
 | `film-writer` | Biên kịch | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash |
 | `film-art-director` | Thiết kế, prompt lớp | `film-prompt-layers` | Read, Write, Edit, Glob, Grep | opus | `memory: project`, không tạo ảnh |
 | `film-plate-maker` | Tạo, tách lớp tranh | `film-prompt-layers` | Bash, Read, Write, Edit, Glob, Grep | sonnet | `FILM_AGENT`, `--ledger/--budget` |
-| `film-animator` | Clip Seedance | – | Bash, Read, Write, Glob | sonnet | `background: true`, `--ledger/--budget` |
+| `film-animator` | Clip Seedance | – | Bash, Read, Write, Glob | sonnet | `background: true`, `--ledger/--budget`; chỉ `method: seedance` |
 | `film-compositor` | Dựng, âm thanh, render | `film-compose-shot`, `cinecode` | Bash, Read, Write, Edit, Glob, Grep | opus | một agent mỗi tập; không gọi ark.py |
 | `film-reviewer` | Kiểm tra độc lập | – | Read, Write, Edit, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode; chỉ ghi `review/qc-*.md` và MEMORY.md |
 | `film-publisher` | Xuất bản YouTube | – | Read, Write, Edit, Glob, Grep | sonnet | `publish.md`, không tự đăng |

@@ -116,9 +116,87 @@ class TestInlineDeterminism(FilmCase):
         self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_kit_lint(self):
+        """The lint line counts the files really inlined: ORDER minus the OPTIONAL ones that are not there yet."""
+        order = re.search(r"(?m)^ORDER = \[([^\]]+)\]", INLINE.read_text(encoding="utf-8"))
+        names = re.findall(r'"([^"]+\.js)"', order[1])
+        for f in ("smoke.js", "fire.js", "foliage.js", "cloth.js", "pose.js"):
+            self.assertIn(f, names)
+        self.assertLess(names.index("strip-warp.js"), names.index("cloth.js"))
+        self.assertLess(names.index("strip-warp.js"), names.index("pose.js"))
+        there = [f for f in names if (INLINE.parent / f).is_file()]
+        missing = [f for f in names if f not in there]
+        self.assertLessEqual(set(missing), {"cloth.js", "pose.js"})
+        self.assertGreaterEqual(len(there), 12)
         r = run(INLINE, "--lint")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"compose kit v\S+: 9 files, lint ok")
+        self.assertRegex(r.stdout, rf"compose kit v\S+: {len(there)} files, lint ok")
+        if missing:
+            self.assertIn(f"(optional, not there yet: {', '.join(missing)})", r.stdout)
+
+
+class TestInlineKitFiles(FilmCase):
+    """ORDER lists cloth.js and pose.js before they exist: only those two may be missing."""
+    def setUp(self):
+        super().setUp()
+        self.kit = self.tmp / "lab" / "tools" / "compose"            # a copy of the kit: the repo is never edited
+        self.kit.mkdir(parents=True)
+        for f in INLINE.parent.iterdir():
+            if f.suffix in (".js", ".py", ".json"):
+                shutil.copy(f, self.kit / f.name)
+        tpl = Path(".claude") / "skills" / "film-compose-shot" / "templates" / "plates-film-section.js"
+        (self.tmp / "lab" / tpl).parent.mkdir(parents=True)
+        shutil.copy(REPO / tpl, self.tmp / "lab" / tpl)
+        for f in ("cloth.js", "pose.js"):
+            (self.kit / f).unlink(missing_ok=True)
+
+    def count(self):
+        r = run(self.kit / "inline.py", "--lint")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return int(re.search(r": (\d+) files, lint ok", r.stdout)[1]), r.stdout
+
+    def test_optional_files_are_skipped_until_they_exist(self):
+        n, out = self.count()
+        self.assertIn("(optional, not there yet: cloth.js, pose.js)", out)
+        r = run(self.kit / "inline.py", self.film, "--init")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"inlined ({n} files, ", r.stdout)
+        html = self.html()
+        for f in ("smoke.js", "fire.js", "foliage.js"):
+            self.assertEqual(html.count(f"// ---- tools/compose/{f}\n"), 1, f)
+        self.assertNotIn("// ---- tools/compose/cloth.js", html)
+        self.assertNotIn("// ---- tools/compose/pose.js", html)
+        self.assertLess(html.find("// ---- tools/compose/strip-warp.js"), html.find("// ---- tools/compose/foliage.js"))
+        self.assertLess(html.find("// ---- tools/compose/mist.js"), html.find("// ---- tools/compose/smoke.js"))
+
+        (self.kit / "cloth.js").write_text("// COMPOSE cloth (stub)\n", encoding="utf-8")
+        n2, out = self.count()
+        self.assertEqual(n2, n + 1)
+        self.assertIn("(optional, not there yet: pose.js)", out)
+        self.assertEqual(run(self.kit / "inline.py", self.film).returncode, 0)
+        html = self.html()
+        self.assertLess(html.find("// ---- tools/compose/strip-warp.js"), html.find("// ---- tools/compose/cloth.js"))
+        # cloth cuts its region out of the plate at load: it must come after the rigs that sample the whole plate
+        self.assertLess(html.find("// ---- tools/compose/eyelid.js"), html.find("// ---- tools/compose/cloth.js"))
+        (self.kit / "pose.js").write_text("// COMPOSE pose (stub)\n", encoding="utf-8")
+        n3, out = self.count()
+        self.assertEqual(n3, n + 2)
+        self.assertNotIn("not there yet", out)
+
+    def test_an_optional_file_is_linted_like_the_rest(self):
+        (self.kit / "pose.js").write_text("const x = Math.random();\n", encoding="utf-8")
+        r = run(self.kit / "inline.py", "--lint")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("pose.js:1", r.stderr)
+
+    def test_a_missing_required_file_fails_and_leaves_the_film_alone(self):
+        (self.kit / "smoke.js").unlink()
+        before = self.html()
+        for args in (("--lint",), (self.film, "--init")):
+            r = run(self.kit / "inline.py", *args)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("FAILED: kit file tools/compose/smoke.js: cannot be read", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+        self.assertEqual(self.html(), before)
 
 
 class TestInlineQc(FilmCase):

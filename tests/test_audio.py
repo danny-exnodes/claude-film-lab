@@ -383,6 +383,50 @@ class TestScoreValidation(ScoreCase):
         self.assertEqual(code, 2)
         self.assertIn("--out", err)
 
+    def test_pitch_curve_too_high_is_refused_before_rendering(self):
+        """The base pitch passes, the bend, vibrato or glide does not: an ERROR at validation, not a traceback."""
+        for opt in ({"bend": [[0, 0], [1, 24]]}, {"vib": [5, 2, 0]}, {"glide": ["B7", 0.5], "vib": [5, 0.5, 0]}):
+            ev = dict({"t": 0, "inst": "guqin", "pitch": "A#7", "dur": 1.5}, **opt)
+            err = self.refused(self.variant(music=[ev, {"t": 0, "inst": "erhu", "pitch": "D3"}]),
+                               "music[0]", "too high for the string model", "unknown instrument")
+            self.assertNotIn("Traceback", err)
+        code, _, err = self.run_score(self.variant(music=[{"t": 0, "inst": "guqin", "pitch": "D3", "dur": 1,
+                                                           "bend": [[0, 0], [0.5, 12]], "vib": [5, 0.3]}]), "--dry-run")
+        self.assertEqual(code, 0, err)
+
+    def test_out_that_is_a_file_is_refused(self):
+        target = self.tmp / "audio"
+        target.write_text("keep", encoding="utf-8")
+        code, _, err = self.run_score(BASE, "--out", str(target))
+        self.assertEqual(code, 2, err)
+        self.assertIn("not a folder", err)
+        self.assertEqual(target.read_text(encoding="utf-8"), "keep")
+
+    def test_score_with_a_bom_and_crlf_is_read(self):
+        p = self.tmp / "bom.json"
+        p.write_bytes(b"\xef\xbb\xbf" + json.dumps(BASE, indent=1).replace("\n", "\r\n").encode("utf-8"))
+        code, out, err = helpers.run_main(score.main, [str(p), "--dry-run"])
+        self.assertEqual(code, 0, err)
+
+    def test_very_short_sounds_render(self):
+        """A few samples of any sound or note must render (ink_drop under 18 ms used to crash after validation)."""
+        for n in (1, 3, 480):
+            for name, spec in sfx.SOUNDS.items():
+                x = spec["fn"](dur=n / sfx.SR, seed=1)
+                self.assertEqual(len(x), n, name)
+                self.assertTrue(np.all(np.isfinite(x)), name)
+            for kw in ({}, {"bend": [(0, 0), (1, 2)]}, {"harmonic": 2}):
+                x = pluck.pluck("guqin", "D3", n / sfx.SR, release=0, **kw)
+                self.assertEqual(len(x), n)
+                self.assertTrue(np.all(np.isfinite(x)))
+        out = self.tmp / "short"
+        code, _, err = self.run_score({"length_s": 1, "foley": [{"t": 0, "sound": "ink_drop", "dur": 0.01}],
+                                       "music": [{"t": 0, "inst": "guqin", "pitch": "D3", "dur": 0.00002, "release": 0.00002,
+                                                  "bend": [[0, 0], [1, 2]]}]}, "--out", str(out))
+        self.assertEqual(code, 0, err)
+        self.refused({"length_s": 1, "music": [{"t": 0, "inst": "koto", "pitches": ["D3", "A3"], "dur": 0.000001, "release": 0}]},
+                     "music[0]", "would be empty")
+
     def test_scale_and_tail_are_warnings(self):
         d = self.variant(music=[{"t": 0, "inst": "guqin", "pitch": "E3", "dur": 1}, {"t": 5.5, "inst": "guqin", "pitch": "D3", "dur": 2},
                                 {"t": 1.2, "inst": "guqin", "pitch": "D3", "dur": 1, "harmonic": 3}])

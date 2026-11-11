@@ -324,9 +324,10 @@ def ink_drop(dur=0.5, intensity=0.5, pitch=1.0, seed=0):
     d = min(n, nsamp(0.018))
     tb = np.arange(n - d) / SR
     bub = np.sin(2 * np.pi * (520 * p * tb + 0.5 * 5200 * p * tb ** 2)) * np.exp(-tb / 0.045)
-    wet = bp(rng.standard_normal(n - d), 350 * p, 1500 * p) * np.exp(-tb / 0.03)
     y = tink * (0.6 + 0.4 * a)
-    y[d:] += 0.8 * bub + 0.5 * wet / (np.abs(wet).max() + 1e-9)
+    if n > d:                                                  # shorter than 18 ms: the tink alone
+        wet = bp(rng.standard_normal(n - d), 350 * p, 1500 * p) * np.exp(-tb / 0.03)
+        y[d:] += 0.8 * bub + 0.5 * wet / (np.abs(wet).max() + 1e-9)
     return _finish(y, n, intensity)
 
 

@@ -328,6 +328,16 @@ def validate(score, seed=None):
                     n = pluck.strum_length(name, len(ev["pitches"]), ev["dur"], ev.get("spread", 0.025), harmonic, ev.get("release"))
                 else:
                     n = pluck.length(name, ev.get("dur"), harmonic, ev.get("release"))
+                one = pluck.length(name, ev.get("dur"), harmonic, ev.get("release"))
+                if one <= 0:
+                    P.error(where, "the sound would be empty (dur too short)")
+                    continue
+                high = [p for p in ev.get("pitches", [ev.get("pitch")])
+                        if pluck.peak_hz(p, one, harmonic, ev.get("bend"), ev.get("vib"), ev.get("glide")) >= pluck.SR / 12]
+                if high:                                 # the base pitch passed: the bend, vib or glide carries it too high
+                    P.error(where, f"bend/vib/glide takes {'+'.join(str(p) for p in high)} too high for the string model "
+                                   f"(limit {pluck.SR / 12:g} Hz)")
+                    continue
                 shown = "+".join(str(p) for p in ev.get("pitches", [ev.get("pitch")]))
                 if harmonic:
                     shown += f" h{2 if harmonic is True else harmonic}"
@@ -486,7 +496,7 @@ def main(argv=None):
     try:
         with open(a.score, "rb") as fh:
             raw = fh.read()
-        score = json.loads(raw.decode("utf-8"))
+        score = json.loads(raw.decode("utf-8-sig"))       # a BOM from a Windows editor is not an error
     except (OSError, ValueError) as e:
         print(f"score: cannot read {a.score}: {e}", file=sys.stderr)
         return 2
@@ -495,6 +505,9 @@ def main(argv=None):
         return 2
     if not a.dry_run and not a.out:
         print("score: --out DIR is required (or --dry-run)", file=sys.stderr)
+        return 2
+    if not a.dry_run and os.path.exists(a.out) and not os.path.isdir(a.out):
+        print(f"score: --out {a.out} exists and is not a folder", file=sys.stderr)
         return 2
     np, pluck, sfx = _libs()
     P, cues, n_total = validate(score, a.seed)
@@ -524,7 +537,11 @@ def main(argv=None):
         return 2
 
     moving = any(c["pluck"] and any(k in c["ev"] for k in ("bend", "vib", "glide")) for c in cues)
-    r = render(cues, n_total, substems=a.stems)
+    try:
+        r = render(cues, n_total, substems=a.stems)
+    except (ValueError, RuntimeError) as e:              # a sound refused its arguments: nothing was written yet
+        print(f"ERROR render: {e}\nscore: 1 error(s), nothing written", file=sys.stderr)
+        return 2
     os.makedirs(os.path.join(a.out, "stems") if labels else a.out, exist_ok=True)
     files = {}
     for s in STEMS:

@@ -229,6 +229,14 @@ def _pitch_curve(m, n, bend, vib, glide):
     return c
 
 
+def peak_hz(pitch, n, harmonic=None, bend=None, vib=None, glide=None):
+    """Highest frequency the note reaches over n samples (pluck() refuses SR / 12 and above)."""
+    m = sounding_midi(pitch, harmonic)
+    if not (bend or vib or glide) or n <= 0:
+        return float(hz(m))
+    return float(hz(_pitch_curve(m, n, bend, vib, glide)).max())
+
+
 def sounding_midi(pitch, harmonic=None):
     """The pitch that is heard: the written pitch, or the chosen partial of it for a harmonic."""
     return midi(pitch) + (12 * np.log2(_partial(harmonic)) if harmonic else 0.0)
@@ -287,7 +295,7 @@ def _string(preset, m, dur, vel, harmonic, bend, vib, glide, trem, release, rng,
         y = _loop_const(exc, max(d, 4.0), g, damp, ap, nap)
     if harmonic:
         y = sosfilt(butter(2, f0 * .7, "high", fs=SR, output="sos"), y)
-    if moving and q.get("slide_noise"):                 # silk-string friction while the finger slides
+    if moving and q.get("slide_noise") and n > 1:       # silk-string friction while the finger slides
         speed = np.abs(np.gradient(pc)) * SR            # semitones per second
         nz = sosfilt(butter(2, [900, 4500], "band", fs=SR, output="sos"), rng.standard_normal(n))
         env = uniform_filter1d(np.minimum(speed / 8, 1), size=480, mode="constant")

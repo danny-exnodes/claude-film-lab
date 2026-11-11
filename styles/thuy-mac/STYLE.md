@@ -15,6 +15,18 @@ che mép, làm chuyển cảnh, và luôn là sương **chuyển động bằng 
 Khác với recipe gốc (vẽ tất cả bằng nét bút code, kiểu tả ý), series dùng **tranh AI chi tiết** cho nhân vật,
 dị thú và cảnh, rồi để code làm phần sống: sương, ánh sáng, nhịp lia, chuyển động nhỏ của bộ phận.
 
+## Nhân vật 2D trên nền thủy mặc (`method: layers`)
+
+Cái nhìn thứ hai của style, dành cho tập dựng bằng `method: layers`: **phong cảnh vẫn là thủy mặc** (các lớp núi tan vào
+sương, giấy trống, một điểm màu ấm), còn **nhân vật là hình 2D tô phẳng**: mảng màu phẳng, nhiều nhất một sắc bóng cho
+mỗi màu, viền mực đậm khép kín, bảng màu hẹp lấy từ `palette` (mực, xám, giấy) cộng `ochre` cho đúng một món áo hoặc
+vật. Nhân vật thường **nhìn từ sau lưng hoặc ba phần tư sau**, đứng yên trước cảnh rộng; cái động là áo choàng, tay áo,
+tóc (`cloth`), khói và lửa (`smoke`, `fire`, `embers`), sương, và máy quay. Mảng phẳng viền đậm đứng tách khỏi nền mực
+loang nên nhân vật không chìm vào cùng tông, tách nền sạch, và các plate tư thế (`pose-cycle`) dễ giữ giống nhau hơn
+tranh mực nhiều sắc độ. Mẫu prompt: `prompts/character-cel.txt`, `prompts/pose-set.txt`; số liệu chuyển động:
+`motion.md`. Dị thú bám nguyên văn nguồn vẫn dùng `prompts/character.txt` (thân mực nhạt, viền đậm). Mô tả ở đây chỉ là
+đặc điểm hình; không nêu tên phim, xưởng hay họa sĩ trong prompt, và không ảnh tham chiếu nào vào repo.
+
 ## Khi nào dùng
 
 - Thần thoại, chí quái (Sơn Hải Kinh, Liêu Trai, truyện dị thú), truyền thuyết có núi sông.
@@ -30,9 +42,11 @@ Không hợp: hành động dồn dập nhiều nhân vật, đô thị hiện �
 - Seedream không xuất nền trong suốt: mọi lớp trừ L1 phải vẽ trên nền phẳng rồi tách (xem bảng dưới).
 - Seedream đếm kém: số đuôi, số tai, số mắt phải viết HOA trong prompt và đếm lại trên ảnh trước khi duyệt.
   Lỗi hay gặp: tự thêm mắt trên mặt, sai số đuôi, quầng sương quanh viền.
-- Seedance (AI video) dễ vẽ lại phong cách và thêm chi tiết: chỉ dùng cho clip ngắn khi code không làm được
-  (vd. dị thú quay đầu); chuyển động còn lại là code trên lớp tranh.
-- Một màu son duy nhất (triện + một điểm nhấn); ochre chỉ cho ánh nắng thấp và tàn lửa. Không màu nào khác.
+- Seedance (AI video) dễ vẽ lại phong cách và thêm chi tiết: chỉ dùng trong tập `method: seedance`, cho clip ngắn khi
+  code không làm được (vd. dị thú quay đầu); chuyển động còn lại là code trên lớp tranh. Tập `method: layers` không
+  dùng Seedance: cử động lớn là đổi bậc giữa các plate tư thế.
+- Một màu son duy nhất (triện + một điểm nhấn); ochre chỉ cho ánh nắng thấp, tàn lửa, lửa, và một món áo hoặc vật của
+  nhân vật 2D. Không màu nào khác.
 
 ## Giọng kể và nhịp
 
@@ -117,5 +131,7 @@ giấy ngoài khối vẽ**. Nếu không, vân giấy bị luminance tách thà
 | `mid.txt` | L2 | giữa khung trống, chân đá tan dần, không trời |
 | `fg.txt` | L3 | mặt đứng cho nhân vật |
 | `character.txt` | L4 | toàn thân, lề rộng, thân phủ mực nhạt |
+| `character-cel.txt` | L4 (`method: layers`) | nhân vật 2D tô phẳng viền mực đậm, mặc định nhìn từ sau; nền trắng phẳng như L4. Mẫu duy nhất **không** mở bằng `{style_block}`: mô tả nhân vật đi trước, `style_block` chỉ nêu nền sẽ ghép. Chưa thử trên model |
+| `pose-set.txt` | plate tư thế `L4b`, `L4c`… | `{subject}` = đúng một thay đổi (vd. "the head turned to the left"); L4 gốc hoặc ảnh khóa làm `--ref` (model flash); cùng khung vẽ, cùng vị trí bàn chân. Dùng được cho cả nhân vật `character.txt` |
 | `part.txt` | P | `{subject}` = tên bộ phận (vd. "nine tails"); L4 làm `--ref` |
 | `edit-eyes-closed.txt` | biến thể L4 | `{subject}` = mắt cần nhắm (vd. "the two eyes on its back"); model `pro` qua Lambda, L4 làm `--ref` |

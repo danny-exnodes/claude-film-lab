@@ -80,6 +80,10 @@ Regex chuẩn (dùng trong `tools/check_episode.py`; `<ID>` = `(?:ep\d{2}|q\d{2}
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
+Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
+`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4`
+(`matte.py --layer L4`). Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/<id>/{plates,clips,renders}/`.
 Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1); khung gốc trước khi
 tách nền: `clips/<tên clip không đuôi>/raw/000001.png`.

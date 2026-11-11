@@ -137,6 +137,38 @@ Quy tắc cổng:
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.
 
+### 2.1 Hai phương pháp dựng (`method`)
+
+Mỗi tập theo đúng **một** phương pháp, ghi ở front matter của `EPISODE.md`: `method: layers | seedance`. Không có khóa
+= `seedance` (tập cũ giữ nguyên nghĩa); tập mới từ mẫu là `layers`. Không trộn hai cách trong một tập; đổi sau G1 phải
+hỏi người dùng (kịch bản và shot list viết theo nhánh).
+
+| | `layers` | `seedance` |
+|---|---|---|
+| Chuyển động | chỉ code trên lớp tranh: `cloth`, `strip-warp`, `foliage`, `smoke`, `fire`, `embers`, `mist-bands`, `pose-cycle` (đổi bậc 2–4 plate tư thế), máy quay | như `layers`, cộng clip Seedance cho cử động lớn của nhân vật |
+| Trả tiền | chỉ ảnh, tạo theo lô | ảnh + giây video |
+| Khâu 6 (clip AI) | **bỏ qua**; không giao `film-animator` | chạy như bảng trên |
+| `budget.yaml` | `video_seconds: 0`, không trần cho model seedance | `video_seconds` do người dùng chốt |
+| `shots.csv` | `ai_motion` trống mọi shot; plate tư thế là mã lớp `L4b`, `L4c`… | `ai_motion` cho shot cần clip |
+
+Việc của đạo diễn theo khâu:
+- **Khâu 0:** hỏi phương pháp **cùng lượt** với độ dài, style và trần chi phí (một câu hỏi, nêu hai lựa chọn và khác biệt
+  chi phí: `layers` chỉ tốn ảnh, `seedance` tốn thêm giây video); ghi câu trả lời nguyên văn và điền `method:` vào
+  `EPISODE.md`. `layers` → `budget.yaml` có `video_seconds: 0`.
+- **Mọi hợp đồng giao việc** ghi thêm một dòng `Phương pháp: layers | seedance` (agent không thấy lịch sử chat).
+- **Khâu 3 (`layers`):** `film-art-director` thiết kế bộ tư thế và viết `prompts/jobs-<nhóm>.csv` cho từng nhóm shot.
+- **Trước G2:** chạy `python3 tools/status.py <thư mục tập>` và đưa người dùng nguyên văn mục `FORECAST` (ảnh còn phải
+  tạo, giây video dự kiến, so với trần); `OVER` hoặc dòng xung đột `method layers but sNN has ai_motion` → sửa
+  `shots.csv`/trần trước khi trình cổng (`status.py --gate G2` kiểm `forecast fits the budget`).
+- **Khâu 4–5 (`layers`):** `film-plate-maker` tạo ảnh theo lô, một `jobs.csv` cho mỗi nhóm shot:
+  `FILM_AGENT=<tên-agent> python3 tools/ark.py image-batch <jobs.csv> --budget B --ledger L [--parallel N] [--dry-run]`
+  (`--dry-run` trước, miễn phí; khâu 4 vẫn chỉ gồm ảnh khóa + một shot mẫu). Tài khoản không còn tín dụng thì không
+  chạy lệnh trả tiền nào: dừng ở `--dry-run` và báo người dùng.
+- **Khâu 6 (`layers`):** ghi Nhật ký `khâu 6 bỏ qua (method layers)` và chuyển thẳng khâu 7. Không tạo khung đầu, không
+  gọi `ark.py video`.
+- **Khâu 7–8 (`layers`):** `film-compositor` theo `.claude/skills/film-compose-shot/references/layers-method.md`; trước
+  G3 kiểm danh sách §5 của file đó (không thân nào trượt, không bộ phận hiện rời, mỗi shot giữ có ≥ 2 chuyển động + máy quay).
+
 ## 3. Mở tập (khâu 0)
 
 1. Tạo `projects/<project>/ep<NN>-<slug>/` (chia quyển: `q<NN>-t<NN>-<slug>/`), chép `templates/episode/EPISODE.md` và

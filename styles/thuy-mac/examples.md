@@ -3,6 +3,12 @@
 **Chưa có prompt nào được duyệt.** Ví dụ đầu tiên sẽ lấy từ tập đầu tiên làm bằng style này, sau khi người dùng
 duyệt ở phiên chính (ghi đường dẫn tập dạng `projects/<project>/ep<NN>-<slug>/` và link Drive). Không commit ảnh; chỉ ghi chữ và link Drive.
 
+**Nhân vật 2D trên nền thủy mặc (`method: layers`).** Cái nhìn cần đạt khi duyệt ví dụ đầu tiên: nền là các lớp núi mực
+tan vào sương với một điểm màu ấm; nhân vật là mảng màu phẳng viền mực đậm, thường quay lưng về phía người xem, áo
+choàng, tay áo, tóc bay; khói mực và lửa `ochre` làm bằng code. Ví dụ của cái nhìn này ghi thêm dòng `method: layers`,
+mẫu `prompts/character-cel.txt` hoặc `prompts/pose-set.txt`, và với bộ tư thế: liệt kê đủ các plate (`L4`, `L4b`…) cùng
+điểm neo chân. Chỉ mô tả đặc điểm; không ghi tên phim, xưởng hay họa sĩ, không lưu ảnh tham chiếu vào repo.
+
 ## Cách ghi một ví dụ
 
 Mỗi ví dụ là một mục `###`, chép từ dòng `approved=yes` trong `prompts.csv` của tập:

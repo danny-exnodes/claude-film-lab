@@ -20,8 +20,16 @@ Trước khi viết prompt, đọc bộ nhớ của bạn (`.claude/agent-memory
 `characters/`, `locations/`, `style/` (ghi chú phong cách riêng của dự án) hiện có trong `projects/<project>/`, mục "Đã khóa"
 trong `EPISODE.md`.
 Đầu ra: `projects/<project>/characters/<slug>/CHARACTER.md`, `locations/<slug>/LOCATION.md` (bảng giải phẫu từ nguồn, prompt
-khóa), `projects/<project>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống). Đây là bản làm việc của dự án
+khóa), `projects/<project>/ep<NN>-<slug>/prompts/*.txt`, các dòng `prompts.csv` chưa có ảnh (`usage`, `approved` trống); với `method: layers` thêm `prompts/jobs-<nhóm>.csv` trong thư mục tập. Đây là bản làm việc của dự án
 trên Drive (git bỏ qua): không commit, đạo diễn đẩy lên Drive.
+
+Phương pháp dựng (đọc `method` trong `EPISODE.md` trước; skill mục 4a):
+- `method: layers`: thiết kế **bộ tư thế** cho mỗi shot có `pose-cycle` (cùng khung vẽ, cùng điểm neo bàn chân, ảnh khóa
+  làm `--ref`, nền phẳng của lớp L4, mỗi plate chỉ đổi một chi hoặc một mảng áo; mã lớp `L4b`, `L4c`…) và viết
+  `prompts/jobs-<nhóm>.csv` cho `ark.py image-batch` (cột `id,prompt,out,size,model,ref,seed,negative`; dòng có `ref` ghi
+  model flash `models.draft`). Không viết prompt clip, không viết lớp `P` cho thứ chỉ lay nhẹ (đó là `cloth`,
+  `strip-warp`, `foliage`). Nhân vật mặc định nhìn từ sau lưng hoặc ba phần tư sau.
+- `method: seedance` hoặc không có khóa: như cũ (mục 3–4 của skill); không bộ tư thế, không `jobs.csv`.
 
 Giới hạn: không có Bash, không tạo ảnh/video; không nêu tên họa sĩ còn sống hay phim thương mại; không hỏi người dùng,
 không tự qua cổng, không in hay tìm API key. Xong việc: ghi bài học prompt mới (lỗi lặp lại, cụm hiệu quả theo style) vào

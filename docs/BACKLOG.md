@@ -4,7 +4,8 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 
 ## Cần chủ dự án quyết
 
-- Redeploy the Lambda worker once after lambda-hardening is merged and before any further paid Lambda job: upload the new zip and run the deploy program through the AWS connector in the main session (free, needs your approval of the AWS calls).
+- Lambda: the hardened worker was redeployed on 2026-11-11 (Active, 900 s, CodeSha256 matches the repo). No job has run on it yet; whether the runtime accepts the conditional write (IfNoneMatch) is still unverified until the first job.
+- BytePlus credit was exhausted on 2026-11-11 (owner): every paid item below waits for a top-up.
 - rembg model for L4/P layers: matte.py has been running bria-rmbg by accident (1 GB download, 9 GB RAM, weights believed to be non-commercial; licence text not verified). The fix makes u2net the explicit default as documented. Decide whether u2net stays or a heavier model is adopted (then prefetch it and clear its licence); mattes made so far may differ from new ones.
 - Narration in the pipeline: confirm the proposed placement without a new stage number or gate (voice audition before G1 when the series has no voice, voice picked by ear at G1, draft narration right after G1, takes heard at G3). The film-narrator agent ships now; the stage rows, hand-off tool, voice block in SERIES.md and vo/ bundling wait for this answer.
 - Issue #8: drop the three-model listening comparison (VieNeu 0.5B is excluded by its voice licence) in favour of an in-family voice audition, or keep it as a separate low-priority item.

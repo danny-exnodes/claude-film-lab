@@ -113,6 +113,8 @@
 | `matte_seq.py --method rembg` thoát 2: `rembg model u2net.onnx is not on disk` | Model chưa được tải về container; công cụ không tự tải (khoảng 170 MB) | Dùng `--method chroma` (mặc định), hoặc để hook `session-start.sh` tải model rồi chạy lại |
 | `matte_seq.py` thoát 2: `OUT_DIR ... already holds N keyed frames` | Thư mục khung của clip đã có kết quả lần chạy trước | Thêm `--overwrite`, hoặc ghi vào thư mục khác khi muốn so hai phương pháp |
 | Ledger có dòng `failed` kèm `task_id` cho một clip (mất kết nối khi chờ hoặc khi tải về) | Clip đã được tạo và tính phí nhưng chưa tải về; link có hạn | `python3 tools/ark.py video --resume-task <id> --ledger <ledger>` (miễn phí); không gọi lệnh `ark.py video` mới |
+| AWS MCP báo `needs you to sign in again` dù connector hiện "connected" (gặp 3 lần 2026-11-10/11) | Phiên đăng nhập phía AWS chỉ sống vài giờ; connector vẫn hiện là đã kết nối | Người dùng đăng nhập lại ở claude.ai → Settings → Connectors → AWS MCP rồi nhắn Claude chạy ngay. Chuẩn bị sẵn mọi thứ không cần AWS trước (build zip, `lambda-job prepare`) để dùng trọn phiên đăng nhập; lệnh bị từ chối không thay đổi gì trên AWS |
+| Ark trả lỗi hết số dư / hạn mức tài khoản khi tạo ảnh hoặc video | Tài khoản BytePlus hết tiền (2026-11-11) | Không thử lại, không đổi model để "lách": báo người dùng nạp thêm. Dòng ledger của request đó vẫn tính theo quy tắc §7. `ark.py ping` và `tools/doctor.sh` không tốn phí nên vẫn chạy được |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

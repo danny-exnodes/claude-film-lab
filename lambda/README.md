@@ -104,6 +104,6 @@ model pro đặt ở `models.dola-seedream-5-0-pro-260628` trong `budget.yaml` c
 `ai-film-lab-ark-image`. **Ảnh thật đầu tiên đã tạo 2026-11-10** (issue #13 bước 3): Pro 2K, 77 s, trả về 1664x2496 –
 kích thước có tên không cố định tỉ lệ, luôn truyền `<rộng>x<cao>`. 4K chưa đo.
 
-**Phải triển khai lại trước job kế tiếp:** function đang chạy là worker cũ (timeout 300 s, khóa giữ theo instance, chưa
-có `sent`/`deadline`/`worker_sha256`, chưa có ghi có điều kiện). Làm theo "Triển khai lại" ở trên trong phiên chính
-(connector AWS); status của job đầu tiên sau đó phải có `worker_sha256` khớp repo.
+**Worker đã gia cố được triển khai lại 2026-11-11**: timeout 900 s, `CodeSha256` khớp repo
+(`python3 lambda/build_deploy.py --check`). Chưa có job nào chạy trên bản này: status của job đầu tiên phải có
+`worker_sha256` khớp repo, và nên xem nó có `sent`/`deadline` để biết đường ghi có điều kiện hoạt động.

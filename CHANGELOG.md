@@ -74,6 +74,8 @@ Mười gói việc, mỗi gói có test viết trước và một lượt revie
 - `tools/ark.py ledger-merge`: các dòng đang có trong `--out` luôn được giữ (lệnh kéo trong tài liệu từng làm mất dòng
   chỉ có ở bản trong container); ledger không có xuống dòng cuối file không còn làm dính dòng mới vào dòng cũ; ledger có
   BOM vẫn được đếm.
+- Worker Lambda đã gia cố được **triển khai lại 2026-11-11** (timeout 900 s, `CodeSha256` khớp repo); chưa có job nào chạy
+  trên bản này.
 - **Lambda đã tạo ảnh thật đầu tiên** (#13 bước 3, phần 2K): Seedream Pro `2K` qua `lambda-job`, 77,3 s trong worker,
   ~90 s từ lúc Invoke đến lúc có file; ảnh trả về 1664×2496 (dọc) vì kích thước dạng tên không cố định tỉ lệ khung.
 

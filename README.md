@@ -38,7 +38,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (không tính phí) |
 | `docs/BACKLOG.md` | Lỗi đã biết chưa sửa và việc hoãn lại sau đợt kiểm toán 2026-11-10 |
-| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – đã triển khai; ảnh thật đầu tiên 2026-11-10 (Pro 2K, 77 s) |
+| `lambda/` | Worker tạo ảnh ngoài proxy (pro, 4K), đi qua `ark.py lambda-job` – đã triển khai (bản gia cố: 2026-11-11); ảnh thật đầu tiên 2026-11-10 (Pro 2K, 77 s) |
 | `docs/RELEASING.md` | Bước phát hành: Claude sửa CHANGELOG + mở PR, người dùng tạo tag và GitHub Release |
 | `formats/` | Định dạng cinecode đã lưu (`CINECODE_FORMATS`) |
 | `tests/` | `python3 -m unittest discover -s tests` |

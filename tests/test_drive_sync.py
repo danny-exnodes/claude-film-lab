@@ -91,6 +91,14 @@ class DriveSyncCase(TmpDirCase, unittest.TestCase):
         return hits[0]
 
 
+class TestTempFiles(unittest.TestCase):
+    def test_lock_and_swap_files_are_temp(self):
+        for rel in ("ep01-x/anchors.json.lock", "ep01-x/script.md.swp", "ep01-x/notes.tmp", "ep01-x/a.md~"):
+            self.assertTrue(ds.is_temp(rel), rel)
+        for rel in ("ep01-x/anchors.json", "ep01-x/prompts/s01.txt", "PROJECT.md"):
+            self.assertFalse(ds.is_temp(rel), rel)
+
+
 class TestSnapshot(DriveSyncCase):
     def test_sha256sum_format_and_pulled_at(self):
         self.write(".hidden", "x")

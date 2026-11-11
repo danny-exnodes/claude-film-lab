@@ -424,7 +424,9 @@ def forecast_brief(f):
                 + (f": {x['verdict']}" if x["over"] else ""))
 
     return "; ".join([one("images", f["images"]["to_make"], "to make", f["images"]),
-                      one("video_seconds", f["video_seconds"]["planned"], "planned", f["video_seconds"])])
+                      one("video_seconds", f["video_seconds"]["planned"], "planned", f["video_seconds"])]
+                     + ([f"clip of {', '.join(f['skipped'])} not counted: fix from_s/to_s in shots.csv"]
+                        if f["skipped"] else []))
 
 
 # -------------------------------------------------------------------- media ---
@@ -519,7 +521,8 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
                 if s["layers"] and all(l["state"] in ("made", "approved") for l in s["layers"])]
         need(done, "one shot with every layer made or approved" + (f" ({', '.join(done)})" if done else " (none)"))
         need(ledger and os.path.isfile(ledger), "ledger.csv present")
-        need(d["forecast"] and d["forecast"]["fits"], f"forecast fits the budget ({forecast_brief(d['forecast'])})")
+        fc = d["forecast"]                 # a clip left out of the sum (unreadable from_s/to_s) proves nothing
+        need(fc and fc["fits"] and not fc["skipped"], f"forecast fits the budget ({forecast_brief(fc)})")
     elif gate == "G3":
         bad = [f"{s['shot']} {l['layer']}:{l['state']}" for s in shots for l in s["layers"]
                if l["state"] != "approved"]

@@ -778,6 +778,23 @@ class ForecastTest(ForecastCase):
         code, g = self.gate("--gate", "G2")
         self.assertIn("forecast fits the budget (no shots.csv)", self.missing(g))
 
+    def test_gate_g2_is_not_ready_when_a_clip_could_not_be_counted(self):
+        self.episode(stage=4, G1=True)
+        self.prompts(ALL_APPROVED[:2])
+        self.put("plates", *[r[0] for r in ALL_APPROVED[:2]])
+        self.rows([self.img(ALL_APPROVED[0][0], "ok", "aa01")])
+        self.shots("s01,0,8,wide,static,Núi,L1;L2,mist-bands,,,",
+                   "s02,8,soon,close,drift,Cận,L1,,slow blink,,")       # the forecast cannot price this clip
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 1, out)
+        self.assertIn("  [MISSING] forecast fits the budget (images 1 to make, 39 left; video_seconds 0 planned, "
+                      "30 left; clip of s02 not counted: fix from_s/to_s in shots.csv)\n", out)
+        self.shots("s01,0,8,wide,static,Núi,L1;L2,mist-bands,,,",
+                   "s02,8,12,close,drift,Cận,L1,,slow blink,,")
+        code, out = self.run_status("--gate", "G2")
+        self.assertEqual(code, 0, out)
+        self.assertIn("  [ok] forecast fits the budget (", out)
+
 
 class DegradeTest(StatusCase):
     def test_missing_inputs_are_notes_not_errors(self):

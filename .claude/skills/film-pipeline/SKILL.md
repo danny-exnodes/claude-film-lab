@@ -139,7 +139,8 @@ Quy tắc cổng:
   `[MISSING]`: chưa trình; hoặc còn `BLOCKED` / `OPEN` / `MISSING` như mục 1 bước 3: xử lý, cái không xử lý được thì
   nêu cho người dùng); rồi đưa file/ảnh/link cần xem, số đã tiêu (ảnh, giây video) so với trần lấy từ dòng `BUDGET`,
   và đúng một câu hỏi duyệt. Ở G2 có thêm dòng `forecast fits the budget`: `[MISSING]` = phần còn phải tạo vượt phần
-  còn lại của trần (xem `FORECAST`), nêu con số cho người dùng quyết trước khi tạo hàng loạt ở khâu 5.
+  còn lại của trần (xem `FORECAST`), nêu con số cho người dùng quyết trước khi tạo hàng loạt ở khâu 5; hoặc có clip
+  `not counted` (`from_s`/`to_s` của shot đó trong `shots.csv` không đọc được): giao `film-writer` sửa rồi chạy lại.
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.

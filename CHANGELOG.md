@@ -13,8 +13,9 @@
 - `inline.py` chèn 16 file (thêm `ink.js`, `figure.js` sau `pose.js`); `motions.json` và `styles/thuy-mac` có id `figure`. Chạy lại `python3 tools/compose/inline.py film.html` để film cũ nhận bộ mã mới.
 - `THIRD_PARTY.md`: `ink.js` và `figure.js` phỏng theo mã MIT của lemomo-ai/lemo-opuscar (Copyright (c) 2026 LemoLab).
 - `tools/audio` sau lần nghe đầu của chủ dự án: gió viết lại thành luồng trầm có đợt (trước đó nghe như tiếng ồn: 8,6 % năng
-  lượng trên 1 kHz, nay dưới 0,5 %); cồng ngân lâu hơn (ở giây thứ 3 còn −13 dB thay vì −31 dB) và có vang phòng mặc
-  định; khóa mới `reverb` và `room_s` cho mọi sự kiện trong `score.json`.
+  lượng trên 1 kHz, nay dưới 0,5 %); cồng dựng lại thành cồng có núm gõ dùi mềm (hai bản đầu dùng tỉ lệ bồi âm của thanh gỗ
+  và có tiếng "tách" ở đầu nên nghe như gõ gỗ): âm cơ bản 196 Hz mạnh nhất và ngân nhiều giây (sau 5 giây còn −5 dB),
+  bồi âm gần quãng tám, mỗi bồi âm là một cặp phách chậm, không có tiếng tách, có vang phòng mặc định; khóa mới `reverb` và `room_s` cho mọi sự kiện trong `score.json`.
 - `THIRD_PARTY.md`: ghi công cho mã phỏng theo lemomo-ai/lemo-opuscar (MIT). Chỉ phỏng mã; phim mẫu, nhân vật, bố cục
   và bản nhạc của dự án đó không được dùng.
 

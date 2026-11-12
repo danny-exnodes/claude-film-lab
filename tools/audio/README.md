@@ -78,8 +78,8 @@ và từng khoảng lặng).
 
 Khóa chung của sự kiện: `t` (giây) hoặc `beat`, `dur`, `gain` (tuyến tính, mặc định 1, tối đa 4), `pan` (−1..1),
 `shot` (id shot, in trong bảng cue), `note`, `seed`, `allow_in_silence`, `reverb` (0–1: độ vang phòng của riêng âm đó;
-mặc định cồng 0,38, mọi âm khác 0), `room_s` (0,3–8 giây: thời gian vang tắt 60 dB, mặc định 2,4). Khóa lạ là ERROR.
-Vang không làm âm dài hơn `dur`: muốn nghe đuôi vang thì cho `dur` đủ dài (cồng mặc định 6 giây). Vang hiện là mono
+mặc định cồng 0,42, mọi âm khác 0), `room_s` (0,3–8 giây: thời gian vang tắt 60 dB, mặc định 2,4). Khóa lạ là ERROR.
+Vang không làm âm dài hơn `dur`: muốn nghe đuôi vang thì cho `dur` đủ dài (cồng mặc định 8 giây; `pitch` 1.0 = G3 196 Hz, 0.75 = D3 cho cồng lớn). Vang hiện là mono
 (mỗi âm được đặt trái/phải bằng `pan` sau đó), chưa có không gian stereo.
 
 **`music`** – `inst`:

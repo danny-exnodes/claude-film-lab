@@ -336,31 +336,34 @@ def ink_drop(dur=0.5, intensity=0.5, pitch=1.0, seed=0):
     return _finish(y, n, intensity)
 
 
-def gong(dur=6.0, intensity=0.5, pitch=1.0, seed=0):
-    """Small gong, one stroke (a synthesised approximation): inharmonic partials in slowly beating pairs, a low
-    body partial, upper partials that bloom just after the stroke and ring on. Dry here; score.py adds the room
-    (SOUNDS["gong"]["reverb"]), which is most of what makes it sound struck in a space."""
+def gong(dur=8.0, intensity=0.5, pitch=1.0, seed=0):
+    """Bossed gong (cồng), one stroke with a soft mallet (a synthesised approximation). pitch 1.0 = G3 (196 Hz);
+    0.75 = D3, a larger gong. What makes it a gong and not a wooden bar: a strong fundamental that sustains for
+    seconds, partials near the octave and the twelfth (a bar has 2.76 and 5.4), every partial a slowly beating pair
+    (the wavering 'ngân'), a soft attack with no click, and a quiet metallic shimmer that blooms after the stroke.
+    The first two versions used bar-like ratios (1.52, 2.08, 2.71...), a noise click and a 1.5 s fundamental: the
+    owner heard knocking on wood. Dry here; score.py adds the room (SOUNDS["gong"]["reverb"])."""
     n, a, p = nsamp(dur), _amt(intensity), _mult(pitch)
     rng = rng_for(seed, "gong")
     t = np.arange(n) / SR
-    f0 = 392.0 * p
-    glide = 1 + 0.010 * (1 + a) * np.exp(-t / 0.30)          # the pitch settles after the stroke
-    y = _modes(n, [(f0 * 0.5, 0.22, 2.6, rng.random() * 6.283)], glide)        # body, an octave below
-    upper = np.zeros(n)
-    for i, r in enumerate((1.0, 1.52, 2.08, 2.71, 3.46, 4.38, 5.47, 6.9)):
-        amp = (1.0 if i == 0 else (0.55 + 0.5 * a) / (i ** (1.25 - 0.5 * a)))
-        tau = 2.4 / (1 + 0.30 * i)                           # the upper partials ring on (first version: 1.5 / (1 + 0.55 i))
-        pair = [(f0 * r * det, amp * 0.5, tau, rng.random() * 6.283)
-                for det in (1.0, 1.0 + (0.004 + 0.006 * rng.random()))]       # 1.5-4 Hz beating: the shimmer
-        if i == 0:
-            y += _modes(n, pair, glide)
-        else:
-            upper += _modes(n, pair, glide)
-    y += upper * (1 - 0.75 * np.exp(-t / 0.09))              # bloom: the shimmer arrives a moment after the stroke
-    k = min(n, nsamp(0.03))
-    y[:k] += bp(rng.standard_normal(k), 600, 5000) * np.exp(-np.arange(k) / (0.004 * SR)) * (0.3 + 0.6 * a) * 2
-    y[:min(n, 96)] *= np.linspace(0, 1, min(n, 96))
-    return _finish(y, n, intensity, tail=0.25)
+    f0 = 196.0 * p
+    glide = 1 + 0.004 * (1 + a) * np.exp(-t / 0.5)                    # a struck gong sits a touch sharp, then settles
+    y = np.zeros(n)
+    # (ratio, amplitude, seconds to fall to 1/e, beat in Hz): the fundamental carries the sound
+    for r, amp, tau, beat in ((1.0, 1.0, 5.0, 1.6), (2.0, 0.46, 3.8, 2.3), (2.98, 0.24, 2.8, 3.1),
+                              (4.07, 0.13 + 0.10 * a, 2.0, 4.2), (5.2, 0.07 + 0.08 * a, 1.5, 5.0)):
+        f = f0 * r
+        pair = [(f, amp * 0.56, tau, rng.random() * 6.283), (f + beat * (0.8 + 0.4 * rng.random()), amp * 0.44, tau * 0.93,
+                                                               rng.random() * 6.283)]
+        y += _modes(n, pair, glide)
+    shimmer = _modes(n, [(f0 * r * (1 + 0.004 * rng.random()), 0.035 + 0.05 * a, 1.1, rng.random() * 6.283)
+                         for r in (6.3, 7.1, 8.4, 9.7, 11.3)], glide)
+    y += shimmer * (1 - np.exp(-t / 0.18))                            # the shimmer arrives after the stroke
+    k = min(n, nsamp(0.06))                                           # the mallet: a soft low thud, not a click
+    y[:k] += lp(rng.standard_normal(k), 420, 2) * np.exp(-np.arange(k) / (0.012 * SR)) * 0.5 * (0.5 + a)
+    ramp = min(n, nsamp(0.010))
+    y[:ramp] *= 0.5 - 0.5 * np.cos(np.pi * np.arange(ramp) / max(1, ramp))
+    return _finish(y, n, intensity, tail=0.4)
 
 
 def reverb(x, mix=0.3, room_s=2.4, seed=0, predelay=0.018):
@@ -504,7 +507,7 @@ SOUNDS = {
     "whoosh":     dict(fn=whoosh, dur=1.2, bed=False, pitch="mult", extra=("rise",)),
     "hoof":       dict(fn=hoof, dur=0.6, bed=False, pitch="mult", extra=()),
     "ink_drop":   dict(fn=ink_drop, dur=0.5, bed=False, pitch="mult", extra=()),
-    "gong":       dict(fn=gong, dur=6.0, bed=False, pitch="mult", extra=(), reverb=0.38),
+    "gong":       dict(fn=gong, dur=8.0, bed=False, pitch="mult", extra=(), reverb=0.42),
     "drum":       dict(fn=drum, dur=0.8, bed=False, pitch="mult", extra=()),
     "drum_roll":  dict(fn=drum_roll, dur=2.0, bed=False, pitch="mult", extra=("rate", "swell")),
     "ember":      dict(fn=ember, dur=0.25, bed=False, pitch="mult", extra=()),

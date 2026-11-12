@@ -313,8 +313,20 @@ class TestRoomAndTimbre(unittest.TestCase):
         first = self.level(g, 0.0)
         for at in (3, 4):                                                   # the first version was 26-31 dB down here
             self.assertGreater(20 * np.log10(self.level(g, at) / first), -20, at)
-        self.assertEqual(sfx.SOUNDS["gong"]["dur"], 6.0)
+        self.assertEqual(sfx.SOUNDS["gong"]["dur"], 8.0)
         self.assertGreater(sfx.SOUNDS["gong"]["reverb"], 0.2)               # score.py gives it a room by default
+
+    def test_gong_is_metal_not_a_wooden_bar(self):
+        """Third listen: 'like knocking on wood'. A gong has a sustaining fundamental, an octave partial and no click."""
+        g = sfx.gong(dur=8, intensity=0.5, seed=3).astype(np.float64)
+        power = np.abs(np.fft.rfft(g)) ** 2
+        f = np.fft.rfftfreq(len(g), 1 / sfx.SR)
+        self.assertAlmostEqual(float(f[np.argmax(power)]), 196.0, delta=3)   # the fundamental is the strongest partial
+        octave = power[(f > 380) & (f < 405)].sum()
+        bar = power[(f > 520) & (f < 560)].sum()                             # 2.76 x f0, where a bar's second mode sits
+        self.assertGreater(octave, 20 * bar)
+        self.assertGreater(20 * np.log10(self.level(g, 5) / self.level(g, 0.05)), -10)   # still ringing after 5 s
+        self.assertLess(self.level(g, 0, 0.005), self.level(g, 0.05, 0.05))  # a soft mallet: no click louder than the tone
 
     def test_reverb_keeps_length_and_peak_and_fills_the_tail(self):
         x = sfx.drum(dur=2.0, intensity=0.6, seed=1)

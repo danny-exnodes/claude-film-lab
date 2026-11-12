@@ -18,3 +18,8 @@ Lỗi hay gặp khi kiểm sản phẩm. Mỗi mục: ngày · lỗi · dấu hi
 - 2026-11-10 · Câu dịch thơ tán/nguyên văn trùng gần hết chữ với bản dịch sách người dùng gửi · so từng câu với sources/*/chep-noi-dung.md · khâu 2. Thơ tán: đọc Hán Việt rồi dịch lại.
 - 2026-11-10 · Tên Hán Việt trùng từ thông dụng khi đọc TTS ("con ngu", "tên nó là loại/lục") · thêm danh từ loại ("con", "cá").
 - 2026-11-10 · Prompt Seedance không nhắc lại đặc điểm giải phẫu; bàn tay viết chữ sinh chữ giả · cột ai_motion.
+- 2026-11-12 · Bài 圖讚 (全晉文 q122/q123) gán nhầm loài: tiêu đề lấy theo chữ, không theo vị trí · xem bài nằm ở cụm kinh
+  nào (Nam Sơn ở q122 dòng ~13–79 theo thứ tự kinh); tiêu đề có chú "此題未詳" là cờ đỏ · Chặn, khâu 1–2.
+- 2026-11-12 · Hai Thanh Khâu (núi Nam Sơn / nước ngoài biển 海外東經, 大荒東經): lời bình gọi chung "nó" là biến tranh
+  cãi thành khẳng định · đối KC "Thanh Khâu" · khâu 2.
+- 2026-11-12 · Chuỗi chữ Hán F01 có chú `{{*|…}}` chen giữa → Grep thô không ra; Grep bản F02/F03 hoặc grep hai nửa.

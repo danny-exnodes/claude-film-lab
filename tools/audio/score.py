@@ -390,7 +390,8 @@ def _synth(cue, pluck, sfx):
     ev = cue["ev"]
     mix = ev.get("reverb", 0.0 if cue["pluck"] else sfx.SOUNDS[cue["name"]].get("reverb", 0.0))
     if mix:
-        x = sfx.reverb(x, mix, ev.get("room_s", 2.4), cue["seed"])
+        room = ev.get("room_s", 2.4 if cue["pluck"] else sfx.SOUNDS[cue["name"]].get("room_s", 2.4))
+        x = sfx.reverb(x, mix, room, cue["seed"])
     return x
 
 

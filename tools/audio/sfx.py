@@ -336,9 +336,9 @@ def ink_drop(dur=0.5, intensity=0.5, pitch=1.0, seed=0):
     return _finish(y, n, intensity)
 
 
-def gong(dur=8.0, intensity=0.5, pitch=1.0, seed=0):
-    """Bossed gong (cồng), one stroke with a soft mallet (a synthesised approximation). pitch 1.0 = G3 (196 Hz);
-    0.75 = D3, a larger gong. What makes it a gong and not a wooden bar: a strong fundamental that sustains for
+def gong(dur=9.0, intensity=0.5, pitch=1.0, seed=0):
+    """Bossed gong (cồng), one stroke with a soft mallet (a synthesised approximation). pitch 1.0 = D3 (147 Hz), the
+    large gong the owner chose by ear; higher pitches turn bell-like (1.33 = G3 was heard as a bell). What makes it a gong and not a wooden bar: a strong fundamental that sustains for
     seconds, partials near the octave and the twelfth (a bar has 2.76 and 5.4), every partial a slowly beating pair
     (the wavering 'ngân'), a soft attack with no click, and a quiet metallic shimmer that blooms after the stroke.
     The first two versions used bar-like ratios (1.52, 2.08, 2.71...), a noise click and a 1.5 s fundamental: the
@@ -346,7 +346,7 @@ def gong(dur=8.0, intensity=0.5, pitch=1.0, seed=0):
     n, a, p = nsamp(dur), _amt(intensity), _mult(pitch)
     rng = rng_for(seed, "gong")
     t = np.arange(n) / SR
-    f0 = 196.0 * p
+    f0 = 146.83 * p
     glide = 1 + 0.004 * (1 + a) * np.exp(-t / 0.5)                    # a struck gong sits a touch sharp, then settles
     y = np.zeros(n)
     # (ratio, amplitude, seconds to fall to 1/e, beat in Hz): the fundamental carries the sound
@@ -507,7 +507,7 @@ SOUNDS = {
     "whoosh":     dict(fn=whoosh, dur=1.2, bed=False, pitch="mult", extra=("rise",)),
     "hoof":       dict(fn=hoof, dur=0.6, bed=False, pitch="mult", extra=()),
     "ink_drop":   dict(fn=ink_drop, dur=0.5, bed=False, pitch="mult", extra=()),
-    "gong":       dict(fn=gong, dur=8.0, bed=False, pitch="mult", extra=(), reverb=0.42),
+    "gong":       dict(fn=gong, dur=9.0, bed=False, pitch="mult", extra=(), reverb=0.42, room_s=3.2),
     "drum":       dict(fn=drum, dur=0.8, bed=False, pitch="mult", extra=()),
     "drum_roll":  dict(fn=drum_roll, dur=2.0, bed=False, pitch="mult", extra=("rate", "swell")),
     "ember":      dict(fn=ember, dur=0.25, bed=False, pitch="mult", extra=()),

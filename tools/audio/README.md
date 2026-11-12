@@ -79,7 +79,7 @@ và từng khoảng lặng).
 Khóa chung của sự kiện: `t` (giây) hoặc `beat`, `dur`, `gain` (tuyến tính, mặc định 1, tối đa 4), `pan` (−1..1),
 `shot` (id shot, in trong bảng cue), `note`, `seed`, `allow_in_silence`, `reverb` (0–1: độ vang phòng của riêng âm đó;
 mặc định cồng 0,42, mọi âm khác 0), `room_s` (0,3–8 giây: thời gian vang tắt 60 dB, mặc định 2,4). Khóa lạ là ERROR.
-Vang không làm âm dài hơn `dur`: muốn nghe đuôi vang thì cho `dur` đủ dài (cồng mặc định 8 giây; `pitch` 1.0 = G3 196 Hz, 0.75 = D3 cho cồng lớn). Vang hiện là mono
+Vang không làm âm dài hơn `dur`: muốn nghe đuôi vang thì cho `dur` đủ dài (cồng mặc định 9 giây trong phòng 3,2 giây; `pitch` 1.0 = D3 147 Hz, cồng lớn mà chủ dự án chọn bằng tai 2026-11-12; cao hơn thì ngả sang tiếng chuông, vd. 1.33 = G3. Gõ mạnh trong không gian rộng: `"vel": 0.8, "reverb": 0.55, "room_s": 4.0`). Vang hiện là mono
 (mỗi âm được đặt trái/phải bằng `pan` sau đó), chưa có không gian stereo.
 
 **`music`** – `inst`:

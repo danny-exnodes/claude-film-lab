@@ -313,7 +313,7 @@ class TestRoomAndTimbre(unittest.TestCase):
         first = self.level(g, 0.0)
         for at in (3, 4):                                                   # the first version was 26-31 dB down here
             self.assertGreater(20 * np.log10(self.level(g, at) / first), -20, at)
-        self.assertEqual(sfx.SOUNDS["gong"]["dur"], 8.0)
+        self.assertEqual((sfx.SOUNDS["gong"]["dur"], sfx.SOUNDS["gong"]["room_s"]), (9.0, 3.2))
         self.assertGreater(sfx.SOUNDS["gong"]["reverb"], 0.2)               # score.py gives it a room by default
 
     def test_gong_is_metal_not_a_wooden_bar(self):
@@ -321,9 +321,9 @@ class TestRoomAndTimbre(unittest.TestCase):
         g = sfx.gong(dur=8, intensity=0.5, seed=3).astype(np.float64)
         power = np.abs(np.fft.rfft(g)) ** 2
         f = np.fft.rfftfreq(len(g), 1 / sfx.SR)
-        self.assertAlmostEqual(float(f[np.argmax(power)]), 196.0, delta=3)   # the fundamental is the strongest partial
-        octave = power[(f > 380) & (f < 405)].sum()
-        bar = power[(f > 520) & (f < 560)].sum()                             # 2.76 x f0, where a bar's second mode sits
+        self.assertAlmostEqual(float(f[np.argmax(power)]), 146.83, delta=3)  # D3, and the fundamental is the strongest partial
+        octave = power[(f > 285) & (f < 302)].sum()
+        bar = power[(f > 392) & (f < 418)].sum()                             # 2.76 x f0, where a bar's second mode sits
         self.assertGreater(octave, 20 * bar)
         self.assertGreater(20 * np.log10(self.level(g, 5) / self.level(g, 0.05)), -10)   # still ringing after 5 s
         self.assertLess(self.level(g, 0, 0.005), self.level(g, 0.05, 0.05))  # a soft mallet: no click louder than the tone

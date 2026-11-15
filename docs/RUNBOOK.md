@@ -155,6 +155,8 @@
 | `check_episode` báo hàng trăm ERROR tên file trong `renders/` | Bản nén để xem (`*_xem.mp4`), contact sheet, thư mục khung tách nằm cạnh bản dựng | `renders/` chỉ chứa `<id>_draft_vNN.mp4` / `<id>_final_vNN.mp4`; bản xem và khung soi để trong `review/` |
 | Clip Seedance lệch giải phẫu (cánh mọc từ vai, mỏ thành hàm có răng, mắt hoạt hình, tai phát sáng) | Model "diễn" thêm khi con thú cử động/kêu | Gen thử 1–2 clip trước cả lô; thêm câu chặn cụ thể vào prompt; clip lệch một đoạn thì chỉ dùng đoạn đúng (cắt, chậm ≤ 0,8×, nối máy quay code) thay vì gen lại |
 | Agent nền dừng giữa chừng: "You've hit your 5-hour limit" | Giới hạn dùng API của tài khoản | Đợi giờ reset trong thông báo rồi `SendMessage` cho đúng agent đó tiếp tục (không mở agent mới); kiểm tra tiến trình render có bị chết không (`renders/*.status.json`) |
+| Render dài chạy nền (`setsid nohup … & disown`) dừng hẳn, `uptime` ≈ 0 phút, `queue.log` không thêm dòng | Phiên cloud rảnh (không còn lệnh/agent nào đang chạy) → container bị thu hồi, mọi tiến trình tách rời chết theo; lệnh chờ chạy nền cũng bị dừng sau 2 giờ | Chia render thành đợt ≤ 100 phút chạy bằng Bash `run_in_background` (hàng đợi có hạn chót, bỏ qua đoạn đã đủ khung), xong đợt nào chạy đợt tiếp; kiểm PNG cuối mỗi lần khởi động lại (đuôi `IEND`). Không dựa vào `setsid` khi phiên có thể rảnh |
+| `check_episode.py --out` ghi file vào `<tập>/projects/<project>/<tập>/review/…` | `--out` tương đối được hiểu theo thư mục tập, không theo thư mục hiện hành | Dùng `--out review/check-v<N>.txt` (tương đối với thư mục tập) như trong CLAUDE.md |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

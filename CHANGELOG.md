@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-19
+
 ### Phương pháp dựng thứ ba `code` và bộ 10 phong cách vẽ bằng code (#38–#43, 2026-11-19)
 Nhân vật và cảnh vẽ hoàn toàn bằng code, không gọi model tạo ảnh hay video nào (0 ảnh, 0 giây). Một nhân vật định nghĩa
 một lần, đổi phong cách chỉ là đổi cách vẽ. Ý tưởng từ một bài đăng "10 animation styles" chủ dự án gửi; linh vật,
@@ -326,6 +328,7 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danny-exnodes/claude-film-lab/releases/tag/v1.0.0

@@ -4,6 +4,46 @@
 
 ## [Unreleased]
 
+### Phương pháp dựng thứ ba `code` và bộ 10 phong cách vẽ bằng code (#38–#43, 2026-11-19)
+Nhân vật và cảnh vẽ hoàn toàn bằng code, không gọi model tạo ảnh hay video nào (0 ảnh, 0 giây). Một nhân vật định nghĩa
+một lần, đổi phong cách chỉ là đổi cách vẽ. Ý tưởng từ một bài đăng "10 animation styles" chủ dự án gửi; linh vật,
+tên và bố cục là của lab.
+
+- **Bộ TOON `tools/toon/`** (v1.0.0, script thuần như bộ COMPOSE, hàm thuần của `t` và `SEED`): `rig.js` (nhân vật =
+  `character.json`: thân `drop`/`blob`/`box`, 1–2 mắt, chỏm, má, miệng, tay chân ống; khung xương, IK hai đoạn),
+  `motion.js` (timeline `walk`, `run`, `turn`, `jump`, `wave`, `cheer`, `point`, `bounce`, `look`, `blink`, `idle`;
+  bước chân tính theo quãng đường nên **chân không trượt** ở mọi tốc độ; quay người đặt lại chân; nhảy có nén – bật –
+  bay – tiếp đất; chớp mắt và thở tự động theo seed), `project.js` (máy quay có `move`/`orbit`/`follow`/`shake`, phép
+  chiếu, danh sách hình 2D theo độ sâu, đạo cụ cảnh theo seed), `look2d.js` (`flat-toon`, `ink-silhouette`,
+  `rubber-hose`, `blueprint` vẽ dần từng nét), `look3d.js` (three.js: `clay-3d` có bề mặt "sôi" mỗi hình, `lowpoly-90s`
+  flat shading, `cardboard` mảnh bìa có độ dày, ghim đồng, đèn bàn đổ bóng), `post.js` (`riso` 2–3 mực chồng, halftone,
+  lệch bản; `pixel-16` 320×180, 16 màu, dither Bayer; `ascii` lưới ký tự theo độ sáng và hướng biên, quầng phosphor),
+  `toon.js` (`TOON.ready`, `TOON.render`), `looks.json` (sổ đăng ký).
+- **Mười style pack `engine: code`** (`status: draft`): `dat-nan-3d`, `hoat-hinh-phang`, `ban-ve-ky-thuat`, `in-riso`,
+  `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90`, và mẫu `styles/_template-code/`.
+  Style pack có khóa mới `engine: image | code` (thiếu = `image`); với `code`: khối `render` (look, post, hold, palette,
+  opts, camera, env) thay cho `style_block`/`matte`/`layers`/`models`/`prompts/`.
+- **`method: code`** trong `EPISODE.md` (gộp `code3d` của #35): `check_episode.py` báo ERROR khi `images`,
+  `video_seconds` hay `models.*` > 0, khi shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`E-<slug>`/`FX[-…]`/`T`,
+  khi style không khớp phương pháp; `camera` nhận thêm `orbit`, `dolly`, `crane`, `track`; không cần `prompts.csv`.
+  `status.py`: METHOD `code`, FORECAST 0/0, cổng G2 kiểm `character.json`, turntable trong `review/` và chi phí 0.
+  `motions.json` thêm 13 id (`engine: toon`).
+- **`tools/toon/toon.py`** (miễn phí, Chromium headless qua Playwright, WebGL phần mềm): `still`, `turntable`, `clip`,
+  `reel`, `lookbook` (cả 10 style cùng một hành động, `sheet.png` + `lookbook.mp4`; bản nháp 960×540 ~2 phút).
+- **`inline.py --toon`**: chèn bộ TOON sau bộ COMPOSE, `READY` chờ `loadToon` (three.js nạp trước khung đầu), cảnh báo
+  `toon:` vào `qc` của READY; `--init --toon` đặt mẫu `templates/toon-film-section.js` (CHARS, STYLE, SHOTS) và look
+  `toon`. Film đã có bộ TOON giữ nó khi làm mới không có `--toon`. Đã chạy qua `make.py stills` và `draft` của cinecode
+  với cả look 2D và 3D.
+- **three.js 0.186.1 ghim cục bộ** (`tools/toon/three.lock`, `install_three.sh`, `FILM_THREE`): setup script bước 6,
+  hook khởi động cài khi thiếu; `doctor.sh` dòng `three` (thiếu = WARN, sai băm = FAIL) và, ở bản đầy đủ, `webgl`.
+  `chrome-root.sh` bật SwiftShader (`FILM_WEBGL=gpu` để tắt). Render không tải CDN.
+- Bộ COMPOSE lên v1.2.0 (chỉ vì `inline.py` đổi). Tài liệu: `references/code-method.md` (mới), `film-pipeline` §2.1,
+  `film-script` §4a, `film-compose-shot`, agent `film-writer`, `film-art-director`, `film-compositor`,
+  `film-reviewer`, `film-animator`, `docs/WORKFLOW.md` (ba phương pháp), `docs/CONVENTIONS.md` §3/§5/§6, RUNBOOK, BACKLOG.
+- Test: `tests/js/toon.test.cjs` (16 test node: chân không trượt, độ dài xương, nhảy đúng độ cao, chớp mắt theo seed,
+  hậu kỳ chỉ ra màu hợp lệ…), `tests/test_toon.py` (render thật cả 10 style, cùng khung hai lần ra cùng byte cả 2D lẫn
+  3D), `tests/test_method_code.py` (13 test: `check_episode`, style, `status.py` G2, `inline.py --toon`).
+
 ## [1.1.0] - 2026-11-11
 
 Dữ liệu dự án phim chuyển lên Google Drive, repo chỉ còn là lõi dùng lại; mỗi tập chọn một trong hai phương pháp dựng

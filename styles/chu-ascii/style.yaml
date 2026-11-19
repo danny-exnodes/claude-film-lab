@@ -1,0 +1,22 @@
+# Chữ ASCII (ASCII) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 8). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip chu-ascii --draft --out out/_lab/chu-ascii.mp4
+id: chu-ascii
+name: Chữ ASCII
+name_en: ASCII
+status: draft
+base: cinecode:ascii-crt
+engine: code
+render:
+  engine: canvas2d
+  look: flat-toon
+  post:
+  - {id: ascii, cols: 150, color: source, glow: 0.35}
+  hold: 1
+palette: {bg: '#050805', sky: '#8FD3F4', ground: '#9BD67A', ink: '#7CFF9A'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: A minor
+  instruments: [synth sine bass, bleep, noise sweep, pad]
+  notes: Điện tử tối giản; tiếng gõ phím cho chữ hiện ra.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

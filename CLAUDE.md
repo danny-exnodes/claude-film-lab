@@ -30,7 +30,9 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Hợp đồng chung (cấu trúc, đặt tên, schema): `docs/CONVENTIONS.md`. Quy trình: `docs/WORKFLOW.md`.
 - Mỗi tập một phương pháp dựng, ghi trong `EPISODE.md`: `method: layers` (chỉ ảnh + chuyển động bằng code, tạo theo lô bằng
   `ark.py image-batch`, không Seedance: `ai_motion` trống, `video_seconds: 0`, bỏ khâu 6) hoặc `method: seedance` (clip cho
-  cử động lớn). Thiếu khóa = `seedance` (WARN). Người dùng chọn ở khâu 0; không trộn trong một tập, sau G1 không tự đổi.
+  cử động lớn) hoặc `method: code` (nhân vật và cảnh vẽ hoàn toàn bằng code với bộ `tools/toon/`, style `engine: code`,
+  `images: 0`, `video_seconds: 0`, bỏ khâu 5–6; `.claude/skills/film-compose-shot/references/code-method.md`). Thiếu khóa = `seedance` (WARN).
+  Người dùng chọn ở khâu 0 (với `code`: cho xem `python3 tools/toon/toon.py lookbook`); không trộn trong một tập, sau G1 không tự đổi.
   Quy tắc dàn cảnh của `layers` (không trượt, không xoay thân, không bộ phận rời):
   `.claude/skills/film-compose-shot/references/layers-method.md` và `layers-character.md`.
 - Trạng thái tập là `EPISODE.md`, **không bao giờ** `STATE.md` (tên đó thuộc cinecode).
@@ -60,6 +62,8 @@ python3 tools/layers/matte_seq.py <clip>.mp4 --start-frame <khung đầu>.png --
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --dry-run --strict
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>]
+python3 tools/toon/toon.py still|turntable|clip|lookbook ...          # method: code, miễn phí: xem style vẽ bằng code, linh vật giot
+python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
 ```
 - Mã thoát của `ark.py image|video|lambda-job prepare`: **2** = từ chối tại chỗ, chưa gửi gì → sửa lệnh; **3** = vượt trần;
   **1** = request đã rời máy, xem dòng ledger. File đầu ra đã tồn tại bị từ chối (tăng `_v<NN>`; `--overwrite` chỉ cho thử
@@ -93,6 +97,9 @@ python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--in
 - Gặp lỗi mới → thêm vào `docs/RUNBOOK.md` (triệu chứng, nguyên nhân, cách xử lý).
 - Sửa `lambda/ark_image_worker.py` → triển khai lại theo `lambda/README.md` (mục "Triển khai lại"); `build_deploy.py --check`
   in hai mã băm phải khớp với function đang chạy.
+- Sửa `tools/toon/*.js` → tăng `T.VERSION` trong `rig.js`, chạy `tests/test_toon.py` (node + trình duyệt) và
+  `tests/test_method_code.py`; look/hậu kỳ mới → thêm vào `looks.json` và `TOON.LOOKS`/`TOON.POSTS` (`toon.js`).
+  Đổi phiên bản three.js: `tools/toon/three.lock` + `docs/setup-script.sh` (`THREE_VER`), `docs/RUNBOOK.md` ("three.js").
 - Sửa `tools/compose/*.js` → tăng `C.VERSION` trong `core.js`, chạy test (`tests/test_compose_js.py`,
   `tests/test_compose_character.py` cần node) và `python3 tools/compose/inline.py --lint`. Module mới → thêm vào `ORDER`
   của `inline.py` và `motions.json`.

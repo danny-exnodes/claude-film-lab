@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>TOON preview</title>
+<style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script src="../compose/core.js"></script>
+<script src="rig.js"></script>
+<script src="motion.js"></script>
+<script src="project.js"></script>
+<script src="look2d.js"></script>
+<script src="look3d.js"></script>
+<script src="post.js"></script>
+<script src="toon.js"></script>
+<script>
+// A free preview page for the TOON kit (tools/toon/toon.py drives it through tools/toon/shoot.cjs).
+// window.SPEC (set before load): { w, h, fps, three, segments: [{ dur, scene, label? }] }
+// window.READY -> { frames, fps, width, height }; window.renderFrame(i); window.grab(type, quality) -> data URL.
+'use strict';
+const SPEC = window.SPEC || { w: 960, h: 540, fps: 24, segments: [{ dur: 2, scene: { look: 'flat-toon', cast: [{ timeline: {} }] } }] };
+const W = SPEC.w || 1920, H = SPEC.h || 1080, FPS = SPEC.fps || 24;
+const canvas = document.getElementById('c');
+canvas.width = W; canvas.height = H;
+const g = canvas.getContext('2d', { willReadFrequently: true });
+if (SPEC.three) TOON.THREE_URL = SPEC.three;
+const starts = [];
+let total = 0;
+for (const s of SPEC.segments) { starts.push(total); total += s.dur; }
+const FRAMES = Math.round(total * FPS);
+const FONT = "'Inter', 'DejaVu Sans', sans-serif";
+
+// the lookbook card: a numbered list of the styles, the current one highlighted (like a style index)
+function label(seg, k) {
+  const L = seg.label;
+  if (!L) return;
+  const u = H / 1080, a = Math.min(1, k * 4, (1 - k) * 4 + 0.6);
+  g.save();
+  g.globalAlpha = Math.max(0, a);
+  const x = 48 * u, y = 44 * u, pad = 18 * u;
+  g.font = `600 ${Math.round(44 * u)}px ${FONT}`;
+  const head = `${L.n}  ${L.name}`;
+  const w = g.measureText(head).width + 2 * pad;
+  g.fillStyle = 'rgba(255,255,255,0.88)';
+  g.beginPath(); g.roundRect(x, y, w, 64 * u + (L.vi ? 34 * u : 0), 14 * u); g.fill();
+  g.fillStyle = '#111'; g.textBaseline = 'top';
+  g.fillText(head, x + pad, y + 10 * u);
+  if (L.vi) { g.font = `400 ${Math.round(26 * u)}px ${FONT}`; g.fillStyle = '#444'; g.fillText(L.vi, x + pad, y + 60 * u); }
+  g.restore();
+}
+
+window.renderFrame = (i) => {
+  const t = i / FPS;
+  let k = SPEC.segments.length - 1;
+  for (let j = 0; j < starts.length; j++) if (t >= starts[j]) k = j;
+  const seg = SPEC.segments[k];
+  const lt = t - starts[k];
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.fillStyle = '#000'; g.fillRect(0, 0, W, H);
+  TOON.render(g, W, H, seg.scene, lt);
+  label(seg, lt / seg.dur);
+};
+window.grab = (type = 'image/png', q = 0.92) => canvas.toDataURL(type, q);
+window.READY = TOON.ready(SPEC.segments.map((s) => s.scene)).then(() => {
+  window.renderFrame(0);
+  return { frames: FRAMES, fps: FPS, width: W, height: H, warnings: TOON.report() };
+});
+</script>
+</body>
+</html>

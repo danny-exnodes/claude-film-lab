@@ -32,11 +32,12 @@ fi
 #    --no-sandbox, and cinecode's capture.mjs only reads CHROME_PATH.
 #    Exported here too, so the doctor this hook starts can check them.
 mkdir -p "$LAB/formats"
-export FILM_LAB="$LAB" CINECODE_FORMATS="$LAB/formats"
+export FILM_LAB="$LAB" CINECODE_FORMATS="$LAB/formats" FILM_THREE="${FILM_THREE:-/opt/film-lab/vendor/three/build/three.module.js}"
 [ "$(id -u)" != "0" ] || export CHROME_PATH="$LAB/tools/compose/chrome-root.sh"
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
   echo "export FILM_LAB=\"$FILM_LAB\"" >> "$CLAUDE_ENV_FILE"
   echo "export CINECODE_FORMATS=\"$CINECODE_FORMATS\"" >> "$CLAUDE_ENV_FILE"
+  echo "export FILM_THREE=\"$FILM_THREE\"" >> "$CLAUDE_ENV_FILE"
   if [ "$(id -u)" = "0" ]; then
     echo "export CHROME_PATH=\"$CHROME_PATH\"" >> "$CLAUDE_ENV_FILE"
   fi
@@ -75,6 +76,12 @@ fi
 if [ ! -f /root/.rembg/models/u2net/u2net.onnx ] && [ ! -f ~/.u2net/u2net.onnx ]; then
   (cd /tmp && timeout 240 python3 -c "from rembg import new_session; new_session('u2net')" >/dev/null 2>&1) \
     || echo "film-lab: u2net prefetch failed; rembg will download it on first use"
+fi
+
+# 5b. three.js for the TOON 3D looks (method: code): pinned in tools/toon/three.lock, best effort
+if [ "$FILM_THREE" = "/opt/film-lab/vendor/three/build/three.module.js" ] && ! "$LAB/tools/toon/install_three.sh" --check >/dev/null 2>&1; then
+  timeout 150 "$LAB/tools/toon/install_three.sh" >/dev/null 2>&1 \
+    || echo "film-lab: three.js install failed (doctor reports three; tools/toon/install_three.sh)"
 fi
 
 # 6. Project data lives on Google Drive (docs/CONVENTIONS.md §11), never in the repo: remind to pull it

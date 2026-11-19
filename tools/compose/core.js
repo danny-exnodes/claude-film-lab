@@ -5,7 +5,7 @@
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
-  C.VERSION = '1.1.0';
+  C.VERSION = '1.2.0';
   C.STAGE = { W: 1920, H: 1080 };               // stage units: every position and size is in 1920x1080 stage px
   // Parallax depth per layer kind (1 = the subject plane, moves with the camera; < 1 farther, > 1 nearer)
   C.DEPTH = { bg: 0.12, mid: 0.45, fg: 1.0, char: 1.0, mist: 1.25, near: 1.7 };

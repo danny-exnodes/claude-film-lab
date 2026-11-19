@@ -22,6 +22,8 @@ Phương pháp dựng (đọc `method` trong `EPISODE.md` trước khi viết sh
   `strip-warp`, `foliage`, `smoke`, `fire`, `embers`, `mist-bands`, `breath`, `eyelid`); cử chỉ lớn là plate tư thế ghi
   thành mã lớp thêm (`L4b`, `L4c`…) kèm `pose-cycle`; shot giữ 3–6 s có máy quay.
 - `method: seedance` hoặc không có khóa: quy tắc `ai_motion` như cũ (mục 4 của skill).
+- `method: code`: nhân vật vẽ bằng code; mã lớp `C-`/`E-`/`FX-`/`T`, `code_motion` là hành động rig, `ai_motion` trống
+  (skill mục 4a, `.claude/skills/film-compose-shot/references/code-method.md` §4).
 - Một tập một nhánh. Không tự đổi `method`; điều nhánh đang dùng không làm được thì ghi vào báo cáo.
 
 Giới hạn:

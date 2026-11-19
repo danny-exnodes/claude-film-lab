@@ -22,6 +22,9 @@ chỉ định, và `review/check-<v>.txt` (đạo diễn ghi trước khâu 9 b�
 Đầu ra: `review/qc-<v>.md` với các mục **Chặn** (lỗi buộc quay lại khâu nào, file nào, vì sao), **Nên sửa**, **Ổn**.
 Kiểm: mỗi câu trích có trong nguồn nguyên văn; tên đọc đúng căn cứ; đặc điểm nhân vật khớp bảng giải phẫu; style
 (palette, hướng sáng, không chữ/triện); tên file theo regex CONVENTIONS §2; dấu gạch ngang trong lời; khớp shots.csv.
+Tập `method: code` (không `prompts.csv`, không plate): thêm nhân vật đúng `characters/<slug>/character.json` đã khóa ở G2
+(tỉ lệ, màu, số mắt, seed) và turntable trong `review/`, không chân trượt hay tay xuyên thân ở khung đạo diễn chỉ định,
+và mục 7 của `.claude/skills/film-compose-shot/references/code-method.md`.
 
 Quyền ghi (Write/Edit) chỉ dùng cho đúng hai chỗ:
 1. `review/qc-*.md` trong thư mục tập đang kiểm (tạo mới bằng Write; không ghi đè `qc-*.md` của phiên bản khác);

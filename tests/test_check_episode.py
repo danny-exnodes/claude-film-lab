@@ -556,7 +556,7 @@ class TestEpisodeBudget(EpisodeCase):
 
 class TestEpisodeMethod(EpisodeCase):
     """EPISODE.md `method: layers | seedance` (docs/CONVENTIONS.md §5): layers never uses Seedance."""
-    WARN = "WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers or method: seedance"
+    WARN = "WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers, seedance or code"
 
     def method(self, value):
         s = (self.ep / "EPISODE.md").read_text(encoding="utf-8")
@@ -582,7 +582,7 @@ class TestEpisodeMethod(EpisodeCase):
         code, out, _ = self.check()
         self.assertEqual(code, 0, out)
         self.assertEqual(out.count(self.WARN), 1, out)
-        self.assertEqual(out.count("method"), 3, out)      # that one line only: s03 keeps its ai_motion
+        self.assertEqual(out.count("method"), 2, out)      # that one line only: s03 keeps its ai_motion
 
     def test_fixture_states_its_method(self):
         code, out, _ = self.check()
@@ -633,7 +633,7 @@ class TestEpisodeMethod(EpisodeCase):
         for bad in ("layer", "both", "", "[layers]"):
             with self.subTest(value=bad):
                 self.method(bad)
-                out = self.assert_error(r"EPISODE\.md: method must be layers or seedance")
+                out = self.assert_error(r"EPISODE\.md: method must be layers, seedance or code")
                 self.assertNotIn("method layers", out)      # no layers rule is applied on an invalid value
                 self.assertNotIn("has no method", out)
 

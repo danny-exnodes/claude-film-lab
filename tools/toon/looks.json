@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "note": "Look ids for style.yaml `render.look` / `render.post` (engine: code style packs, docs/CONVENTIONS.md §3). geometry looks draw the frame (canvas2d or three); post passes turn any finished frame into another. Mirrors TOON.LOOKS / TOON.POSTS in toon.js (tests/js/toon.test.cjs checks they agree).",
+  "looks": {
+    "clay-3d": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 2, "name": "Soft clay 3D", "name_vi": "Đất nặn 3D", "base": "cinecode:claymation"},
+    "flat-toon": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 1, "name": "Flat cartoon", "name_vi": "Hoạt hình phẳng", "base": "cinecode:midcentury-toon"},
+    "blueprint": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 1, "name": "Blueprint", "name_vi": "Bản vẽ kỹ thuật", "base": "cinecode:blueprint"},
+    "ink-silhouette": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 1, "name": "Ink silhouette", "name_vi": "Bóng mực", "base": "cinecode:shadow-puppet"},
+    "rubber-hose": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 2, "name": "Rubber hose", "name_vi": "Tay ống cao su", "base": "cinecode:rubber-hose"},
+    "cardboard": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 2, "name": "Cardboard cutout", "name_vi": "Bìa cắt dán", "base": "cinecode:paper-popup"},
+    "lowpoly-90s": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 1, "name": "90s low poly", "name_vi": "Low poly thập niên 90", "base": "cinecode:lowpoly-island"}
+  },
+  "posts": {
+    "riso": {"kind": "post", "module": "post.js", "hold": 2, "name": "Riso print", "name_vi": "In riso", "base": "cinecode:risograph"},
+    "pixel-16": {"kind": "post", "module": "post.js", "hold": 2, "name": "16-bit pixel", "name_vi": "Pixel 16-bit", "base": "cinecode:pixel-rpg"},
+    "ascii": {"kind": "post", "module": "post.js", "hold": 1, "name": "ASCII", "name_vi": "Chữ ASCII", "base": "cinecode:ascii-crt"}
+  }
+}

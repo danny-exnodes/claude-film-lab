@@ -1,0 +1,22 @@
+# Hoạt hình phẳng (Flat cartoon) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 2). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip hoat-hinh-phang --draft --out out/_lab/hoat-hinh-phang.mp4
+id: hoat-hinh-phang
+name: Hoạt hình phẳng
+name_en: Flat cartoon
+status: draft
+base: cinecode:midcentury-toon
+engine: code
+render:
+  engine: canvas2d
+  look: flat-toon
+  post: []
+  hold: 1
+  opts: {outline: 0}
+palette: {sky: '#8FD3F4', sun: '#FFD166', hill: '#7CC47F', ground: '#9BD67A', tree: '#3E9E5B', trunk: '#8A5A3C'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: C major
+  instruments: [marimba, piano staccato, bass điện, trống cajón]
+  notes: Nhịp tươi 100–120 BPM; mỗi hành động chính một tiếng "pop" hoặc "whoosh" nhẹ.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

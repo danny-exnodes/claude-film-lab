@@ -395,7 +395,8 @@ class TestSessionStartHook(unittest.TestCase):
 
     def test_exports_reach_the_env_file_and_the_doctor(self):
         lab, r = self.lab["healthy"].lab, self.r["healthy"]
-        want = [f'export FILM_LAB="{lab}"', f'export CINECODE_FORMATS="{lab}/formats"']
+        want = [f'export FILM_LAB="{lab}"', f'export CINECODE_FORMATS="{lab}/formats"',
+                'export FILM_THREE="/opt/film-lab/vendor/three/build/three.module.js"']
         if os.getuid() == 0:
             want.append(f'export CHROME_PATH="{lab}/tools/compose/chrome-root.sh"')
         self.assertEqual(r["env_lines"], want)

@@ -1,0 +1,22 @@
+# Tay ống cao su (Rubber hose) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 7). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip ong-cao-su --draft --out out/_lab/ong-cao-su.mp4
+id: ong-cao-su
+name: Tay ống cao su
+name_en: Rubber hose
+status: draft
+base: cinecode:rubber-hose
+engine: code
+render:
+  engine: canvas2d
+  look: rubber-hose
+  post: []
+  hold: 2
+  opts: {bpm: 120}
+palette: {paper: '#E9DFC8', ink: '#1A1714', grey: '#8C8475', white: '#F8F3E6'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: Bb major (jazz)
+  instruments: [kèn trumpet tắt tiếng, clarinet, banjo, tuba, trống snare chổi]
+  notes: Hot jazz 120–140 BPM; nhún theo phách (đặt `bpm` của style và clip `bounce` cùng một số).
+type: {latin: Inter, cjk: Noto Sans CJK TC}

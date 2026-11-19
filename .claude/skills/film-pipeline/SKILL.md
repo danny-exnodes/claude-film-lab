@@ -145,9 +145,10 @@ Quy tắc cổng:
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.
 
-### 2.1 Hai phương pháp dựng (`method`)
+### 2.1 Ba phương pháp dựng (`method`)
 
-Mỗi tập theo đúng **một** phương pháp, ghi ở front matter của `EPISODE.md`: `method: layers | seedance`. Không có khóa
+Mỗi tập theo đúng **một** phương pháp, ghi ở front matter của `EPISODE.md`: `method: layers | seedance | code`.
+`code` (nhân vật và cảnh vẽ hoàn toàn bằng code, chi phí 0) có quy trình riêng ở cuối mục này. Không có khóa
 = `seedance` (tập cũ giữ nguyên nghĩa); tập mới từ mẫu là `layers`. Không trộn hai cách trong một tập; đổi sau G1 phải
 hỏi người dùng (kịch bản và shot list viết theo nhánh).
 
@@ -163,7 +164,7 @@ Việc của đạo diễn theo khâu:
 - **Khâu 0:** hỏi phương pháp **cùng lượt** với độ dài, style và trần chi phí (một câu hỏi, nêu hai lựa chọn và khác biệt
   chi phí: `layers` chỉ tốn ảnh, `seedance` tốn thêm giây video); ghi câu trả lời nguyên văn và điền `method:` vào
   `EPISODE.md`. `layers` → `budget.yaml` có `video_seconds: 0`.
-- **Mọi hợp đồng giao việc** ghi thêm một dòng `Phương pháp: layers | seedance` (agent không thấy lịch sử chat).
+- **Mọi hợp đồng giao việc** ghi thêm một dòng `Phương pháp: layers | seedance | code` (agent không thấy lịch sử chat).
 - **Khâu 3 (`layers`):** `film-art-director` thiết kế bộ tư thế và viết `prompts/jobs-<nhóm>.csv` cho từng nhóm shot.
 - **Trước G2:** chạy `python3 tools/status.py <thư mục tập>` và đưa người dùng nguyên văn mục `FORECAST` (ảnh còn phải
   tạo, giây video dự kiến, so với trần); `OVER` hoặc dòng xung đột `method layers but sNN has ai_motion` → sửa
@@ -176,6 +177,20 @@ Việc của đạo diễn theo khâu:
   gọi `ark.py video`.
 - **Khâu 7–8 (`layers`):** `film-compositor` theo `.claude/skills/film-compose-shot/references/layers-method.md`; trước
   G3 kiểm danh sách §5 của file đó (không thân nào trượt, không bộ phận hiện rời, mỗi shot giữ có ≥ 2 chuyển động + máy quay).
+
+
+**`method: code`** (đọc `.claude/skills/film-compose-shot/references/code-method.md`):
+- **Khâu 0:** nêu lựa chọn thứ ba cùng lượt: "vẽ hoàn toàn bằng code, 0 đồng, nhân vật nhất quán tuyệt đối, chất hoạt
+  hình (không phải tranh vẽ chi tiết)". Cho người dùng xem lookbook (`python3 tools/toon/toon.py lookbook --draft`, miễn
+  phí, gửi `sheet.png` và video) để chọn một trong 10 style `engine: code`. `budget.yaml`: `images: 0`, `video_seconds: 0`.
+- **Khâu 3:** `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
+  theo `tools/toon/rig.js` `T.DEFAULTS`) và mục **Thông số model** trong `CHARACTER.md`; bối cảnh `E-<slug>` = tham số
+  `env` (cây, đá, mây, đồi) và bảng màu của style.
+- **Khâu 4 → G2:** đạo diễn tự chạy (miễn phí) `python3 tools/toon/toon.py turntable --character <...>/character.json
+  --style <id> --out <tập>/review/turntable-<slug>.png` và một clip shot mẫu (`toon.py clip`); `status.py --gate G2`
+  kiểm `character.json`, turntable và chi phí 0.
+- **Khâu 5–6:** bỏ qua (Nhật ký: `khâu 5–6 bỏ qua (method code)`); không giao `film-plate-maker`, `film-animator`.
+- **Khâu 7–10:** `film-compositor` dựng bằng `inline.py film.html --init --toon` (mẫu `templates/toon-film-section.js`).
 
 ## 3. Mở tập (khâu 0)
 

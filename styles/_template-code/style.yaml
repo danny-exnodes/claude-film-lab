@@ -1,0 +1,38 @@
+# Mẫu style pack vẽ hoàn toàn bằng code (engine: code, method: code) – schema: docs/CONVENTIONS.md §3.
+# Tạo trường phái mới: chép cả thư mục styles/_template-code/ thành styles/<id>/, điền file này, STYLE.md, motion.md,
+# sound.md, examples.md. Không có prompts/, matte, layers, models: không model tạo ảnh/video nào được gọi.
+# Ví dụ đầy đủ: styles/hoat-hinh-phang/ (2D), styles/low-poly-90/ (3D), styles/in-riso/ (2D + hậu kỳ).
+# Xem thử miễn phí: python3 tools/toon/toon.py clip <id> --draft --out out/_lab/<id>.mp4
+
+# id: tên thư mục, kebab-case không dấu (CONVENTIONS §2). Phải trùng tên thư mục sau khi chép.
+id: _template-code
+name: "<Tên trường phái>"
+name_en: "<English name>"
+status: draft
+# base: recipe cinecode gần nhất (python3 <cinecode>/scripts/styles.py list), dạng cinecode:<id>, hoặc null.
+base: null
+engine: code
+# render: cách TOON vẽ một khung (tools/toon/toon.js). look: một geometry look của tools/toon/looks.json
+# (canvas2d: flat-toon, ink-silhouette, rubber-hose, blueprint · three: clay-3d, lowpoly-90s, cardboard), engine phải
+# khớp look. post: hậu kỳ theo thứ tự (riso, pixel-16, ascii), mỗi mục là id hoặc {id: ..., tuỳ chọn}. hold: 1 = 24 hình/s,
+# 2 = bước đôi, 3 = stop-motion. palette: ghi đè màu của look (tên khóa ở đầu look trong look2d.js / look3d.js).
+# opts / camera / env: tuỳ chọn của look, máy quay mặc định, đạo cụ cảnh (project.js T.props).
+render:
+  engine: canvas2d
+  look: flat-toon
+  post: []
+  hold: 1
+  palette: {}
+  opts: {}
+# palette: bảng màu để duyệt (tên -> "#RRGGBB"); màu nhân vật nằm trong character.json.
+palette:
+  ink: "#14161C"
+  paper: "#F4EEDF"
+motion: [walk-cycle, turn, wave, blink, breath]
+sound:
+  scale: "<scale>"
+  instruments: []
+  notes: "<ghi chú ngắn; chi tiết ở sound.md>"
+type:
+  latin: Inter
+  cjk: Noto Sans CJK TC

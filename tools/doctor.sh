@@ -70,6 +70,22 @@ if [ -f "$CINE/SKILL.md" ]; then
 else
   bad skill-cinecode "$CINE/SKILL.md missing"
 fi
+# three.js for the TOON 3D looks (method: code): pinned in tools/toon/three.lock. Missing = WARN (only the 3D styles
+# need it); present with another hash = FAIL (a render would silently change).
+tdir=$(dirname "$(dirname "${FILM_THREE:-/opt/film-lab/vendor/three/build/three.module.js}")")
+out=$(FILM_THREE_DIR="$tdir" "$LAB/tools/toon/install_three.sh" --check 2>&1)
+if [ $? = 0 ]; then ok three "$(echo "$out" | sed 's/^three: //')"
+elif echo "$out" | grep -q "hash differs"; then bad three "$(echo "$out" | head -1 | cut -c1-110); run tools/toon/install_three.sh"
+else warn three "not installed: the 3D code styles need it; run tools/toon/install_three.sh"; fi
+if [ $QUICK = 0 ]; then
+  # WebGL2 in headless Chromium (software, SwiftShader): the TOON 3D looks render through it
+  v=$(cd "$LAB" && timeout 60 node -e "
+const { chromium } = require('playwright');
+(async () => { const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const p = await b.newPage(); const v = await p.evaluate(() => { const c = document.createElement('canvas').getContext('webgl2');
+  return c ? c.getParameter(c.VERSION) : ''; }); await b.close(); console.log(v); })().catch((e) => { console.log(''); });" 2>/dev/null)
+  case "$v" in *"WebGL 2"*) ok webgl "$v" ;; *) bad webgl "no WebGL2 in headless Chromium (the 3D code styles cannot render; docs/RUNBOOK.md)" ;; esac
+fi
 # The ark.py link is shared by every session in the container and belongs to the main checkout. In a linked
 # git worktree it must stay there: never repoint it at work in progress.
 MAIN=$(git -C "$LAB" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) && MAIN=$(dirname "$MAIN") || MAIN=""

@@ -182,7 +182,7 @@ Việc của đạo diễn theo khâu:
 **`method: code`** (đọc `.claude/skills/film-compose-shot/references/code-method.md`):
 - **Khâu 0:** nêu lựa chọn thứ ba cùng lượt: "vẽ hoàn toàn bằng code, 0 đồng, nhân vật nhất quán tuyệt đối, chất hoạt
   hình (không phải tranh vẽ chi tiết)". Cho người dùng xem lookbook (`python3 tools/toon/toon.py lookbook --draft`, miễn
-  phí, gửi `sheet.png` và video) để chọn một trong 10 style `engine: code`. `budget.yaml`: `images: 0`, `video_seconds: 0`.
+  phí, gửi `sheet.png` và video) để chọn một trong 11 style `engine: code`. `budget.yaml`: `images: 0`, `video_seconds: 0`.
 - **Khâu 3:** `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
   theo `tools/toon/rig.js` `T.DEFAULTS`) và mục **Thông số model** trong `CHARACTER.md`; bối cảnh `E-<slug>` = tham số
   `env` (cây, đá, mây, đồi) và bảng màu của style.

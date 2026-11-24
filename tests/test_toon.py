@@ -27,7 +27,7 @@ class TestToonNode(unittest.TestCase):
 @unittest.skipUnless(playwright_ok(), "node + Playwright are needed for the browser renders")
 class TestToonRender(unittest.TestCase):
     STYLES = ["hoat-hinh-phang", "bong-muc", "ong-cao-su", "ban-ve-ky-thuat", "in-riso", "pixel-16bit", "chu-ascii",
-              "dat-nan-3d", "low-poly-90", "bia-cat-dan"]
+              "dat-nan-3d", "low-poly-90", "bia-cat-dan", "sach-pop-up"]
 
     def still(self, style, out, t="2.6"):
         r = subprocess.run([sys.executable, str(REPO / "tools" / "toon" / "toon.py"), "still", style, "--t", t,
@@ -37,7 +37,7 @@ class TestToonRender(unittest.TestCase):
     def test_every_style_renders(self):
         with tempfile.TemporaryDirectory() as d:
             for s in self.STYLES:
-                if s in ("dat-nan-3d", "low-poly-90", "bia-cat-dan") and not THREE.is_file():
+                if s in ("dat-nan-3d", "low-poly-90", "bia-cat-dan", "sach-pop-up") and not THREE.is_file():
                     continue
                 with self.subTest(style=s):
                     out = Path(d) / f"{s}.png"
@@ -51,7 +51,7 @@ class TestToonRender(unittest.TestCase):
                     self.assertGreater(colours, 8, f"{s}: frame looks blank ({colours} colours)")
 
     def test_same_frame_same_bytes(self):
-        styles = ["ong-cao-su"] + (["low-poly-90"] if THREE.is_file() else [])
+        styles = ["ong-cao-su"] + (["low-poly-90", "sach-pop-up"] if THREE.is_file() else [])
         with tempfile.TemporaryDirectory() as d:
             for s in styles:
                 with self.subTest(style=s):

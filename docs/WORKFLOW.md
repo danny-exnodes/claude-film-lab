@@ -68,12 +68,12 @@ Mỗi tập chọn **một** phương pháp ở khâu 0, ghi `method: layers | s
 
 **`method: code`** (#38): không gọi model tạo ảnh hay video nào. Nhân vật là `character.json` (rig vẽ bằng code: thân,
 mắt, tay chân ống, chỏm), chuyển động là timeline hành động (`walk`, `turn`, `wave`, `jump`… chân không trượt), cảnh là
-đạo cụ thủ tục theo seed, và một style `engine: code` quyết định cách vẽ: 10 style sẵn (đất nặn 3D, hoạt hình phẳng,
-bản vẽ kỹ thuật, in riso, pixel 16-bit, bóng mực, tay ống cao su, chữ ASCII, bìa cắt dán, low poly thập niên 90).
+đạo cụ thủ tục theo seed, và một style `engine: code` quyết định cách vẽ: 11 style sẵn (đất nặn 3D, hoạt hình phẳng,
+bản vẽ kỹ thuật, in riso, pixel 16-bit, bóng mực, tay ống cao su, chữ ASCII, bìa cắt dán, low poly thập niên 90, sách pop-up giấy).
 Trả tiền: không. Khâu 3 = `character.json` + `CHARACTER.md` (Thông số model); khâu 4 = turntable + shot mẫu (G2); khâu
 5–6 bỏ qua; khâu 7–10 như cũ với `inline.py --init --toon`. Chọn khi: phim thiếu nhi, giải thích kiến thức, linh vật,
 intro kênh, cần nhân vật nhất quán tuyệt đối và chi phí 0. Hướng dẫn: `.claude/skills/film-compose-shot/references/code-method.md`;
-xem cả 10 style: `python3 tools/toon/toon.py lookbook`.
+xem cả 11 style: `python3 tools/toon/toon.py lookbook`.
 
 Trước G2 đạo diễn đưa người dùng mục `FORECAST` của `python3 tools/status.py <thư mục tập>` (ảnh còn phải tạo, giây
 video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản muốn gì → làm thế nào" và danh sách kiểm trước G3 của

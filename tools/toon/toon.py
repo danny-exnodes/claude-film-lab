@@ -30,9 +30,9 @@ DEMO = HERE / "demo" / "giot.json"
 LOOKS = json.loads((HERE / "looks.json").read_text(encoding="utf-8"))
 THREE_DEFAULT = "/opt/film-lab/vendor/three/build/three.module.js"
 
-# The lookbook: the ten code styles in the order of the style index (issue #38)
+# The lookbook: the ten code styles in the order of the style index (issue #38), then the pop-up book (11)
 LOOKBOOK = ["dat-nan-3d", "hoat-hinh-phang", "ban-ve-ky-thuat", "in-riso", "pixel-16bit",
-            "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90"]
+            "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up"]
 
 # One action for every style: walk in, turn to the camera, wave, turn and walk out.
 ACTION = {

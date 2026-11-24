@@ -22,7 +22,7 @@ tên và bố cục là của lab.
   lệch bản; `pixel-16` 320×180, 16 màu, dither Bayer; `ascii` lưới ký tự theo độ sáng và hướng biên, quầng phosphor),
   `toon.js` (`TOON.ready`, `TOON.render`), `looks.json` (sổ đăng ký).
 - **Mười style pack `engine: code`** (`status: draft`): `dat-nan-3d`, `hoat-hinh-phang`, `ban-ve-ky-thuat`, `in-riso`,
-  `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90`, và mẫu `styles/_template-code/`.
+  `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90` (+ `sach-pop-up`, xem dưới), và mẫu `styles/_template-code/`.
   Style pack có khóa mới `engine: image | code` (thiếu = `image`); với `code`: khối `render` (look, post, hold, palette,
   opts, camera, env) thay cho `style_block`/`matte`/`layers`/`models`/`prompts/`.
 - **`method: code`** trong `EPISODE.md` (gộp `code3d` của #35): `check_episode.py` báo ERROR khi `images`,
@@ -39,6 +39,11 @@ tên và bố cục là của lab.
 - **three.js 0.186.1 ghim cục bộ** (`tools/toon/three.lock`, `install_three.sh`, `FILM_THREE`): setup script bước 6,
   hook khởi động cài khi thiếu; `doctor.sh` dòng `three` (thiếu = WARN, sai băm = FAIL) và, ở bản đầy đủ, `webgl`.
   `chrome-root.sh` bật SwiftShader (`FILM_WEBGL=gpu` để tắt). Render không tải CDN.
+- **Phong cách thứ 11 `sach-pop-up`** (look `popup-paper`, TOON v1.1.0, 2026-11-24), sau khi nghiên cứu Papertrails
+  (xikhar/papertrails, MIT; chỉ học kỹ thuật, không dùng mã hay tranh của họ): cuốn sách pop-up nhìn từ trên cao qua
+  ống kính dài; trang in nền và đường kraft mép xé; cây hai tấm bìa cài chéo, thông, dải bụi in hoa, đá gấp; mặt bìa in
+  hoạ tiết vẽ bằng code, mép cắt kem; bìa bật dậy theo lò xo bản lề (`opts.rise`, vượt ~15 % rồi rung) và lắc trong gió;
+  ánh ấm, bóng mềm, tilt-shift, grade ấm; ban đêm có đèn lồng (`opts.night`). Ghi chép nghiên cứu: `styles/sach-pop-up/STYLE.md`.
 - Bộ COMPOSE lên v1.2.0 (chỉ vì `inline.py` đổi). Tài liệu: `references/code-method.md` (mới), `film-pipeline` §2.1,
   `film-script` §4a, `film-compose-shot`, agent `film-writer`, `film-art-director`, `film-compositor`,
   `film-reviewer`, `film-animator`, `docs/WORKFLOW.md` (ba phương pháp), `docs/CONVENTIONS.md` §3/§5/§6, RUNBOOK, BACKLOG.

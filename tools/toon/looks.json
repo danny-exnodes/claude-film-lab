@@ -8,7 +8,8 @@
     "ink-silhouette": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 1, "name": "Ink silhouette", "name_vi": "Bóng mực", "base": "cinecode:shadow-puppet"},
     "rubber-hose": {"kind": "geometry", "engine": "canvas2d", "module": "look2d.js", "hold": 2, "name": "Rubber hose", "name_vi": "Tay ống cao su", "base": "cinecode:rubber-hose"},
     "cardboard": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 2, "name": "Cardboard cutout", "name_vi": "Bìa cắt dán", "base": "cinecode:paper-popup"},
-    "lowpoly-90s": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 1, "name": "90s low poly", "name_vi": "Low poly thập niên 90", "base": "cinecode:lowpoly-island"}
+    "lowpoly-90s": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 1, "name": "90s low poly", "name_vi": "Low poly thập niên 90", "base": "cinecode:lowpoly-island"},
+    "popup-paper": {"kind": "geometry", "engine": "three", "module": "look3d.js", "hold": 1, "name": "Pop-up paper book", "name_vi": "Sách pop-up giấy", "base": "cinecode:paper-popup"}
   },
   "posts": {
     "riso": {"kind": "post", "module": "post.js", "hold": 2, "name": "Riso print", "name_vi": "In riso", "base": "cinecode:risograph"},

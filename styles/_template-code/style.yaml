@@ -13,7 +13,7 @@ status: draft
 base: null
 engine: code
 # render: cách TOON vẽ một khung (tools/toon/toon.js). look: một geometry look của tools/toon/looks.json
-# (canvas2d: flat-toon, ink-silhouette, rubber-hose, blueprint · three: clay-3d, lowpoly-90s, cardboard), engine phải
+# (canvas2d: flat-toon, ink-silhouette, rubber-hose, blueprint · three: clay-3d, lowpoly-90s, cardboard, popup-paper), engine phải
 # khớp look. post: hậu kỳ theo thứ tự (riso, pixel-16, ascii), mỗi mục là id hoặc {id: ..., tuỳ chọn}. hold: 1 = 24 hình/s,
 # 2 = bước đôi, 3 = stop-motion. palette: ghi đè màu của look (tên khóa ở đầu look trong look2d.js / look3d.js).
 # opts / camera / env: tuỳ chọn của look, máy quay mặc định, đạo cụ cảnh (project.js T.props).

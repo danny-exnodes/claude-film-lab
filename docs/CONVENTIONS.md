@@ -137,7 +137,7 @@ base, engine: code, render, palette`; không `style_block, negative, light, matt
 engine: code
 render:
   engine: canvas2d          # canvas2d | three, phải khớp look trong tools/toon/looks.json
-  look: flat-toon           # flat-toon | ink-silhouette | rubber-hose | blueprint | clay-3d | lowpoly-90s | cardboard
+  look: flat-toon           # flat-toon | ink-silhouette | rubber-hose | blueprint | clay-3d | lowpoly-90s | cardboard | popup-paper
   post: [riso]              # hậu kỳ theo thứ tự: riso | pixel-16 | ascii; một mục có thể là {id: riso, cell: 7, ...}
   hold: 2                   # 1 = 24 hình/s, 2 = bước đôi, 3–4 = stop-motion
   palette: {sky: "#F4EEDF"} # ghi đè màu của look: "#RRGGBB" hoặc "rgba(...)"

@@ -12,7 +12,7 @@
 | `motion.js` | timeline hành động → tư thế tại `t`: `walk`, `run`, `turn`, `jump`, `wave`, `cheer`, `point`, `bounce`, `look`, `blink`, `idle`; chớp mắt và thở tự động |
 | `project.js` | máy quay (`pos`, `target`, `fov`, `move`, `follow`, `shake`), phép chiếu, danh sách hình 2D, đạo cụ cảnh theo seed (đồi, cây, đá, mây) |
 | `look2d.js` | look canvas: `flat-toon`, `ink-silhouette`, `rubber-hose`, `blueprint` |
-| `look3d.js` | look three.js: `clay-3d`, `lowpoly-90s`, `cardboard` |
+| `look3d.js` | look three.js: `clay-3d`, `lowpoly-90s`, `cardboard`, `popup-paper` |
 | `post.js` | hậu kỳ áp lên mọi khung: `riso`, `pixel-16`, `ascii` |
 | `toon.js` | `TOON.ready(scene)`, `TOON.render(g, W, H, scene, t)` |
 | `looks.json` | sổ đăng ký look và hậu kỳ (khớp `TOON.LOOKS` / `TOON.POSTS`) |
@@ -23,7 +23,7 @@ Mọi khung là hàm thuần của `(scene, t)`: không `Math.random`, `Date`, `
 ghim cục bộ (`tools/toon/three.lock`, `FILM_THREE`, cài bằng `tools/toon/install_three.sh`); Chrome headless chạy WebGL
 phần mềm (SwiftShader, `chrome-root.sh`). Không tải CDN lúc render.
 
-## 2. Mười phong cách (`styles/<id>/`, `engine: code`)
+## 2. Mười một phong cách (`styles/<id>/`, `engine: code`)
 
 | # | Style pack | Look (+ hậu kỳ) | Engine | `hold` |
 |---|---|---|---|---|
@@ -37,6 +37,7 @@ phần mềm (SwiftShader, `chrome-root.sh`). Không tải CDN lúc render.
 | 8 | `chu-ascii` | `flat-toon` + `ascii` | canvas2d | 1 |
 | 9 | `bia-cat-dan` | `cardboard` | three | 2 |
 | 10 | `low-poly-90` | `lowpoly-90s` | three | 1 |
+| 11 | `sach-pop-up` | `popup-paper` (sách pop-up, bìa bật dậy `opts.rise`, đêm `opts.night`) | three | 1 |
 
 Hậu kỳ ghép được với mọi look (vd. `lowpoly-90s` + `riso`): style mới = chép `styles/_template-code/`. Xem tất cả:
 `python3 tools/toon/toon.py lookbook` (miễn phí, ~2 phút bản nháp, ra `out/_lab/lookbook/lookbook.mp4` + `sheet.png`).
@@ -70,7 +71,9 @@ Hậu kỳ ghép được với mọi look (vd. `lowpoly-90s` + `riso`): style m
 - `bong-muc`: máy quay thấp (`render.camera` của pack) để dáng nổi trên trời; tay không che thân.
 - `ong-cao-su`: `bounce` cùng BPM với nhạc (`render.opts.bpm`).
 - `ban-ve-ky-thuat`: nét vẽ dần trong `opts.reveal` giây đầu shot; shot đầu tập dùng được làm "thiết kế" nhân vật.
-- 3D (`clay-3d`, `lowpoly-90s`, `cardboard`): cần three.js (`tools/doctor.sh` dòng `three`, bản đầy đủ thêm `webgl`).
+- `sach-pop-up`: máy quay cao, ống dài (`render.camera` của pack); look tự rải bìa dày theo `env.density` và chừa dải
+  trước đường đi nên không cây nào che nhân vật; đường đi chạy dọc trục x (z = 0): cho nhân vật đi ngang.
+- 3D (`clay-3d`, `lowpoly-90s`, `cardboard`, `popup-paper`): cần three.js (`tools/doctor.sh` dòng `three`, bản đầy đủ thêm `webgl`).
   Tốc độ ở 1080p trong container: 2D 25–70 ms/khung, 3D 100–650 ms/khung (cardboard chậm nhất).
 
 ## 6. Mẫu FILM section

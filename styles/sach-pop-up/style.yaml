@@ -1,0 +1,35 @@
+# Sách pop-up giấy (Pop-up paper book) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Phong cách số 11 của bộ vẽ bằng code (#38), thêm sau nghiên cứu Papertrails (STYLE.md). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip sach-pop-up --draft --out out/_lab/sach-pop-up.mp4
+id: sach-pop-up
+name: Sách pop-up giấy
+name_en: Pop-up paper book
+status: draft
+base: cinecode:paper-popup
+engine: code
+render:
+  engine: three
+  look: popup-paper
+  post: []
+  hold: 1
+  opts:
+    rise: {at: 0, dur: 1, spread: 0.12}
+    tiltShift: 1
+  camera:
+    pos: [0, 5.0, 5.2]
+    target: [0, 0.3, -0.6]
+    fov: 26
+    follow: 1
+    move:
+      t: [0, 4.5]
+      pos: [0, 4.5, 4.6]
+      target: [0, 0.32, -0.5]
+  env: {density: 1.7}
+palette: {page: '#C4C095', path: '#E9D6B4', rim: '#F1E6CC', ochre: '#D9902F', terracotta: '#C4502E', red: '#B23B2A', teal: '#2E7F7A',
+  pine: '#6E8A4E', table: '#2A1E17'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: G major pentatonic
+  instruments: [hộp nhạc (music box), guitar mộc gảy, sáo gỗ, tiếng giấy lật]
+  notes: Tiếng giấy gập khi bìa bật dậy (mỗi đợt một cue), bước chân giấy nhẹ, nhạc hộp nhạc ấm.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

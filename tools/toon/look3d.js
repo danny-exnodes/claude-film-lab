@@ -1,4 +1,4 @@
-// TOON 3D looks (three.js, WebGL2): clay-3d, lowpoly-90s, cardboard. Same rig and props as the 2D looks; three.js is
+// TOON 3D looks (three.js, WebGL2): clay-3d, lowpoly-90s, cardboard, popup-paper. Same rig and props as the 2D looks; three.js is
 // pinned locally (FILM_THREE, docs/setup-script.sh) and loaded by TOON.ready() before the first frame.
 // The renderer and the static scene are built once per (look, size, seed) and kept (a cache, not state: every frame
 // is still a pure function of t and SEED). The 3D picture is drawn into the film's 2D canvas.
@@ -440,6 +440,296 @@
     // a soft vignette from the lamp
     const vg = g.createRadialGradient(fs.W / 2, fs.H / 2, fs.H * 0.4, fs.W / 2, fs.H / 2, fs.H);
     vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(40,25,10,0.35)');
+    g.fillStyle = vg; g.fillRect(0, 0, fs.W, fs.H);
+  };
+
+  // ------------------------------------------------------------------ popup-paper
+  // An open pop-up book seen through a long lens from high up: a printed page (sage ground, kraft path with torn
+  // cream edges, grass ticks), die-cut cards standing on it (trees of two crossed cards, pines, shrub bands, folded
+  // rocks), each printed with its own pattern and edged in cream card; the character is a paper puppet of the rig.
+  // Cards rise from the page with a hinge spring (overshoot and quiver) when opts.rise is set, sway in a slow gust.
+  // A warm key from the upper left with soft shadows, tilt-shift blur above and below the focus line, warm grade.
+  // opts: { rise: { at, dur, spread }, night: false, tiltShift: 1, focusY: share of height (default: the character) }
+  // Techniques studied from Papertrails (xikhar/papertrails, MIT); no code or art of it is used here.
+  const POP = { page: '#C4C095', page2: '#B2AE82', path: '#E9D6B4', pathEdge: '#F4EAD6', tick: '#6E7A4E', table: '#2A1E17',
+                block: '#E9DDC2', rim: '#F1E6CC', ochre: '#D9902F', terracotta: '#C4502E', red: '#B23B2A', leaf: '#7E2F1F',
+                trunk: '#6B3B22', pine: '#6E8A4E', pine2: '#4F6B3A', teal: '#2E7F7A', teal2: '#1F5E5A', flower: '#F2D7A6',
+                rock: '#B9A58C', sky: '#20180F', lantern: '#FFC873' };
+  const cardTex = (THREE, key, draw, w = 256, h = 256) => {
+    cache.tex = cache.tex || {};
+    if (!cache.tex[key]) {
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      const g = c.getContext('2d');
+      g.translate(0, h); g.scale(w, -h);          // unit square, y up: the same coordinates as the card's shape
+      draw(g);
+      const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+      cache.tex[key] = t;
+    }
+    return cache.tex[key];
+  };
+  const unitPath = (g, pts) => { g.beginPath(); g.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); };
+  // card silhouettes in the unit square (x 0..1, y 0..1, y up; the hinge is the bottom edge)
+  const SHAPES = {
+    tree: (r) => {                                    // a round crown on a short trunk
+      const pts = [[0.44, 0], [0.56, 0], [0.56, 0.3]];
+      for (let i = 0; i <= 40; i++) {
+        const a = -Math.PI / 2 + 0.55 + (i / 40) * (2 * Math.PI - 1.1);
+        const k = 1 + 0.05 * Math.sin(7 * a + r * 6) + 0.03 * Math.sin(13 * a + r * 3);
+        pts.push([0.5 + Math.cos(a) * 0.46 * k, 0.62 + Math.sin(a) * 0.37 * k]);
+      }
+      pts.push([0.44, 0.3]);
+      return pts;
+    },
+    pine: () => {
+      const pts = [[0.46, 0], [0.54, 0], [0.54, 0.12]];
+      const tiers = [[0.5, 0.12, 0.42], [0.36, 0.34, 0.6], [0.24, 0.53, 0.8], [0.12, 0.7, 1.0]];
+      for (const [hw, y0] of tiers) pts.push([0.5 + hw, y0], [0.5 + hw * 0.55, y0 + 0.08]);
+      pts.push([0.5, 1]);
+      for (const [hw, y0] of tiers.slice().reverse()) pts.push([0.5 - hw * 0.55, y0 + 0.08], [0.5 - hw, y0]);
+      pts.push([0.46, 0.12]);
+      return pts;
+    },
+    shrub: (r) => {                                   // a band of bumps
+      const pts = [[0, 0], [1, 0]];
+      for (let i = 0; i <= 48; i++) {
+        const x = 1 - i / 48;
+        const bump = Math.abs(Math.sin(Math.PI * x * 3 + r)) ** 0.6;
+        pts.push([x, Math.max(0.05, 0.55 + 0.4 * bump * Math.sin(Math.PI * x) ** 0.5)]);
+      }
+      return pts;
+    },
+  };
+  function printCard(kind, pal, r) {
+    return (g) => {
+      const sh = SHAPES[kind](r);
+      const rr = C.rng(Math.floor(r * 1e6), 5);
+      g.save(); unitPath(g, sh); g.clip();
+      if (kind === 'tree') {
+        const base = [pal.ochre, pal.terracotta, pal.red][Math.floor(rr() * 3)];
+        g.fillStyle = pal.trunk; g.fillRect(0, 0, 1, 0.35);
+        g.fillStyle = base; g.fillRect(0, 0.26, 1, 0.8);
+        g.strokeStyle = pal.trunk; g.lineWidth = 0.025; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(0.5, 0.25); g.lineTo(0.5, 0.82); g.stroke();
+        for (let i = 0; i < 5; i++) {                // branches
+          const y = 0.4 + i * 0.09, s = i % 2 ? 1 : -1;
+          g.lineWidth = 0.014; g.beginPath(); g.moveTo(0.5, y); g.quadraticCurveTo(0.5 + s * 0.1, y + 0.04, 0.5 + s * 0.2, y + 0.1); g.stroke();
+        }
+        for (let i = 0; i < 34; i++) {                // leaves: pointed, in two tones
+          const a = rr() * C.TAU, d = 0.06 + Math.sqrt(rr()) * 0.3;
+          g.fillStyle = i % 4 ? pal.leaf : pal.flower; g.globalAlpha = i % 4 ? 0.85 : 0.6;
+          g.save(); g.translate(0.5 + Math.cos(a) * d, 0.62 + Math.sin(a) * d * 0.8); g.rotate(a + 0.6);
+          g.beginPath(); g.moveTo(-0.04, 0); g.quadraticCurveTo(0, 0.022, 0.04, 0); g.quadraticCurveTo(0, -0.022, -0.04, 0); g.fill(); g.restore();
+        }
+        g.globalAlpha = 1;
+      } else if (kind === 'pine') {
+        g.fillStyle = pal.trunk; g.fillRect(0, 0, 1, 0.14);
+        g.fillStyle = pal.pine; g.fillRect(0, 0.12, 1, 1);
+        g.strokeStyle = pal.pine2; g.lineWidth = 0.012;
+        for (let y = 0.15; y < 1; y += 0.045) { g.beginPath(); g.moveTo(0.5, y + 0.03); g.lineTo(0.2, y - 0.02); g.moveTo(0.5, y + 0.03); g.lineTo(0.8, y - 0.02); g.stroke(); }
+        g.strokeStyle = pal.trunk; g.lineWidth = 0.02; g.beginPath(); g.moveTo(0.5, 0.1); g.lineTo(0.5, 0.95); g.stroke();
+      } else {
+        const red = rr() < 0.4;
+        g.fillStyle = red ? pal.terracotta : pal.teal; g.fillRect(0, 0, 1, 1);
+        g.fillStyle = red ? pal.red : pal.teal2;
+        for (let i = 0; i < 6; i++) { g.beginPath(); g.ellipse(0.1 + i * 0.17, 0.25, 0.12, 0.22, 0, 0, C.TAU); g.fill(); }
+        for (let i = 0; i < 9; i++) {                 // printed flowers
+          const x = 0.08 + rr() * 0.84, y = 0.3 + rr() * 0.4;
+          g.fillStyle = pal.flower;
+          for (let k = 0; k < 5; k++) { g.beginPath(); g.ellipse(x + Math.cos(k * 1.257) * 0.028, y + Math.sin(k * 1.257) * 0.05, 0.02, 0.035, k * 1.257, 0, C.TAU); g.fill(); }
+          g.fillStyle = pal.ochre; g.beginPath(); g.ellipse(x, y, 0.014, 0.025, 0, 0, C.TAU); g.fill();
+        }
+      }
+      g.restore();
+      // the die-cut rim: a cream band along the cut, printed just inside the edge
+      g.strokeStyle = pal.rim; g.lineWidth = 0.02; g.lineJoin = 'round'; unitPath(g, sh); g.stroke();
+    };
+  }
+  // a cut card: the unit shape extruded by `thick`, the face printed, the cut edge cream; hinge at the origin
+  function popCard(THREE, S, kind, r, w, h, thick) {
+    const key = `${kind}:${Math.floor(r * 8)}`;      // eight variants of each kind
+    const rv = Math.floor(r * 8) / 8 + 0.03;
+    if (!S.geo[key]) {
+      const sh = SHAPES[kind](rv);
+      const shape = new THREE.Shape(sh.map(([x, y]) => new THREE.Vector2(x, y)));
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, curveSegments: 4 });
+      geo.translate(-0.5, 0, -0.5);
+      S.geo[key] = geo;
+      S.mat[key] = new THREE.MeshLambertMaterial({ map: cardTex(THREE, 'pop-' + key, printCard(kind, S.pal, rv)) });
+    }
+    const m = new THREE.Mesh(S.geo[key], [S.mat[key], S.edge]);
+    m.scale.set(w, h, thick);
+    m.castShadow = true; m.receiveShadow = true;
+    return m;
+  }
+  function pageTexture(THREE, pal, seed, area) {
+    return cardTex(THREE, `page:${seed}`, (g) => {
+      const [x0, x1, z0, z1] = area, W = x1 - x0, D = z1 - z0;
+      const r = C.rng(seed, 77);
+      g.fillStyle = pal.page; g.fillRect(0, 0, 1, 1);
+      for (let i = 0; i < 260; i++) {                 // mottling
+        g.fillStyle = i % 2 ? pal.page2 : 'rgba(255,250,230,0.5)'; g.globalAlpha = 0.18;
+        g.beginPath(); g.ellipse(r(), r(), 0.01 + r() * 0.05, 0.02 + r() * 0.08, r() * 3, 0, C.TAU); g.fill();
+      }
+      g.globalAlpha = 1;
+      // the path: a wobbling kraft ribbon along world z = 0 (texture y = 0 is the near edge z1, y = 1 the far edge z0)
+      const pv = (z) => (z1 - z) / D, pu = (x) => (x - x0) / W;
+      const half = (x) => 0.3 + 0.06 * Math.sin(x * 0.7 + seed) + 0.025 * Math.sin(x * 2.3);
+      for (const [col, extra] of [[pal.pathEdge, 0.06], [pal.path, 0]]) {
+        g.fillStyle = col; g.beginPath();
+        for (let i = 0; i <= 200; i++) { const x = x0 + W * i / 200; const j = (C.hash(seed, i, 3) - 0.5) * 0.04; g.lineTo(pu(x), pv(half(x) + extra + j)); }
+        for (let i = 200; i >= 0; i--) { const x = x0 + W * i / 200; const j = (C.hash(seed, i, 4) - 0.5) * 0.04; g.lineTo(pu(x), pv(-half(x) - extra - j)); }
+        g.fill();
+      }
+      g.strokeStyle = pal.tick; g.lineWidth = 0.0012; g.globalAlpha = 0.6;
+      for (let i = 0; i < 1400; i++) {                // grass ticks off the path
+        const x = r(), y = r(), z = z1 - y * D;
+        if (Math.abs(z) < 0.42) continue;
+        g.beginPath(); g.moveTo(x, y); g.lineTo(x + 0.002, y + 0.008); g.stroke();
+      }
+      g.globalAlpha = 1;
+    }, 2048, 1024);
+  }
+  L3['popup-paper'] = (g, fs) => {
+    const THREE = T.THREE;
+    if (!THREE) { T.warn('look popup-paper: three.js is not loaded (TOON.ready() before the first frame)'); return; }
+    const pal = Object.assign({}, POP, fs.pal);
+    const o = fs.opts || {};
+    const night = !!o.night;
+    const key = `popup|${fs.W}x${fs.H}|${fs.seed}|${night}|${JSON.stringify(fs.envKey || '')}|${JSON.stringify(fs.pal)}`;
+    let S = cache[key];
+    const thick = 0.014;
+    if (!S) {
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(night ? '#0B0D14' : pal.sky);
+      const edge = new THREE.MeshLambertMaterial({ color: pal.rim, map: grainTexture(THREE, fs.seed + 9, '#ffffff', 0.12, 128, true) });
+      S = { scene, edge, pal, geo: {}, mat: {}, cards: [], held: null, charGroup: null };
+      // table, page block, the page itself
+      const area = [-14, 14, -10, 5];
+      const table = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), new THREE.MeshLambertMaterial({ color: pal.table, map: grainTexture(THREE, fs.seed + 2, '#ffffff', 0.08, 256, true) }));
+      table.rotation.x = -Math.PI / 2; table.position.y = -0.18; table.receiveShadow = true; scene.add(table);
+      const block = new THREE.Mesh(new THREE.BoxGeometry(area[1] - area[0] + 0.3, 0.17, area[3] - area[2] + 0.3), new THREE.MeshLambertMaterial({ color: pal.block }));
+      block.position.set(0, -0.095, (area[2] + area[3]) / 2); block.receiveShadow = true; scene.add(block);
+      const pageMat = new THREE.MeshLambertMaterial({ map: pageTexture(THREE, pal, fs.seed, area) });
+      const page = new THREE.Mesh(new THREE.PlaneGeometry(area[1] - area[0], area[3] - area[2]), pageMat);
+      page.rotation.x = -Math.PI / 2; page.position.set(0, 0, (area[2] + area[3]) / 2); page.receiveShadow = true; scene.add(page);
+      // cards: trees and pines from the props, shrub bands and folded rocks around them
+      const add = (mesh, x, z, yaw, info) => {
+        const hinge = new THREE.Group(); hinge.position.set(x, 0, z); hinge.rotation.y = yaw;
+        const pivot = new THREE.Group(); pivot.add(mesh); hinge.add(pivot); scene.add(hinge);
+        S.cards.push(Object.assign({ pivot, x, z }, info));
+      };
+      // a dense jittered grid of cards (env.density: cards per square unit, default 1.7). Near the path only low cards;
+      // tall cards never stand between the lens and the walker (z -0.9 .. 3.0), except as blurred near framing.
+      const rr = C.rng(fs.seed, 909);
+      const env = fs.envKey || {};
+      const step = 1 / Math.sqrt(env.density || 1.7);
+      for (let z = -8; z <= 4.4; z += step) for (let x = -14; x <= 14; x += step) {
+        const px = x + (rr() - 0.5) * step * 0.9, pz = z + (rr() - 0.5) * step * 0.9, roll = rr(), r = rr();
+        if (Math.abs(pz) < 0.62) continue;                                   // the path and its margin
+        const nearLens = pz > -0.9 && pz < 3.0;
+        if (roll < 0.36 && !nearLens) {
+          const pine = roll < 0.12, kind = pine ? 'pine' : 'tree';
+          const h = (pine ? 1.15 : 0.95) * C.range(rr, 0.75, 1.3), w = h * (pine ? 0.55 : 0.8), yaw = (rr() - 0.5) * 0.8;
+          add(popCard(THREE, S, kind, r, w, h, thick), px, pz, yaw, { size: h });
+          add(popCard(THREE, S, kind, r, w, h, thick), px, pz, yaw + Math.PI / 2, { size: h, twin: true });
+        } else if (roll < 0.74) {
+          const w = C.range(rr, 0.45, 0.95);
+          add(popCard(THREE, S, 'shrub', r, w, w * 0.42, thick), px, pz, (rr() - 0.5) * 0.7, { size: w * 0.42 });
+        } else if (roll < 0.84) {
+          const sz = C.range(rr, 0.12, 0.26);
+          const m = new THREE.Mesh(new THREE.DodecahedronGeometry(sz, 0), S.rockMat || (S.rockMat = new THREE.MeshLambertMaterial({ color: pal.rock, flatShading: true, map: grainTexture(THREE, fs.seed + 5, '#ffffff', 0.1) })));
+          m.scale.set(1.3, 0.6, 0.9); m.position.y = sz * 0.2; m.castShadow = true; m.receiveShadow = true;
+          add(m, px, pz, rr() * 3, { size: sz, rock: true });
+        }
+      }
+      // order of rising: nearest the path's start first (a wave that opens ahead of the walker)
+      S.cards.forEach((c) => { c.rank = Math.hypot(c.x + 4, c.z * 1.4) + C.hash(fs.seed, Math.round(c.x * 97 + c.z * 13), 8) * 0.8; });
+      // light: warm key from the upper left with soft shadows, cool fill, warm hemisphere (navy and a lantern at night)
+      scene.add(new THREE.HemisphereLight(night ? '#33405e' : '#ffe9c8', night ? '#120c08' : '#4a3426', night ? 0.55 : 0.9));
+      const key3 = new THREE.DirectionalLight(night ? '#9fb4ff' : '#ffe2b8', night ? 0.6 : 3.4);
+      key3.castShadow = true; key3.shadow.mapSize.set(2048, 2048); key3.shadow.radius = 5; key3.shadow.bias = -0.0006;
+      Object.assign(key3.shadow.camera, { left: -9, right: 9, top: 9, bottom: -9, near: 0.5, far: 40 });
+      scene.add(key3, key3.target);
+      const fill = new THREE.DirectionalLight(night ? '#304060' : '#b8c8ff', night ? 0.15 : 0.45); fill.position.set(6, 4, 4); scene.add(fill);
+      let lantern = null;
+      if (night) { lantern = new THREE.PointLight(pal.lantern, 6, 5, 1.6); lantern.castShadow = true; lantern.shadow.radius = 4; scene.add(lantern); }
+      Object.assign(S, { key3, lantern });
+      cache[key] = S;
+    }
+    // cards: hinge spring (rise) and the gust (both pure functions of t)
+    const rise = o.rise;
+    for (const c of S.cards) {
+      let p = 1;
+      if (rise) {
+        const t0 = (rise.at || 0) + c.rank * (rise.spread != null ? rise.spread : 0.12) * (rise.dur || 1);
+        const tau = fs.t - t0;
+        p = tau <= 0 ? 0 : 1 - Math.exp(-6 * tau) * Math.cos(11 * tau);
+      }
+      const gust = c.rock ? 0 : 0.025 * (0.6 + 0.4 * Math.sin(0.9 * fs.t + c.x * 0.35)) * Math.sin(2.1 * fs.t + c.x * 1.7 + c.z) * Math.min(1, c.size);
+      c.pivot.rotation.x = -(1 - p) * Math.PI / 2 + (c.twin ? 0 : gust);
+      c.pivot.rotation.z = c.twin ? gust : 0;
+    }
+    // the puppet: the rig's draw list on its own plane, turned to face the lens, rebuilt per held drawing
+    const held = `${fs.tp}`;
+    if (S.held !== held) {
+      if (S.charGroup) { S.scene.remove(S.charGroup); S.charGroup.traverse((q) => { if (q.geometry) q.geometry.dispose(); }); }
+      const grp = new THREE.Group();
+      for (const c of fs.chars) {
+        const J = c.J, rp = J.rootPos;
+        const P = (q) => [q[0] - rp[0], -q[1], -(q[2] - rp[2]), 1];
+        P.cam = { pos: [rp[0], 0.6, rp[2] + 10], target: [rp[0], 0.6, rp[2]], fov: 30 }; P.f = [0, 0, -1]; P.r = [1, 0, 0]; P.u = [0, 1, 0];
+        const items = T.drawList(J, P, { hose: false });
+        const puppet = new THREE.Group();
+        items.forEach((it, i) => {
+          if (it.role === 'cheek') return;
+          const color = J.ch.palette[it.fill] || J.ch.palette.body;
+          const pts = it.kind === 'tube' ? strokeOutline(it.pts, it.taper ? it.w * 0.8 : it.w) : it.pts;
+          if (pts.length < 3) return;
+          const shape = new THREE.Shape(pts.map((q) => new THREE.Vector2(q[0], -q[1])));
+          const geo = new THREE.ExtrudeGeometry(shape, { depth: thick * 0.7, bevelEnabled: false, curveSegments: 4 });
+          const m = new THREE.Mesh(geo, [new THREE.MeshLambertMaterial({ color: it.role === 'mouth' ? J.ch.palette.mouth : color }), S.edge]);
+          m.position.z = i * 0.006; m.castShadow = true;
+          puppet.add(m);
+        });
+        const cam = fs.P.cam;
+        puppet.position.set(rp[0], rp[1], rp[2]);
+        puppet.rotation.y = Math.atan2(cam.pos[0] - rp[0], cam.pos[2] - rp[2]);
+        grp.add(puppet);
+      }
+      S.scene.add(grp); S.charGroup = grp; S.held = held;
+    }
+    const follow = fs.chars[0] ? fs.chars[0].J.rootPos : [0, 0, 0];
+    S.key3.position.set(follow[0] - 5, 8, follow[2] + 3); S.key3.target.position.set(follow[0], 0, follow[2]);
+    if (S.lantern) S.lantern.position.set(follow[0] + 0.35, 0.75, follow[2] + 0.25);
+    const r = renderer(THREE, fs.W, fs.H, THREE.PCFSoftShadowMap);
+    r.render(S.scene, camera3(THREE, fs));
+    g.drawImage(r.domElement, 0, 0, fs.W, fs.H);
+    // tilt-shift: two blurred copies faded in above and below the focus line
+    const ts = o.tiltShift == null ? 1 : o.tiltShift;
+    if (ts > 0) {
+      const fy = o.focusY != null ? o.focusY * fs.H : (fs.chars[0] ? fs.P(fs.chars[0].J.center)[1] : fs.H * 0.55);
+      const band = fs.H * (o.focusBand || 0.13);
+      cache.ts = cache.ts && cache.ts.width === fs.W && cache.ts.height === fs.H ? cache.ts
+        : Object.assign(document.createElement('canvas'), { width: fs.W, height: fs.H });
+      const sc = cache.ts.getContext('2d');
+      for (const [blur, reach] of [[fs.H * 0.0035 * ts, 1.5], [fs.H * 0.009 * ts, 3.0]]) {
+        sc.globalCompositeOperation = 'source-over'; sc.clearRect(0, 0, fs.W, fs.H);
+        sc.filter = `blur(${blur.toFixed(1)}px)`; sc.drawImage(r.domElement, 0, 0, fs.W, fs.H); sc.filter = 'none';
+        const gr = sc.createLinearGradient(0, 0, 0, fs.H);
+        const a = C.clamp((fy - band * reach) / fs.H), b = C.clamp((fy - band) / fs.H), c2 = C.clamp((fy + band) / fs.H), d = C.clamp((fy + band * reach * 1.4) / fs.H);
+        gr.addColorStop(0, 'rgba(0,0,0,1)'); gr.addColorStop(a, 'rgba(0,0,0,1)'); gr.addColorStop(Math.max(a, b), 'rgba(0,0,0,0)');
+        gr.addColorStop(Math.max(b, c2), 'rgba(0,0,0,0)'); gr.addColorStop(Math.max(c2, d), 'rgba(0,0,0,1)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
+        sc.globalCompositeOperation = 'destination-in'; sc.fillStyle = gr; sc.fillRect(0, 0, fs.W, fs.H);
+        sc.globalCompositeOperation = 'source-over';
+        g.drawImage(cache.ts, 0, 0);
+      }
+    }
+    // warm grade and a dark warm vignette (the table around the book)
+    g.save();
+    g.globalCompositeOperation = 'soft-light'; g.fillStyle = night ? 'rgba(60,80,140,0.25)' : 'rgba(255,160,70,0.12)'; g.fillRect(0, 0, fs.W, fs.H);
+    g.restore();
+    const vg = g.createRadialGradient(fs.W / 2, fs.H * 0.55, fs.H * 0.35, fs.W / 2, fs.H * 0.55, fs.H * 1.05);
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, night ? 'rgba(5,6,12,0.7)' : 'rgba(30,18,8,0.5)');
     g.fillStyle = vg; g.fillRect(0, 0, fs.W, fs.H);
   };
 

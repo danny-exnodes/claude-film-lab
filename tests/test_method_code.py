@@ -96,11 +96,11 @@ class CodeEpisode(TmpDirCase, unittest.TestCase):
 
 
 class CodeStyles(unittest.TestCase):
-    """The ten engine: code style packs pass the style check and agree with looks.json."""
+    """The eleven engine: code style packs pass the style check and agree with looks.json."""
     IDS = ["dat-nan-3d", "hoat-hinh-phang", "ban-ve-ky-thuat", "in-riso", "pixel-16bit",
-           "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90"]
+           "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up"]
 
-    def test_all_ten_pass(self):
+    def test_all_eleven_pass(self):
         for sid in self.IDS + ["_template-code"]:
             with self.subTest(style=sid):
                 code, out, _ = run_main(ce.main, ["style", str(REPO / "styles" / sid)])

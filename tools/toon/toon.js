@@ -24,6 +24,7 @@
     'clay-3d': { engine: 'three', hold: 2 },
     'lowpoly-90s': { engine: 'three', hold: 1 },
     'cardboard': { engine: 'three', hold: 2 },
+    'popup-paper': { engine: 'three', hold: 1 },
   };
   T.POSTS = ['riso', 'pixel-16', 'ascii'];
   T.THREE_URL = T.THREE_URL || 'file:///opt/film-lab/vendor/three/build/three.module.js';

@@ -69,7 +69,7 @@ python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio 
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
 python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
-python3 tools/toon/toon.py still|turntable|clip|lookbook ...          # method: code, miễn phí: xem style vẽ bằng code, linh vật giot
+python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc]   # method: code, miễn phí: xem style vẽ bằng code, linh vật giot, dị thú 3D
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL

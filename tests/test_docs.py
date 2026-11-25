@@ -29,8 +29,6 @@ PREFIXES = (".claude", "tools", "docs", "lambda", "tests", "templates", "styles"
 
 # "<kind>:<item>" -> reason. Kinds: path, subcommand (<tool> <name>), option (<tool> <--flag>).
 ALLOW = {
-    "path:tools/toon/three.lock": "the three.js pin was never committed: .gitignore has `*.lock`; the file must be "
-                                  "rebuilt from three@0.186.1 and un-ignored (BACKLOG)",
 }
 
 KNOWN_AGENT_TOOLS = {"Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebSearch", "WebFetch",

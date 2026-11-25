@@ -235,15 +235,15 @@ s04,24.5,30,wide,crane,Thú đi ra,M-ky-lan;E-doi-co,walk-cycle,,wind,
         self.assert_line(out, "WARN", r"s01 code_motion 'walk-cycle' is a method code \(TOON\) action")
 
     def test_new_registry_ids_just_work(self):
-        """A toon motion or camera move added to motions.json (toon-creatures) needs no checker change."""
+        """A toon motion or camera move added to motions.json needs no checker change (made-up ids, not yet registered)."""
         reg = dict(ce.motion_registry())
-        reg["tail-fan"] = {"module": "toon/motion.js", "call": "TOON timeline clip", "engine": "toon"}
-        reg["fly-through"] = {"module": "toon/project.js", "call": "TOON SHOT camera", "engine": "toon"}
+        reg["zz-tail-test"] = {"module": "toon/motion.js", "call": "TOON timeline clip", "engine": "toon"}
+        reg["zz-move-test"] = {"module": "toon/project.js", "call": "TOON SHOT camera", "engine": "toon"}
         self.edit("shots.csv", "s03,15,24.5,close,orbit,Thú nhảy,M-ky-lan;E-doi-co;FX-bui,jump",
-                  "s03,15,24.5,close,fly-through,Thú nhảy,M-ky-lan;E-doi-co;FX-bui,tail-fan")
+                  "s03,15,24.5,close,zz-move-test,Thú nhảy,M-ky-lan;E-doi-co;FX-bui,zz-tail-test")
         code, out, _ = self.check()
-        self.assert_line(out, "ERROR", r"camera 'fly-through' is not one move")
-        self.assert_line(out, "WARN", r"code_motion 'tail-fan' is not in tools/compose/motions.json")
+        self.assert_line(out, "ERROR", r"camera 'zz-move-test' is not one move")
+        self.assert_line(out, "WARN", r"code_motion 'zz-tail-test' is not in tools/compose/motions.json")
         with mock.patch.object(ce, "motion_registry", lambda: reg):
             code, out, _ = self.check()
         self.assertEqual(code, 0, out)

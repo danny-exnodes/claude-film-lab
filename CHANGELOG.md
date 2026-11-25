@@ -58,6 +58,18 @@ Bảy gói việc làm song song, mỗi gói một nhánh, gộp và chạy lạ
   tìm được từ mọi thư mục; `demo_plates.py --help` không tạo gì.
 - Mới: `inline.py <film.html> --preflight` (chạy thử mọi shot bằng node, báo ERROR/WARN, thoát 1 khi có ERROR).
 
+#### Dị thú và sơn thủy 3D bằng code (#35)
+- Dị thú 3D bằng code (`tools/toon/creature.js`): spec + seed, thân loft theo spline, 0/2/4/6 chân không trượt, nhiều
+  đuôi trễ pha, cánh, sừng, tai, bờm, 1–3 mắt; đi, chạy, bơi, bay, quay, nhìn, vỗ cánh, xòe đuôi, thở, chớp mắt; ba con
+  mẫu `mac-loc`, `van-dieu`, `luc-tuc-ngu` (thiết kế của lab). Thông số model: `code-method.md` §8.
+- Look `ink-wash-3d` (`tools/toon/ink3d.js`) và style `thuy-mac-3d` (số 12): mực loang bậc theo thớ giấy, viền mực mảnh
+  dần theo khoảng cách, núi ba tầng có nét thuân, sương, mặt nước có vòng sóng; motion mới `head-turn`, `tail-fan`,
+  `wing-flap`, `fly`, `swim`, `fly-through`, `ink-reveal-3d`, `water-ripple`, `brush-write`.
+- `toon.py still|turntable|clip|lookbook --creature <mẫu|spec.json>`; bộ TOON 1.2.0.
+- Sửa: `tools/toon/three.lock` chưa từng được commit (`.gitignore` `*.lock` nuốt mất) nên `install_three.sh`, `doctor`
+  dòng `three` và setup bước 6 hỏng trên bản clone mới (`--check` còn báo ok khi chưa cài gì); thêm ngoại lệ
+  `.gitignore`, file lock (three 0.186.1), `install_three.sh` từ chối khi thiếu lock, test.
+
 #### Test, CI, doctor
 - Test chạy được bằng user thường: đường dẫn cinecode lấy từ `CINECODE_DIR` hoặc `~/.claude/skills/cinecode`; hết 2 lỗi
   import ở `test_audio.py` / `test_compose.py`.

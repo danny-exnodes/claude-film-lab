@@ -34,7 +34,9 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
   `images: 0`, `video_seconds: 0`, bỏ khâu 5–6; `.claude/skills/film-compose-shot/references/code-method.md`). Thiếu khóa = `seedance` (WARN).
   Người dùng chọn ở khâu 0 (với `code`: cho xem `python3 tools/toon/toon.py lookbook`); không trộn trong một tập, sau G1 không tự đổi.
   Quy tắc dàn cảnh của `layers` (không trượt, không xoay thân, không bộ phận rời):
-  `.claude/skills/film-compose-shot/references/layers-method.md` và `layers-character.md`.
+  `.claude/skills/film-compose-shot/references/layers-method.md` và `layers-character.md`. Người nhỏ trong cảnh rộng
+  (≤ 25 % chiều cao khung: đứng trên sống núi, đi dọc đường, đám đông ở xa) vẽ bằng code, không mua tranh:
+  `COMPOSE.figure.draw` (id `figure`), `references/layers-figure.md`.
 - Trạng thái tập là `EPISODE.md`, **không bao giờ** `STATE.md` (tên đó thuộc cinecode).
 - Mọi lệnh tạo ảnh/video cho một tập phải có `--budget <tập>/budget.yaml --ledger out/<project>/ep<NN>/ledger.csv`
   và `FILM_AGENT=<tên agent>` khi chạy trong agent.
@@ -60,6 +62,7 @@ python3 tools/layers/matte.py IN.png [OUT.png] --style styles/<id> --layer L2 --
 python3 tools/compose/keyframe.py --check <khung đầu>.png --key "#RRGGBB"                # miễn phí, trước mỗi clip tính phí
 python3 tools/layers/matte_seq.py <clip>.mp4 --start-frame <khung đầu>.png --strict      # tách nền cả clip + số đo nhấp nháy
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --dry-run --strict
+python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio [--stems] [--seed N]   # nhạc dây gảy + tiếng động theo sự kiện, local, miễn phí
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ...          # method: code, miễn phí: xem style vẽ bằng code, linh vật giot
@@ -73,6 +76,9 @@ python3 tools/compose/inline.py <film>/film.html --init --toon         # film.ht
   chối, không tự tải (`--allow-download`).
 - Khung đầu của clip luôn do `tools/compose/keyframe.py` tạo (`clips/..._start_v<NN>.png`, không lấy file trong `plates/`);
   khung clip tách nền bằng `tools/layers/matte_seq.py`, không chạy `matte.py` từng khung.
+- Âm thanh bằng code: `tools/audio/score.py` (cổ cầm, tỳ bà, koto, cồng, trống khung, drone, bộ tiếng động;
+  `tools/audio/README.md`). Chỉ viết phần `music` khi người dùng đã chọn nhạc code; `foley` dùng được với mọi lựa chọn.
+  `score.json` là dữ liệu dự án (không commit). Chất âm chưa có người nghe duyệt.
 - Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
@@ -101,8 +107,9 @@ python3 tools/compose/inline.py <film>/film.html --init --toon         # film.ht
   `tests/test_method_code.py`; look/hậu kỳ mới → thêm vào `looks.json` và `TOON.LOOKS`/`TOON.POSTS` (`toon.js`).
   Đổi phiên bản three.js: `tools/toon/three.lock` + `docs/setup-script.sh` (`THREE_VER`), `docs/RUNBOOK.md` ("three.js").
 - Sửa `tools/compose/*.js` → tăng `C.VERSION` trong `core.js`, chạy test (`tests/test_compose_js.py`,
-  `tests/test_compose_character.py` cần node) và `python3 tools/compose/inline.py --lint`. Module mới → thêm vào `ORDER`
+  `tests/test_compose_character.py`, `tests/test_compose_figure.py` cần node) và `python3 tools/compose/inline.py --lint`. Module mới → thêm vào `ORDER`
   của `inline.py` và `motions.json`.
+- Mã phỏng theo dự án khác → ghi nguồn ở đầu file và thêm một dòng vào `THIRD_PARTY.md`.
 - Lỗi đã biết nhưng chưa sửa và việc hoãn lại: `docs/BACKLOG.md`.
 - cinecode được ghim ở `tools/compose/cinecode.ref` (= `CINECODE_REF` trong `docs/setup-script.sh`); đổi ghim theo
   `docs/RUNBOOK.md` ("cinecode đổi template"), không `git pull` trong thư mục skill.

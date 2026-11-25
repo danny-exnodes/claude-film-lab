@@ -123,6 +123,8 @@ class TestInlineDeterminism(FilmCase):
             self.assertIn(f, names)
         self.assertLess(names.index("strip-warp.js"), names.index("cloth.js"))
         self.assertLess(names.index("strip-warp.js"), names.index("pose.js"))
+        self.assertLess(names.index("pose.js"), names.index("ink.js"))      # the code-drawn figure: ink.js, then figure.js
+        self.assertLess(names.index("ink.js"), names.index("figure.js"))
         there = [f for f in names if (INLINE.parent / f).is_file()]
         missing = [f for f in names if f not in there]
         self.assertLessEqual(set(missing), {"cloth.js", "pose.js"})

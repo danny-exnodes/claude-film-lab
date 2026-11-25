@@ -1,7 +1,7 @@
 # Chuyển động – Thủy mặc
 
 Kế thừa `cinecode:ink-wash` §5 (chất chuyển động), §6 (ngữ pháp máy quay), §8 (thủ pháp riêng). File này chỉ ghi
-lựa chọn của series và cách dùng các id trong `style.yaml: motion` (bốn id chung, năm id thêm cho `method: layers`). Tham số và API là của `tools/compose/`
+lựa chọn của series và cách dùng các id trong `style.yaml: motion` (bốn id chung, sáu id thêm cho `method: layers`). Tham số và API là của `tools/compose/`
 (đọc chú thích đầu mỗi file); ở đây chỉ ghi **giá trị và cách dùng riêng của thủy mặc**.
 
 ## Nguyên tắc series
@@ -29,7 +29,7 @@ lựa chọn của series và cách dùng các id trong `style.yaml: motion` (b�
 | `embers` | `embers.js`: `COMPOSE.embers.draw` | Chỉ ở cảnh có lửa hoặc chiều tà; ít (≤ 40 hạt), màu `ochre`; một vài hạt `accent` là đủ (giữ quy tắc một màu son §3). | tàn lửa vẽ sẵn | series thêm |
 | `strip-warp` | `strip-warp.js`: rig `warp` trên L4 | Đuôi, tai, lông, cỏ lay trong chính lớp L4; mỗi bộ phận một hộp trong `anchors.json` (gốc → ngọn). Biên độ nhỏ (ngọn lệch ≤ 2–3% chiều dài bộ phận). Đuôi nhiều nhánh (vd. chín đuôi) → mỗi nhánh một hộp, lệch pha (`salt`) để không lay đồng loạt. | clip AI cho chuyển động nhỏ | §5 (không "boil") |
 
-## Năm id thêm cho `method: layers`
+## Sáu id thêm cho `method: layers`
 
 Dùng khi `EPISODE.md` ghi `method: layers` (tập `seedance` vẫn dùng được khói, lửa, cây, vải; `pose-cycle` thì không).
 Giá trị dưới đây là **điểm xuất phát, chưa kiểm trên tập thật**; sửa ở đây sau lần G3 đầu tiên của phương pháp này.
@@ -41,9 +41,10 @@ Giá trị dưới đây là **điểm xuất phát, chưa kiểm trên tập th
 | `cloth` | áo choàng, tay áo, đai, tóc của nhân vật 2D | ngọn lệch 3–5 % chiều dài vùng (áo choàng), 2–3 % (tóc, đai); gió mạnh ở cảnh chiến trường tới 7 %; mọi vùng vải cùng hướng gió với sương và khói, lệch pha | không quá 7 % (vải thủy mặc nặng, không phần phật); mép dính vào thân đứng yên |
 | `foliage` | tán thông, bụi, lau sậy trên L2/L3 | ngọn lệch 1–1,5 % chiều cao hộp ở L3, 0,5–1 % ở L2; cơn gió chậm (chu kỳ 5–8 s) | cây xa trên L1 không lay; không lay đồng loạt (mỗi hộp một `salt`) |
 | `pose-cycle` | ngoảnh đầu, giơ tay, rút kiếm, bước tại chỗ | **8 fps**, cắt thẳng (không trộn); tư thế giữ ≥ 1 s trước và sau một cử chỉ; plate trung gian giữ 2 khung (0,25 s); chu kỳ bước 3–4 plate, mỗi plate 3 khung (0,375 s), tối đa 2 chu kỳ rồi cắt | 2–4 plate mỗi shot; không trượt thân trong lúc đổi bậc (nền trôi bằng máy quay); tư thế cuối giữ ≥ 0,5 s trước khi cắt |
+| `figure` | người nhỏ trong cảnh rộng: lữ khách trên sống núi, người đứng trước chiến trường, người đi dọc đường, đám đông ở xa | cao 60–160 px (≤ 25 % khung = 270 px), nhìn từ sau; `palette.ink` = `ink` (`#1A1714`), `tone` 0,7–0,85 cho người ở xa (L2), `palette.paper` = `paper` khi cần che nền; búi tóc + dải buộc, nón lá cho dân thường; gió chung với sương và vải; đi 0,3–0,6 lần chiều cao mỗi giây | không mặt, không cận cảnh, không dị thú; dải buộc màu `accent` chỉ khi đó là điểm son duy nhất của cảnh; không quá 60 người; không dịch `x`, `y` bằng tay (dùng `path`) |
 
-Thứ tự vẽ thêm: khói xa sau L2 → lửa và ánh hắt cùng độ sâu với lớp đang cháy → L4 (vải, tư thế) → `embers` → L3 → khói
-gần, sương trước. Bảng tra và danh sách kiểm: `.claude/skills/film-compose-shot/references/layers-method.md`.
+Thứ tự vẽ thêm: khói xa sau L2 → lửa và ánh hắt cùng độ sâu với lớp đang cháy → L4 (vải, tư thế) → `embers` → L3 → `figure` (sau lớp
+nó đứng trên) → khói gần, sương trước. Bảng tra và danh sách kiểm: `.claude/skills/film-compose-shot/references/layers-method.md`.
 
 Module khác trong `tools/compose/` dùng chung cho mọi style, không cần khai báo ở đây: `breath.js` (thở),
 `eyelid.js` (mắt nhắm/mở bằng code từ hộp mắt trong `anchors.json`). Với thủy mặc, **thử `eyelid.js` trước** khi tạo

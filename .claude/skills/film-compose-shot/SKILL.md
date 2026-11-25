@@ -16,7 +16,8 @@ Biến các lớp tranh đã duyệt (L1 nền, L2 tầng giữa, L3 tiền cả
 rồi thành bản dựng của cả tập, bằng **cinecode Quick mode** + bộ mã dùng chung `tools/compose/`.
 
 **Nguyên tắc:** tranh AI lo chất liệu; code lo máy quay, không khí, thời gian, âm thanh; Seedance chỉ cho cử động code
-không làm được (quay đầu, đứng dậy, vỗ cánh). **Không vẽ nhân vật hay dị thú bằng nét code** (đã thử: luôn phẳng và giả).
+không làm được (quay đầu, đứng dậy, vỗ cánh). **Không vẽ nhân vật hay dị thú bằng nét code** (đã thử: luôn phẳng và giả);
+ngoại lệ duy nhất: người nhỏ ≤ 25 % khung trong cảnh rộng bằng `figure` (`references/layers-figure.md`).
 
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.
@@ -41,7 +42,8 @@ Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì th�
   `sun-glow`, `strip-warp`, `eyelid`, `breath`, `parallax`, `push-in`) và có trong `style.yaml` `motion:`.
 - `method: layers` còn dùng `smoke`, `fire`, `foliage`, `cloth`, `pose-cycle` (cũng phải có trong `motions.json` và
   `style.yaml` `motion:`); `cloth` và `foliage` cần hộp neo, `pose-cycle` cần các plate tư thế ghi ở cột `layers`
-  (`L4b`, `L4c`…) và điểm neo chân chung. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
+  (`L4b`, `L4c`…) và điểm neo chân chung. Người nhỏ trong cảnh rộng (≤ 25 % khung): `figure`, vẽ bằng code, không
+  cần plate (`references/layers-figure.md`); chỉ cần một điểm neo cho bàn chân nếu đứng trên plate. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
 - `strip-warp`, `eyelid`, `breath`, `push-in` cần điểm neo trong `anchors.json` (`tools/layers/anchors.py set`; hộp =
   cặp điểm `<tên>_tl`/`<tên>_br`; chi tiết `references/compose-api.md` §2).
 - Kiểm tra bộ mã: `python3 tools/compose/inline.py --lint`.
@@ -165,6 +167,15 @@ nhấp nháy và dòng `PLATES`; `--method rembg` chỉ để dự phòng: viề
   `projects/<project>/ep<NN>-<slug>/review/sound-audit.md` (đạo diễn đẩy lên Drive `03_KichBan/ep<NN>-<slug>/review/`).
 - **Nhạc luôn do người dùng chọn** (câu hỏi của cinecode: bản thu giấy phép mở ★ · nhạc của họ · code · không), ghi
   vào dòng `Music:` của `STATE.md` kèm `(user)`. Không tự viết `score()` khi họ chưa chọn code.
+- **Nhạc code và foley theo sự kiện: `tools/audio/score.py`** (local, miễn phí, không sample; `tools/audio/README.md`).
+  Dùng khi người dùng đã chọn nhạc **code** (phần `music`: guqin/pipa/koto, cồng, trống khung, drone) và, với mọi lựa
+  chọn nhạc, cho foley phải rơi đúng khung hình (phần `foley`: `hoof`, `brush_air`, `ink_drop`, `ember`, `whoosh`…
+  theo bảng của `styles/<id>/sound.md`). Viết `projects/<project>/<tập>/score.json` (mẫu `templates/episode/score.json`;
+  `t` = khung tiếp xúc / fps, `shot` = id shot, `silence` = khoảng lặng thật), chạy `--dry-run` cho tới khi hết ERROR,
+  rồi `--out <media>/audio` (bản sau: `<media>/audio/v<NN>`, không ghi đè). Dán `mix-snippet.json` vào `audio/mix.json`:
+  `music.wav` → bus `music`, `foley.wav` → bus `foley`, `ambience.wav` → bus `ambience`; `preview.wav` chỉ để nghe thô,
+  không phải bản master. **Vẫn liệt kê mọi sự kiện** trong `review/sound-audit.md` (chép từ bảng cue của `--dry-run`) và
+  ghi một dòng `LICENSES.csv` cho các stem (`tools/audio`, tự tổng hợp). Không có sáo/tiêu và không có sampler.
 - Âm thanh được đo, không nghe: mỗi lần giao bản nháp nhờ người dùng nghe, nêu các giây quan trọng.
 - Lời bình chỉ lấy từ các bản đọc của `tools/tts/vieneu_tts.py` trong `<media>/vo/` (do `film-narrator` render,
   `--check` đã đạt). **Không bao giờ** dùng `tools/tts.py` hay `keys.py` của cinecode: đường đó đi tìm khóa Gemini,

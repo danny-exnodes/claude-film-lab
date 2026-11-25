@@ -11,6 +11,7 @@
     "strip-warp": {"module": "strip-warp.js", "call": "PLATES.<id>.rig.warp", "needs": ["anchors box", "anchors points <name>_root, <name>_tip (or root: left|right|top|bottom)"]},
     "cloth": {"module": "cloth.js", "call": "PLATES.<id>.rig.cloth", "needs": ["anchors box", "root edge (the side of the box that stays attached)"]},
     "pose-cycle": {"module": "pose.js", "call": "PLATES.<id>.rig.poses", "needs": ["pose plates listed in the shot"]},
+    "figure": {"module": "figure.js", "call": "COMPOSE.figure.draw / crowd", "needs": ["optional: anchors point for the feet (on: { plate, anchor })"]},
     "eyelid": {"module": "eyelid.js", "call": "PLATES.<id>.rig.eyes", "needs": ["anchors box of the eye"]},
     "breath": {"module": "breath.js", "call": "PLATES.<id>.rig.breath", "needs": ["anchors point for the pivot (or bottom)"]},
     "parallax": {"module": "stage.js", "call": "COMPOSE.stage + PLATES.<id>.depth", "needs": []},

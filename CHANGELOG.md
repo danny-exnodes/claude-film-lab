@@ -4,9 +4,9 @@
 
 ## [Unreleased]
 
-## [1.2.0] - 2026-11-19
+## [1.2.0] - 2026-11-25
 
-### Phương pháp dựng thứ ba `code` và bộ 10 phong cách vẽ bằng code (#38–#43, 2026-11-19)
+### Phương pháp dựng thứ ba `code` và bộ 11 phong cách vẽ bằng code (#38–#43, 2026-11-19 / 24)
 Nhân vật và cảnh vẽ hoàn toàn bằng code, không gọi model tạo ảnh hay video nào (0 ảnh, 0 giây). Một nhân vật định nghĩa
 một lần, đổi phong cách chỉ là đổi cách vẽ. Ý tưởng từ một bài đăng "10 animation styles" chủ dự án gửi; linh vật,
 tên và bố cục là của lab.
@@ -44,12 +44,27 @@ tên và bố cục là của lab.
   ống kính dài; trang in nền và đường kraft mép xé; cây hai tấm bìa cài chéo, thông, dải bụi in hoa, đá gấp; mặt bìa in
   hoạ tiết vẽ bằng code, mép cắt kem; bìa bật dậy theo lò xo bản lề (`opts.rise`, vượt ~15 % rồi rung) và lắc trong gió;
   ánh ấm, bóng mềm, tilt-shift, grade ấm; ban đêm có đèn lồng (`opts.night`). Ghi chép nghiên cứu: `styles/sach-pop-up/STYLE.md`.
-- Bộ COMPOSE lên v1.2.0 (chỉ vì `inline.py` đổi). Tài liệu: `references/code-method.md` (mới), `film-pipeline` §2.1,
+- Bộ COMPOSE lên v1.3.0 (1.2.0 là bản có `ink.js`, `figure.js` ở mục dưới; 1.3.0 vì `inline.py --toon`). Tài liệu: `references/code-method.md` (mới), `film-pipeline` §2.1,
   `film-script` §4a, `film-compose-shot`, agent `film-writer`, `film-art-director`, `film-compositor`,
   `film-reviewer`, `film-animator`, `docs/WORKFLOW.md` (ba phương pháp), `docs/CONVENTIONS.md` §3/§5/§6, RUNBOOK, BACKLOG.
 - Test: `tests/js/toon.test.cjs` (16 test node: chân không trượt, độ dài xương, nhảy đúng độ cao, chớp mắt theo seed,
   hậu kỳ chỉ ra màu hợp lệ…), `tests/test_toon.py` (render thật cả 10 style, cùng khung hai lần ra cùng byte cả 2D lẫn
   3D), `tests/test_method_code.py` (13 test: `check_episode`, style, `status.py` G2, `inline.py --toon`).
+
+### Âm thanh tổng hợp và hình người vẽ bằng nét mực (#32, #33, 2026-11-24)
+- **Âm thanh tổng hợp tại chỗ `tools/audio/` (#33, #32)**: `pluck.py` (guqin, pipa, koto bằng mô hình dây Karplus-Strong mở rộng: trượt dây, rung, bồi âm, tremolo, rải dây), `sfx.py` (15 foley theo bảng của `styles/thuy-mac/sound.md`: `wind`, `fire`, `drone`, `brush_air`, `whoosh`, `hoof`, `ink_drop`, `gong`, `drum`, `drum_roll`, `ember`, `thump`, `footstep`, `cloth_flap`, `water_ring`) và `score.py` dựng `score.json` của tập thành stem `music.wav` / `foley.wav` / `ambience.wav` + `preview.wav` + `score-log.json` + `mix-snippet.json` cho `audio/mix.json` của cinecode. Chạy local, miễn phí, chỉ numpy + scipy, không sample, không API; cùng điểm nhạc + cùng seed cho file giống hệt từng byte; khoảng lặng (`silence`) là số 0 tuyệt đối; kiểm tra trước khi dựng (mã thoát 2, in mọi lỗi, không ghi gì); file đầu ra đã có thì từ chối (`--overwrite`). Nhạc vẫn do người dùng chọn: tool không tự bật. Không có sáo/tiêu và không có sampler; `drone` và `gong` là xấp xỉ tổng hợp.
+- `templates/episode/score.json`: mẫu điểm nhạc 24 s; `THIRD_PARTY.md`: mã phỏng theo lemomo-ai/lemo-opuscar (MIT, Copyright (c) 2026 LemoLab).
+- `styles/thuy-mac/sound.md`: sửa tham chiếu chết `core/audio/pluck.py` thành `tools/audio/pluck.py`, ghi tên hàm foley cạnh từng dòng.
+- **Hình người vẽ bằng code cho cảnh rộng (`figure`, bộ ghép 1.2.0, #32)**: `COMPOSE.figure.draw(st, o)` vẽ một người nhỏ bằng nét mực code (khối áo nhạt + nét mực đậm + búi tóc/nón, mặc định nhìn từ sau), không mua ảnh nào: đứng, đi dọc `path` (bàn chân đã đặt không trượt, độ dài bước suy từ tốc độ), quay người, giơ tay, cúi, ngồi, `timeline`; thân theo bậc 12 fps, áo, tay áo, đai và dải buộc tóc bay theo gió của shot (`st.wind`, cùng cơn gió với `cloth`). `COMPOSE.figure.crowd` cho đám đông lệch pha. Cao tối đa 25 % khung (270 px), lớn hơn bị thu lại + cảnh báo (dùng plate AI + `cloth` / `pose-cycle`). Hướng dẫn: `.claude/skills/film-compose-shot/references/layers-figure.md`, `compose-api.md` §5.4.
+- **Nét mực `COMPOSE.ink`** (`tools/compose/ink.js`): `stroke` (lực nhấn, sợi lông bút cạn mực dần, `dry` từ ướt đến phi bạch, năm sắc mực, bút ăn mực một bên) và `mass` (khối nhạt mép mềm), vẽ thẳng vào sân khấu; mỗi nét có `id` nên chỗ đứt nét không bò giữa các khung.
+- `inline.py` chèn 16 file (thêm `ink.js`, `figure.js` sau `pose.js`); `motions.json` và `styles/thuy-mac` có id `figure`. Chạy lại `python3 tools/compose/inline.py film.html` để film cũ nhận bộ mã mới.
+- `THIRD_PARTY.md`: `ink.js` và `figure.js` phỏng theo mã MIT của lemomo-ai/lemo-opuscar (Copyright (c) 2026 LemoLab).
+- `tools/audio` sau lần nghe đầu của chủ dự án: gió viết lại thành luồng trầm có đợt (trước đó nghe như tiếng ồn: 8,6 % năng
+  lượng trên 1 kHz, nay dưới 0,5 %); cồng dựng lại thành cồng có núm gõ dùi mềm (hai bản đầu dùng tỉ lệ bồi âm của thanh gỗ
+  và có tiếng "tách" ở đầu nên nghe như gõ gỗ): âm cơ bản D3 147 Hz (chủ dự án chọn bằng tai; cao hơn nghe ra chuông) mạnh nhất và ngân nhiều giây (sau 5 giây còn −5 dB),
+  bồi âm gần quãng tám, mỗi bồi âm là một cặp phách chậm, không có tiếng tách, có vang phòng mặc định; khóa mới `reverb` và `room_s` cho mọi sự kiện trong `score.json`.
+- `THIRD_PARTY.md`: ghi công cho mã phỏng theo lemomo-ai/lemo-opuscar (MIT). Chỉ phỏng mã; phim mẫu, nhân vật, bố cục
+  và bản nhạc của dự án đó không được dùng.
 
 ## [1.1.0] - 2026-11-11
 

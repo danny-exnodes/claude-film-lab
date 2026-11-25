@@ -4,7 +4,9 @@
 
 ## [Unreleased]
 
-### Đợt sửa issue mở (2026-11-25, nhánh `claude/issues-round`)
+## [1.3.0] - 2026-11-25
+
+### Đợt sửa issue mở (#45, 2026-11-25)
 Bảy gói việc làm song song, mỗi gói một nhánh, gộp và chạy lại cả bộ test (`bash tools/ci.sh`). Không có request tính phí nào.
 
 #### Ngân sách và ledger (#15, #13 phía dùng)
@@ -437,7 +439,8 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danny-exnodes/claude-film-lab/releases/tag/v1.0.0

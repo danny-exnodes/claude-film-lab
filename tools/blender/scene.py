@@ -479,6 +479,13 @@ def main():
     sc.render.fps, sc.render.fps_base = fps, 1.0
     sc.frame_start, sc.frame_end = 1, n
     sc.render.use_motion_blur = False
+    # no metadata stamps (date, render time...): the same frame must give the same bytes
+    for name in dir(sc.render):
+        if name.startswith("use_stamp"):
+            try:
+                setattr(sc.render, name, False)
+            except (AttributeError, TypeError):
+                pass
     sc.render.film_transparent = False
     sc.render.use_compositing = True
     sc.render.image_settings.media_type = "IMAGE"

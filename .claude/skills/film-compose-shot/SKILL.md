@@ -38,15 +38,21 @@ Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì th�
 
 - Đầu vào: `projects/<project>/ep<NN>-<slug>/{EPISODE.md, shots.csv, anchors.json}`, lớp tranh đã duyệt trong
   `out/<project>/ep<NN>/plates/`, `styles/<id>/{style.yaml, motion.md, sound.md}`.
-- Mỗi `code_motion` trong `shots.csv` phải là id có trong `tools/compose/motions.json` (`mist-bands`, `embers`,
-  `sun-glow`, `strip-warp`, `eyelid`, `breath`, `parallax`, `push-in`) và có trong `style.yaml` `motion:`.
-- `method: layers` còn dùng `smoke`, `fire`, `foliage`, `cloth`, `pose-cycle` (cũng phải có trong `motions.json` và
-  `style.yaml` `motion:`); `cloth` và `foliage` cần hộp neo, `pose-cycle` cần các plate tư thế ghi ở cột `layers`
-  (`L4b`, `L4c`…) và điểm neo chân chung. Người nhỏ trong cảnh rộng (≤ 25 % khung): `figure`, vẽ bằng code, không
-  cần plate (`references/layers-figure.md`); chỉ cần một điểm neo cho bàn chân nếu đứng trên plate. Với `layers`, shot nào có `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
+- Mỗi `code_motion` trong `shots.csv` phải là một id của `tools/compose/motions.json` **không** ghi `"engine": "toon"`
+  (id `toon` chỉ cho `method: code`) **và** có trong `style.yaml` `motion:`. Đó là: `mist-bands`, `embers`, `sun-glow`,
+  `smoke`, `fire`, `foliage`, `strip-warp`, `cloth`, `pose-cycle`, `figure`, `eyelid`, `breath`, `parallax`, `push-in`.
+  Mọi id là code nên dùng được cho cả `layers` lẫn `seedance`, trừ `pose-cycle` và `figure`: chỉ `method: layers`.
+- `cloth` và `foliage` cần hộp neo, `pose-cycle` cần các plate tư thế ghi ở cột `layers` (`L4b`, `L4c`…) và điểm neo
+  chân chung. Người nhỏ trong cảnh rộng (≤ 25 % khung): `figure`, vẽ bằng code, không cần plate
+  (`references/layers-figure.md`); chỉ cần một điểm neo cho bàn chân nếu đứng trên plate. Với `layers`, shot nào có
+  `ai_motion` là lỗi của `shots.csv`: báo đạo diễn.
 - `strip-warp`, `eyelid`, `breath`, `push-in` cần điểm neo trong `anchors.json` (`tools/layers/anchors.py set`; hộp =
   cặp điểm `<tên>_tl`/`<tên>_br`; chi tiết `references/compose-api.md` §2).
-- Kiểm tra bộ mã: `python3 tools/compose/inline.py --lint`.
+- Kiểm tra bộ mã: `python3 $FILM_LAB/tools/compose/inline.py --lint`.
+- **Đường dẫn và thư mục làm việc.** `$FILM_LAB` = gốc repo (hook đặt sẵn). Đặt một lần mỗi phiên
+  `FILM=$FILM_LAB/out/<project>/ep<NN>/film/<slug>` (thư mục phim cinecode). Lệnh `tools/make.py`, `tools/capture.mjs`
+  là của cinecode, nằm trong thư mục phim: chạy với `cd "$FILM"`. Lệnh của lab (`inline.py`, `bundle.py`,
+  `anchors.py`, `score.py`) luôn ghi đường dẫn đầy đủ `$FILM_LAB/...` và đối số tuyệt đối, nên chạy từ đâu cũng được.
 - Chrome trong container chạy bằng root cần `--no-sandbox`:
   `export CHROME_PATH=$FILM_LAB/tools/compose/chrome-root.sh` (nếu hook chưa đặt). Thiếu biến này `make.py` báo
   `Chrome did not start ... Running as root without --no-sandbox`.
@@ -56,10 +62,10 @@ Một tập một nhánh. Với `layers`, shot thiếu chuyển động thì th�
 Nạp skill `cinecode` bằng Skill tool trước (để guard của nó chạy), rồi:
 
 ```bash
-mkdir -p out/<project>/ep<NN>/film && cd out/<project>/ep<NN>/film
+mkdir -p $FILM_LAB/out/<project>/ep<NN>/film && cd $FILM_LAB/out/<project>/ep<NN>/film
 python3 ~/.claude/skills/cinecode/scripts/init_film.py <slug> --quick --title "<Tên tập>"
-cd <slug>
-python3 $FILM_LAB/tools/compose/inline.py film.html --init --anchors $FILM_LAB/projects/<project>/ep<NN>-<slug>/anchors.json
+FILM=$FILM_LAB/out/<project>/ep<NN>/film/<slug>
+python3 $FILM_LAB/tools/compose/inline.py $FILM/film.html --init --anchors $FILM_LAB/projects/<project>/ep<NN>-<slug>/anchors.json
 ```
 
 - Một tập = một phim cinecode (`out/<project>/ep<NN>/film/<slug>/film.html`), mỗi shot = một dòng `SCENES`.
@@ -68,8 +74,10 @@ python3 $FILM_LAB/tools/compose/inline.py film.html --init --anchors $FILM_LAB/p
 - `inline.py --init` làm một lần trên film.html mới: chèn bộ mã (một khối `<script>` giữa hai dấu `compose-kit`,
   không sửa tay), đổi kích thước mặc định 1080x1920 → **1920x1080**, nối `loadPlates` vào `window.READY`, thay các cảnh
   mẫu bằng `templates/plates-film-section.js`, thêm look `plates` và điền dòng Format của `STATE.md`
-  (`<giây> s, 16:9, 1920x1080, 24 fps`; `make.py` đọc dòng này). Sau mỗi lần sửa `tools/compose/` hoặc
-  `anchors.json`: chạy lại `inline.py film.html --anchors ...` (không `--init`).
+  (`<giây> s, 16:9, 1920x1080, 24 fps`; tỉ lệ theo `--size`; `make.py` đọc dòng này). Sau mỗi lần sửa
+  `tools/compose/` hoặc `anchors.json`: chạy lại `python3 $FILM_LAB/tools/compose/inline.py $FILM/film.html` (không
+  `--init`): nó tự đọc lại `anchors.json` đã ghi lần trước (đường dẫn lưu tương đối với film.html, chạy từ thư mục nào
+  cũng tìm thấy). film.html CRLF vẫn giữ CRLF; file được ghi qua file tạm rồi đổi tên, không bao giờ ghi dở.
 - Ngay sau đó: `DURATION` = `length_s` của `EPISODE.md`, `TITLE`, và sửa số giây trên dòng Format của `STATE.md` cho
   khớp; thay `PLATES`, `CUES`, hàm shot và `SCENES` mẫu bằng của tập (template chạy được nguyên trạng chỉ trên lớp thử).
 - Định dạng lưu của cinecode: hook đặt `CINECODE_FORMATS=<repo>/formats` (CONVENTIONS §9). Sau bản final đầu tiên
@@ -99,8 +107,9 @@ cinecode) vẽ sau `COMPOSE.stage`.
 
 **Máy quay** (`COMPOSE.camera`):
 - Tiến về chủ thể: `toward: COMPOSE.anchor('L4', 'subject')`, `zoom: [1, 1.06–1.12]`, `center` ≤ 0.35. Đừng lia
-  ra xa hay đẩy lệch làm cắt đầu/đuôi; ảnh L1 không đủ lớn thì console báo `shows its edge` (bộ mã tự zoom thêm
-  liên tục cho khỏi lộ mép): tăng `overscan` hoặc giảm chuyển động.
+  ra xa hay đẩy lệch làm cắt đầu/đuôi; ảnh L1 không đủ lớn cho đường đi của máy quay thì bộ mã tự zoom thêm liên tục
+  cho khỏi lộ mép và báo dòng `compose: plate L1 shows its edge` trong `qc` của `make.py`. Bắt sớm hơn bằng
+  `inline.py --preflight` (mục 2a): nó in luôn `overscan` cần có. Lia cuộn tranh: `compose-api.md` §3.
 - Rung: `shake: { amp: 1.5–3, freq: 0.5–0.7, roll: ≤ 0.1 }` (noise có seed, không ngẫu nhiên thật).
 - Một cú đẩy nhỏ ở sự kiện chính: `events: [{ at: CUES.<sự kiện>, zoom: 0.02–0.04, dur: 0.5, kick: 2–3 }]`.
 - Shot đầu: `ease: 'out'` (nhanh nhất ở khung 0: luật hook của cinecode); các shot sau `inOut`. Hai shot liền nhau
@@ -112,14 +121,29 @@ Số liệu preset (tốc độ, alpha, số hạt, biên độ) lấy từ `sty
 
 **Tất định (bắt buộc):** mọi thứ là hàm của `(t, SEED)`: không `Math.random`, `Date`, `performance.now`, không giữ
 trạng thái giữa các khung (`inline.py` từ chối). Ảnh hay texture mới phải nạp trong `loadPlates` (trước READY).
-Kiểm: `node tools/capture.mjs --url film.html --verify --params "w=1920&h=1080"` → phải in `deterministic: yes`.
+Kiểm (`cd "$FILM"`): `node tools/capture.mjs --url film.html --verify --params "w=1920&h=1080"` → phải in
+`deterministic: yes`.
+
+## 2a. Preflight trước mỗi lần render (miễn phí, node, không ghi gì)
+
+```bash
+python3 $FILM_LAB/tools/compose/inline.py $FILM/film.html --preflight
+```
+
+Chạy bộ mã đã chèn trong film.html với canvas giả, đọc cỡ từng file plate, vẽ mọi shot của `SCENES` ở 12 khung/giây
+thời gian phim. `ERROR` (thoát 1, sửa trước khi `make.py stills`): khoá lạ trong `PLATES` (gõ sai), thiếu điểm/hộp neo
+mà rig hay `place` cần, thiếu file plate hoặc khung `seq`, L1 lộ mép dưới chuyển động máy quay (kèm `overscan` cần
+có), `figure` vượt 25 % khung, shot ném lỗi, cảnh báo của bộ mã làm khung khác với mã (rig đứng yên, giá trị bị chặn).
+`WARN` (thoát 0, xem qua): khoá lạ trong tham số một lời gọi, số ngoài khoảng ghi trong `compose-api.md`, hình người
+bị đẩy vào quá 25 % khung, film.html mang bộ mã cũ. Chi tiết: `compose-api.md` §9.
 
 ## 3. Cử động trong một ảnh phẳng (rig của lớp)
 
 Khai trong `PLATES.<id>.rig`, chỉnh theo shot bằng tham số của `st.plate(id, {...})` (chi tiết: `compose-api.md` §4):
 - **strip-warp** (đuôi, tóc, vạt áo): vùng = hộp neo; dải 4 px (px sân khấu) lệch theo sóng chạy từ gốc ra ngọn,
-  biên độ tăng về ngọn (`amp` 15–35 px ảnh, `speed` 0.3–0.6 vòng/s). Hộp chỉ chứa phần được cử động và nền trong suốt
-  quanh nó; gốc nối vào thân với độ lệch 0 nên không có đường nối.
+  biên độ tăng về ngọn. `amp` tính bằng px **ảnh** ở ngọn (mặc định 16): giữ ngọn lệch ≤ 2–3 % chiều dài bộ phận
+  (`styles/<id>/motion.md`), vd. đuôi dài 1000 px ảnh → `amp` ≤ 20–30; `speed` 0.3–0.6 vòng/s. Hộp chỉ chứa phần được
+  cử động và nền trong suốt quanh nó; gốc nối vào thân với độ lệch 0 nên không có đường nối.
 - **eyelid** (mắt nhắm/mở, kể cả mắt trên lưng): hộp neo của mắt; mảng da lấy ngay trên mắt trượt xuống làm mí.
   `blinks: [{ at, dur: 0.3 }]` hoặc `keys: [[t, 1], [t2, 0]]` (mắt mở dần một lần).
 - **breath**: phóng dọc 0,8 % quanh chân (`pivot: 'feet'`), chu kỳ 3–4 s.
@@ -136,7 +160,8 @@ style khai báo chúng. Chữ ký và tham số: `references/compose-api.md` (kh
   đứng yên; mọi vùng vải của một shot chung một hướng gió, lệch pha.
 - **pose-cycle** (rig `poses` trên L4): mỗi thời điểm vẽ đúng **một** plate tư thế, cắt thẳng trên lưới 8–12 fps, canh
   theo điểm neo chân; không nội suy vị trí hay góc xoay của thân. Dịch chuyển chậm của cả hình là việc của máy quay.
-- **foliage** (rig trên vùng tán cây, bụi, cỏ của L2/L3): nghiêng nhẹ tăng theo chiều cao, gốc đứng yên.
+- **foliage** (rig `sway` trên vùng tán cây, bụi, cỏ của L2/L3): nghiêng nhẹ tăng theo chiều cao, gốc đứng yên. Theo
+  shot: `st.plate('L2', { sway: false })` giữ yên mọi cây (đuôi `warp` cùng lớp vẫn động), `{ sway: { tan: {...} } }`.
 - **smoke** (`COMPOSE.smoke.plume`): cột khói từ một điểm gốc có độ sâu; nhiều cột lệch pha. Vẽ sau lớp chứa nguồn khói.
 - **fire** (`COMPOSE.fire.flames`, `COMPOSE.fire.glow`): lưỡi lửa blend `lighter` + ánh hắt lên lớp gần; đi cùng
   `embers`. Không bao giờ chớp cả khung.
@@ -184,14 +209,15 @@ nhấp nháy và dòng `PLATES`; `--method rembg` chỉ để dự phòng: viề
 
 ## 6. Render và giao
 
-1. `python3 tools/make.py stills --at <các giây chính>` → tự xem (Read ảnh `review/stills-N.jpg`) rồi gửi người
-   dùng. Kiểm: đủ lớp, sương, parallax (so khung đầu và cuối: nền gần như đứng yên, tiền cảnh/nhân vật lớn dần),
+0. `inline.py --preflight` (mục 2a) không còn `ERROR`.
+1. `cd "$FILM"`, rồi `python3 tools/make.py stills --at <các giây chính>` (`tools/make.py` của cinecode, trong thư mục
+   phim) → tự xem (Read ảnh `$FILM/review/stills-N.jpg`) rồi gửi người dùng. Kiểm: đủ lớp, sương, parallax (so khung đầu và cuối: nền gần như đứng yên, tiền cảnh/nhân vật lớn dần),
    chủ thể không bị mép cắt, mắt/đuôi đúng thời điểm.
 2. `python3 tools/make.py draft` (960x540, đủ âm, chạy nền với `run_in_background`, rồi `make.py wait`). Đo trên
    container cloud (CPU, 2 worker): ~10 khung/s ở 1080p, nhanh hơn ở 960x540; 8 s phim ≈ 20 s render + kiểm.
    Phim 60 s ≈ 2–3 phút.
 3. Sau khi người dùng duyệt bản nháp: `python3 tools/make.py final` (kiểm tất định, 1920x1080, master −14 LUFS).
-4. Chép bản dựng sang tên chuẩn: `out/<project>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` /
+4. Chép bản dựng sang tên chuẩn: `$FILM_LAB/out/<project>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` /
    `ep<NN>_final_v<NN>.mp4` (phiên bản luôn tăng, không ghi đè); ghi `EPISODE.md` Nhật ký.
 
 **"TOO STILL":** `make.py` đo phần thay đổi còn lại sau khi trừ chuyển động máy quay (ngưỡng 1,0 mức xám, mẫu 4
@@ -203,12 +229,12 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 
 ## 7. Lưu trữ (CONVENTIONS §9, §11)
 
-- Gói mỗi shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
+- Gói mỗi shot: `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
   `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (đạo diễn tải; compositor không tải lên Drive).
   Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
 - Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
-  trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
+  trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.
 - Bản dựng duyệt tải riêng từng file: bản nháp vào `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối vào
   `05_ThanhPham/ep<NN>-<slug>/`.
@@ -222,10 +248,13 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 | `deterministic: NO` | ảnh nạp muộn, `Math.random`/`Date`, trạng thái giữa khung | nạp trong `loadPlates`; chỉ dùng `COMPOSE.rng/noise`, `rng()` của cinecode; `inline.py` để kiểm |
 | `Chrome did not start ... --no-sandbox` | container chạy bằng root | `CHROME_PATH=$FILM_LAB/tools/compose/chrome-root.sh` |
 | `page threw while loading ... plate L4: could not load` | sai đường dẫn tương đối | đường dẫn tính từ film.html: `../../plates/<file>` (L1, matte `none`) hoặc `../../plates/matte/<file>` (lớp đã tách nền) |
-| dòng `compose: plate L1 shows its edge` | L1 không đủ lớn cho chuyển động | tăng `overscan`, giảm `zoom`/`pan`, hoặc ảnh L1 lớn hơn. Cảnh báo của bộ mã là các dòng `compose:` trong phần `qc` mà `make.py` in ra, không phải console của trình duyệt |
+| dòng `compose: plate L1 shows its edge` | L1 không đủ lớn cho chuyển động | tăng `overscan` tới số `inline.py --preflight` in ra, giảm `zoom`/`pan`, hoặc ảnh L1 lớn hơn. Cảnh báo của bộ mã là các dòng `compose:` trong phần `qc` mà `make.py` in ra, không phải console của trình duyệt |
 | vạch dọc trên đuôi | hộp warp chứa cả phần thân xa gốc | thu hộp lại, đặt `tail_root` đúng chỗ nối |
 | `cliché: lens flare` | chữ "flare" trong phần FILM | đừng dùng từ đó trong mã/ghi chú của FILM, hoặc ghi lý do trên director card |
-| `anchors ... scaled` | `anchors.json` đo trên ảnh khác cỡ | cập nhật `size` hoặc đo lại trên ảnh đã duyệt |
+| `anchors ... scaled` | khoá `size` (hoặc `_size`) trong `anchors.json` khác cỡ ảnh: điểm được đo trên ảnh khác cỡ | đo lại các điểm trên đúng ảnh đã duyệt (`anchors.py set`; `anchors.py` không ghi `size`, khoá đó chỉ có khi sửa tay) rồi xoá khoá `size`; giữ `size` chỉ khi cố ý dùng điểm đo trên bản nhỏ hơn |
+| `--preflight` in `ERROR plate L4: rig.warp.<tên> needs anchor box ...` | hộp neo chưa đánh dấu hoặc sai tên | `anchors.py set ... <tên>_tl x y` và `<tên>_br x y`, rồi `inline.py $FILM/film.html` (đọc lại anchors) |
+| `--preflight` in `ERROR plate <id>: unknown key ...` | gõ sai khoá trong `PLATES` (bộ mã bỏ qua khoá lạ, không báo) | sửa theo danh sách khoá in kèm; `compose-api.md` §1, §4 |
 
-Thử nhanh bộ mã không tốn phí: `python3 tools/compose/demo_plates.py out/demo`, khởi tạo một phim Quick trong
-`out/demo/film/`, `inline.py --init --anchors out/demo/anchors.json`; template chạy nguyên trạng trên lớp thử.
+Thử nhanh bộ mã không tốn phí: `python3 $FILM_LAB/tools/compose/demo_plates.py $FILM_LAB/out/demo`, khởi tạo một phim
+Quick trong `$FILM_LAB/out/demo/film/`, `inline.py <film.html> --init --anchors $FILM_LAB/out/demo/anchors.json`;
+template chạy nguyên trạng trên lớp thử và `--preflight` báo `0 error(s), 0 warning(s)`.

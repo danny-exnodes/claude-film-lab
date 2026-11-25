@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "title": "Lookbook: every preset in one static frame",
+  "note": "tools/blender/blender.py lookbook renders the middle frame of this shot once per look.",
+  "size": [1920, 1080], "fps": 24, "seconds": 2, "seed": 3,
+  "look": "ink-wash", "engine": "eevee",
+  "world": {"mist": 0.8, "mist_range": [8, 140], "sun": [34, 290]},
+  "assets": [
+    {"id": "ground", "src": "preset:ground", "params": {"relief": 0.3}, "mask": false},
+    {"id": "peaks", "src": "preset:mountains", "at": [4, 80, -2], "params": {"width": 150, "depth": 30, "height": 30, "peaks": 5, "seed": 21}},
+    {"id": "lake", "src": "preset:water", "at": [0, 22, 0.02], "params": {"width": 160, "depth": 26}, "mask": false},
+    {"id": "rocks", "src": "preset:rocks", "at": [2.4, 4.2, 0], "params": {"count": 3, "spread": 1.2, "size": 0.9, "seed": 5}},
+    {"id": "pines", "src": "preset:pines", "at": [3.2, 6.5, 0.3], "params": {"count": 2, "spread": 2.5, "height": 3.6, "seed": 4}},
+    {"id": "cube", "src": "prim:cube", "at": [-2.4, 4.0, 0.35], "rot": [0, 0, 30], "scale": 0.7, "color": "#B02E22"},
+    {"id": "giot", "src": "preset:giot", "at": [-0.6, 3.2, 0], "rot": [0, 0, 12], "anim": {"action": "wave"}}
+  ],
+  "camera": {"move": "static", "from": [0, -3.2, 1.4], "target": [0, 12, 2.2], "lens": 30},
+  "passes": [], "depth_range": [0.5, 150]
+}

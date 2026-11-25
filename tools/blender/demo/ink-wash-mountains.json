@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "title": "Ink-wash mountains, push-in on Giọt",
+  "size": [1920, 1080], "fps": 24, "seconds": 5, "seed": 7,
+  "look": "ink-wash", "engine": "eevee",
+  "world": {"paper": "#EFE6D3", "ink": "#1A1714", "mist": 0.85, "mist_range": [8, 150], "sun": [32, 285]},
+  "assets": [
+    {"id": "ground", "src": "preset:ground", "params": {"relief": 0.4}, "mask": false},
+    {"id": "far", "src": "preset:mountains", "at": [10, 110, -3], "params": {"width": 220, "depth": 40, "height": 42, "peaks": 7, "seed": 3}},
+    {"id": "mid", "src": "preset:mountains", "at": [-16, 42, -1], "params": {"width": 64, "depth": 18, "height": 17, "peaks": 3, "seed": 8}},
+    {"id": "water", "src": "preset:water", "at": [0, 18, 0.02], "params": {"width": 160, "depth": 22}, "mask": false},
+    {"id": "rocks", "src": "preset:rocks", "at": [-3.2, 4.5, 0], "params": {"count": 4, "spread": 1.6, "size": 1.1}},
+    {"id": "pine", "src": "preset:pines", "at": [-3.6, 5.2, 0.4], "params": {"count": 1, "height": 4.2}, "anim": {"action": "sway"}},
+    {"id": "giot", "src": "preset:giot", "at": [0.6, 3.0, 0], "rot": [0, 0, -15], "anim": {"action": "idle"}}
+  ],
+  "camera": {"move": "push-in", "from": [0.4, -4.5, 1.5], "to": [0.5, -2.4, 1.25], "target": [0.3, 12, 2.6], "lens": 32, "ease": "inout"},
+  "passes": ["depth", "normal", "line", "mask"], "depth_range": [1, 120]
+}

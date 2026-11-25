@@ -184,6 +184,7 @@ class TestFinishRound2(LambdaCase):
         code, _, err = self.finish(st)
         self.assertEqual(code, 1)
         self.assertIn("read jobs/", err)
+        self.assertNotIn("WARN", err)                              # the worker hash is checked once, at the end
         code, _, err = self.finish(st, "--give-up")
         self.assertEqual(code, 2)
         self.assertIn("--give-up only after its deadline", err)

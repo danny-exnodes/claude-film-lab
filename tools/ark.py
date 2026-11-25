@@ -1267,7 +1267,6 @@ def lambda_finish(a):
         usage_error(f"job {job} has no row in {a.ledger}: every Lambda job starts with 'lambda-job prepare' "
                     "(budget check + pending row). Check that this is the episode's ledger")
     status = st.get("status")
-    check_worker_hash(st, job)
     last = known[-1]
     req = {k: last.get(k, "") for k in ("kind", "model", "size", "seconds", "count", "out")}
     out = a.out or req.get("out")
@@ -1292,9 +1291,12 @@ def lambda_finish(a):
                           "memory limit). Stop reading the status and do not invoke again. Close the request (it "
                           f"may have been billed, so it stays counted):\n  {finish}", file=sys.stderr)
                     sys.exit(1)
-                if not done:
-                    log_row(a, req, job, "failed", f"{LAMBDA_NOTE}; gave up: still running {late:.0f}s after the "
-                                                    "deadline (worker died; may have been billed)")
+                if done:
+                    print(f"job {job} already has a final row ({done[-1].get('status')}); ledger unchanged",
+                          file=sys.stderr)
+                    sys.exit(1)
+                log_row(a, req, job, "failed", f"{LAMBDA_NOTE}; gave up: still running {late:.0f}s after the "
+                                                "deadline (worker died; may have been billed)")
                 print(f"job {job} closed as failed (worker died); it stays counted. Not retried.", file=sys.stderr)
                 sys.exit(1)
             if a.give_up:
@@ -1304,11 +1306,15 @@ def lambda_finish(a):
         print(f"job {job} is {status or 'unknown'}: no final row written; read jobs/{job}.json again later",
               file=sys.stderr)
         sys.exit(1)
+    check_worker_hash(st, job)            # on the final status only: one WARN per job, not one per poll
     if status == "failed":
         error = redact(st.get("error"))
         unsent = st.get("sent") is False
-        if not done:
-            log_row(a, req, job, "failed-unsent" if unsent else "failed", f"{secs}; {error[:240]}")
+        if done:
+            print(f"job {job} FAILED: {error}. It already has a final row ({done[-1].get('status')}); ledger "
+                  "unchanged.", file=sys.stderr)
+            sys.exit(1)
+        log_row(a, req, job, "failed-unsent" if unsent else "failed", f"{secs}; {error[:240]}")
         if unsent:
             print(f"job {job} FAILED before anything was sent to Ark (sent: false): {error}\nNothing was generated; "
                   "the request is closed as failed-unsent and no longer counts. Fix the cause, then prepare a new "

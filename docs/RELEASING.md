@@ -20,6 +20,11 @@ Phiên bản theo SemVer, ghi trong `CHANGELOG.md`. Từ phiên Claude Code clou
 - Không `git tag`, không `git push --tags`, không `git push origin vx.y.z`, không gọi API tạo release.
 - Gặp 403 ở các lệnh trên là **đúng như dự kiến**: không thử lại, không tìm đường vòng; báo người dùng làm mục 3.
 
+Ngoại lệ: trong phiên **local** (máy chủ dự án, `gh` đã đăng nhập), khi chủ dự án **yêu cầu trực tiếp** trong phiên đó
+("merge và phát hành"), Claude được merge PR phát hành và tạo tag + release bằng
+`gh release create vx.y.z --target main --title vx.y.z --notes-file docs/releases/vx.y.z.md`. Không bao giờ tự làm khi
+không được yêu cầu, và không bao giờ từ phiên cloud.
+
 ## 3. Người dùng làm (sau khi PR được merge)
 1. GitHub → **Releases** → **Draft a new release**.
 2. **Choose a tag** → gõ `vx.y.z` → *Create new tag on publish*; **Target**: `main` (commit merge của PR phát hành).
@@ -32,3 +37,6 @@ Phiên bản theo SemVer, ghi trong `CHANGELOG.md`. Từ phiên Claude Code clou
 | Bản | Tag trỏ tới | Ghi chú |
 |---|---|---|
 | `v1.0.0` | `f0fe000` (2026-11-10) | tạo tay; nhánh `release/v1.0.0` còn trên remote, xoá được |
+| `v1.1.0` | `db93b4a` (2026-11-11) | tạo tay |
+| `v1.2.0` | `df6258c` (2026-11-25) | tạo tay |
+| `v1.3.0` | commit merge của PR `Release v1.3.0` (2026-11-25) | Claude tạo bằng `gh release create` từ phiên local, theo yêu cầu trực tiếp của chủ dự án |

@@ -124,4 +124,5 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
 - cinecode được ghim ở `tools/compose/cinecode.ref` (= `CINECODE_REF` trong `docs/setup-script.sh`); đổi ghim theo
   `docs/RUNBOOK.md` ("cinecode đổi template"), không `git pull` trong thư mục skill.
 - Phát hành: `docs/RELEASING.md`. Claude chỉ sửa `CHANGELOG.md` và mở PR; **không** `git tag`, không push tag, không gọi
-  API release (phiên cloud bị chặn 403 – đúng như dự kiến, không thử lại). Tag và GitHub Release do người dùng tạo tay.
+  API release (phiên cloud bị chặn 403 – đúng như dự kiến, không thử lại). Tag và GitHub Release do người dùng tạo tay
+  (ngoại lệ duy nhất: phiên local khi chủ dự án yêu cầu trực tiếp, `docs/RELEASING.md` mục 2).

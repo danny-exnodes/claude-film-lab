@@ -82,7 +82,7 @@ Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.j
 - `assets[]`: `id`, `src` = `preset:<id>` | `prim:<cube|sphere|ico|cylinder|cone|plane|torus>` | đường dẫn `.glb/.gltf`
   (tương đối với file spec), `at`, `rot`, `scale`, `fit` (co asset cho cạnh lớn nhất bằng `fit` mét, đặt đứng trên z = 0),
   `color`, `ink` (0–1, độ đậm mực ở look ink-wash), `lines` (false = không nét mực), `mask`, `params` (tham số preset),
-  `anim`: `action` (preset: `giot` có `idle, hop, walk, wave`; `pines` có `sway`; `.glb`: tên action trong file),
+  `anim`: `action` (preset: `giot` có `idle, hop, walk, wave`; `pines` có `sway`; `.glb`: tên action trong file; không ghi `action` thì model `.glb` đứng yên),
   `path` [[t, [dx, dy, dz]], …] (độ lệch so với `at`), `ease`, `face_path` (quay mặt theo hướng đi, mặc định bật), `speed`.
 - `camera`: `move` (`static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track` — cùng nghĩa với
   `tools/toon/project.js`), `from`, `target` (id asset hoặc [x, y, z]), `aim` (độ lệch điểm nhìn; mặc định nửa chiều cao

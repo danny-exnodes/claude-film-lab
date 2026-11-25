@@ -161,6 +161,10 @@ def build_asset(a, k, base_dir, seed, coll):
                     o["film_color"] = col
         if a.get("anim", {}).get("action"):
             _assign_action(new, a["anim"]["action"])
+        else:                                   # no action named: the asset stands still (the importer plays one)
+            for o in new:
+                if o.animation_data:
+                    o.animation_data.action = None
     meshes = [o for o in _descendants(root) if o.type == "MESH"]
     if "fit" in a:
         _fit(root, meshes, a["fit"], coll)

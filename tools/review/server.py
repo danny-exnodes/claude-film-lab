@@ -17,11 +17,17 @@ Two listeners:
                              (24 h, SQLite), plus the latest full sample
       /api/comfy             ComfyUI state from monitor.py: up, queue, current job's steps, last 10 jobs (+ linked build)
       /api/stream            Server-Sent Events: build, step, progress, render, job, done, fail, metrics, comfy
-                             (metrics and comfy: at most one each per 2 s, not replayed) + heartbeat
+                             (metrics and comfy: at most one each per 2 s, not replayed) + heartbeat; at most
+                             MAX_SSE streams at once (503 above), each closed after SSE_LIFETIME (EventSource reconnects)
       /media/<path>          files under the read-only media mount, HTTP Range (206/416), allowlisted types only
   ingest 8791 (write)
       POST /ingest/event     one JSON event (types above); unknown types and fields are refused (400); metrics and
-                             comfy events carry no build
+                             comfy events carry no build. The Host header must be 127.0.0.1|localhost|[::1]:<port> and
+                             every POST needs the header X-Film-Review: 1 (403 otherwise): a web page cannot send it
+                             cross-origin without a CORS preflight, which this server never approves (DNS rebinding).
+Public text: every stored string is scrubbed (an absolute path becomes its base name) and capped; old builds, steps,
+renders, jobs and history rows are pruned (MAX_BUILDS, MAX_STEPS, ...). A slow client cannot hold a thread: socket
+timeouts, a deadline for the request head, a bounded SSE lifetime.
 The compose file publishes both ports on 127.0.0.1 only; ngrok tunnels 8790. This process is the only one that opens
 the SQLite database (a named Docker volume): nothing else may share the .db file.
 """
@@ -36,6 +42,7 @@ import os
 import posixpath
 import queue
 import re
+import socket
 import sqlite3
 import sys
 import threading
@@ -58,6 +65,18 @@ MINUTE = 60.0                    # the 24 h history: one averaged row per minute
 KEEP_HISTORY = 24 * 3600.0
 PUSH_EVERY = 2.0                 # SSE: at most one metrics and one comfy event per 2 s (the newest one wins)
 MONITOR_STALE = 10.0             # no sample for this long: the monitor is shown as offline
+MAX_SSE = 64                     # concurrent SSE streams; more answer 503
+SSE_LIFETIME = 600.0             # an SSE stream ends after 10 min (the browser's EventSource reconnects at once)
+SSE_SEND_TIMEOUT = 30.0          # a stalled SSE reader is dropped after this long
+PUBLIC_TIMEOUT = 15.0            # socket timeout while a request is read (and of an idle keep-alive connection)
+REQUEST_DEADLINE = 20.0          # the whole request head (line + headers) must arrive within this (slow loris)
+SEND_TIMEOUT = 60.0              # one 64 KB chunk of a file must be taken by the client within this
+MAX_BUILDS = 500                 # retention: the oldest builds (by updated) go, with their steps, renders and jobs
+MAX_STEPS = 2000                 # per build: the lowest step numbers go
+MAX_RENDERS = 500                # per build: the oldest go
+MAX_JOBS = 200                   # per build: the oldest go
+MAX_MINUTES = int(KEEP_HISTORY // MINUTE) + 60      # metrics_min rows, besides the 24 h age limit
+INGEST_HEADER = "X-Film-Review"
 
 MEDIA_TYPES = {
     ".glb": "model/gltf-binary", ".gltf": "model/gltf+json", ".bin": "application/octet-stream",
@@ -90,6 +109,38 @@ EVENTS = {
 }
 MAX_STR = {"title": 200, "label": 200, "message": 500, "project": 100, "engine": 60, "job": 100, "kind": 20,
            "status": 20, "tool": 20}
+
+# Anything that looks like an absolute path: UNC (\\server\share\...), a drive (C:\..., D:/...), POSIX (/home/x/...,
+# ~/x/...). A segment before a separator may hold spaces ("C:\Program Files\..."), the last one may not. Stored and
+# public text keeps the base name only. client.py has the same pattern (a test keeps the two equal).
+PATHLIKE = re.compile(r"(?:\\\\|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![\w.:/~-])~?/(?=[^\s/]))"
+                      r"(?:[^\\/\"'<>|\r\n]*[\\/])*[^\s\\/\"'<>|]*")
+CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _basename(m):
+    parts = [p.strip() for p in re.split(r"[\\/]", m.group(0)) if p.strip()]
+    last = parts[-1] if parts else ""
+    return "\u2026" if not last or re.fullmatch(r"[A-Za-z]:|~", last) else last
+
+
+def scrub(text, limit=500):
+    """Public text: every absolute path -> its base name ('…' when it has none), control characters -> one space,
+    at most `limit` characters."""
+    if not isinstance(text, str):
+        return text
+    return PATHLIKE.sub(_basename, CONTROL.sub(" ", text)).strip()[:limit]
+
+
+def scrub_obj(v, depth=0):
+    """scrub() every string (keys too) of a JSON value (the stats of a step)."""
+    if isinstance(v, str):
+        return scrub(v, 200)
+    if isinstance(v, dict) and depth < 8:
+        return {scrub(str(k), 60): scrub_obj(x, depth + 1) for k, x in v.items()}
+    if isinstance(v, list) and depth < 8:
+        return [scrub_obj(x, depth + 1) for x in v]
+    return v
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS builds (
@@ -195,7 +246,7 @@ def validate(ev):
         if ftype == STR:
             if not isinstance(v, str):
                 raise BadEvent(f"{kind}: {name} must be a string")
-            v = v.strip()[:MAX_STR.get(name, 200)]
+            v = scrub(v, MAX_STR.get(name, 200))
         elif ftype in (NUM, INT):
             if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
                 raise BadEvent(f"{kind}: {name} must be a number")
@@ -211,6 +262,7 @@ def validate(ev):
                 raise BadEvent(f"{kind}: {name} must be an object")
             if len(json.dumps(v)) > 8192:
                 raise BadEvent(f"{kind}: {name} is too large (8 KB)")
+            v = scrub_obj(v)
         elif ftype == PATH:
             if safe_rel(v) is None or not v.startswith(bid + "/"):
                 raise BadEvent(f"{kind}: {name} must be a media path under '{bid}/' (no '..', no absolute path)")
@@ -464,6 +516,17 @@ class Store:
         if not row:
             self.db.execute("INSERT INTO builds (id, title, kind, status, progress, started, updated) "
                             "VALUES (?, ?, ?, 'building', 0, ?, ?)", (bid, bid, kind, now, now))
+            self._prune_builds(bid)
+
+    def _prune_builds(self, keep):
+        """Retention: at most MAX_BUILDS builds; the least recently updated go (their rows cascade). Never `keep`."""
+        self.db.execute("DELETE FROM builds WHERE id IN (SELECT id FROM builds WHERE id != ? ORDER BY updated DESC "
+                        "LIMIT -1 OFFSET ?)", (keep, max(0, MAX_BUILDS - 1)))
+
+    def _prune_rows(self, table, bid, newest_first, most):
+        """Retention: at most `most` rows of one build in steps/renders/jobs (the rest of `newest_first` go)."""
+        self.db.execute(f"DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE build=? "
+                        f"ORDER BY {newest_first} LIMIT -1 OFFSET ?)", (bid, most))
 
     def apply(self, kind, bid, f, now=None):
         """Store one validated event. -> the stored row (dict) for the SSE payload."""
@@ -487,6 +550,7 @@ class Store:
                            "updated) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
                            (bid, f.get("title") or bid, f.get("kind") or "model", f.get("project"),
                             f.get("status") or "building", f.get("expected_steps"), now, now))
+                self._prune_builds(bid)
             else:
                 sets, vals = ["updated=?"], [now]
                 for col in ("title", "kind", "project", "expected_steps", "status"):
@@ -514,6 +578,7 @@ class Store:
                        "ON CONFLICT(build, n) DO UPDATE SET label=excluded.label, stats=excluded.stats, "
                        "glb=excluded.glb, image=excluded.image, t=excluded.t",
                        (bid, n, f["label"], stats, f.get("glb"), f.get("image"), now))
+            self._prune_rows("steps", bid, "n DESC", MAX_STEPS)
             exp = db.execute("SELECT expected_steps FROM builds WHERE id=?", (bid,)).fetchone()[0]
             prog = min(1.0, n / exp) if exp else None
             sets = ["current=?", "updated=?", "status=CASE WHEN status IN ('queued','done','failed') "
@@ -550,6 +615,7 @@ class Store:
                 rid = db.execute(f"INSERT INTO renders (build, {', '.join(cols)}, t) "
                                  f"VALUES (?, {', '.join('?' * len(cols))}, ?)",
                                  [bid] + [f.get(c) for c in cols] + [now]).lastrowid
+                self._prune_rows("renders", bid, "t DESC, id DESC", MAX_RENDERS)
             sets, vals = ["updated=?"], [now]
             if f.get("image"):
                 sets.append("thumb=COALESCE(thumb, ?)")
@@ -565,6 +631,7 @@ class Store:
                        "t=excluded.t",
                        (bid, key, f["tool"], f["status"], f.get("progress"), f.get("gpu_s"), f.get("message"),
                         now, now))
+            self._prune_rows("jobs", bid, "t DESC, id DESC", MAX_JOBS)
             sets, vals = ["updated=?"], [now]
             if f["status"] == "running":
                 sets += ["status=CASE WHEN status='building' THEN status ELSE 'rendering' END", "finished=NULL"]
@@ -596,6 +663,8 @@ class Store:
                     self.db.execute("INSERT OR REPLACE INTO metrics_min (t, data) VALUES (?, ?)",
                                     (int(r["t"]), json.dumps(r, separators=(",", ":"))))
                 self.db.execute("DELETE FROM metrics_min WHERE t < ?", (int(prune_before),))
+                self.db.execute("DELETE FROM metrics_min WHERE t IN (SELECT t FROM metrics_min ORDER BY t DESC "
+                                "LIMIT -1 OFFSET ?)", (MAX_MINUTES,))
                 self.db.execute("COMMIT")
             except Exception:
                 self.db.execute("ROLLBACK")
@@ -646,8 +715,11 @@ class Hub:
             return self.seq
 
     def subscribe(self, last_id=None):
+        """-> (queue, backlog), or (None, []) when MAX_SSE streams are open already."""
         q = queue.Queue(maxsize=1000)
         with self.lock:
+            if len(self.clients) >= MAX_SSE:
+                return None, []
             backlog = [it for it in self.recent if last_id is not None and it[0] > last_id]
             self.clients.add(q)
         return q, backlog
@@ -835,17 +907,52 @@ def importmap_hashes(web_root):
 
 
 def csp_header(hashes):
+    """connect-src needs blob: too: three.js's GLTFLoader fetch()es the blob: URLs of a GLB's embedded textures."""
     script = " ".join(["'self'"] + hashes)
     return ("default-src 'none'; script-src %s; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
-            "media-src 'self' blob:; connect-src 'self'; font-src 'self'; worker-src 'self' blob:; "
+            "media-src 'self' blob:; connect-src 'self' blob:; font-src 'self'; worker-src 'self' blob:; "
             "manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" % script)
 
 
 # ------------------------------------------------------------------ HTTP
+class Reaper:
+    """Shuts down connections whose request head did not arrive within REQUEST_DEADLINE (a slow-loris client that
+    sends one byte now and then never trips the per-read socket timeout)."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.watch = {}
+        self.stopped = threading.Event()
+
+    def arm(self, key, sock, seconds):
+        with self.lock:
+            self.watch[key] = (time.monotonic() + seconds, sock)
+
+    def disarm(self, key):
+        """-> False when the deadline had already fired for key."""
+        with self.lock:
+            return self.watch.pop(key, None) is not None
+
+    def run(self):
+        while not self.stopped.wait(0.2):
+            now = time.monotonic()
+            with self.lock:
+                late = [k for k, (t, _) in self.watch.items() if t <= now]
+                socks = [self.watch.pop(k)[1] for k in late]
+            for s in socks:
+                try:
+                    s.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+
 class App:
-    def __init__(self, db, media, web, host="0.0.0.0", public_port=8790, ingest_port=8791, quiet=False):
+    def __init__(self, db, media, web, host="0.0.0.0", public_port=8790, ingest_port=8791, quiet=False,
+                 ingest_hosts=()):
         self.store = Store(db)
         self.hub = Hub()
+        self.reaper = Reaper()
+        self.ingest_hosts = {h.strip().lower() for h in ingest_hosts if h.strip()}
         self.machine = Machine(self.store)
         self.push = {k: Throttle(lambda p, k=k: self.hub.publish(k, p, keep=False)) for k in SYS_EVENTS}
         self.media = os.path.abspath(media)
@@ -873,6 +980,7 @@ class App:
             t.start()
             self.threads.append(t)
         threading.Thread(target=self._heartbeat, daemon=True).start()
+        threading.Thread(target=self.reaper.run, daemon=True).start()
         return self
 
     def _heartbeat(self):
@@ -881,6 +989,7 @@ class App:
 
     def stop(self):
         self.hub.closed.set()
+        self.reaper.stopped.set()
         for t in self.push.values():
             t.close()
         for s in (self.public, self.ingest):
@@ -917,6 +1026,32 @@ class Base(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         if not self.app.quiet:
             sys.stderr.write("%s %s\n" % (self.log_date_time_string(), fmt % args))
+
+    # --- slow clients: a socket timeout for every read (and an idle keep-alive), a deadline for the request head
+    def setup(self):
+        self.timeout = PUBLIC_TIMEOUT
+        super().setup()
+
+    def handle_one_request(self):
+        try:
+            self.connection.settimeout(PUBLIC_TIMEOUT)      # a file or stream before may have set a longer one
+        except OSError:
+            pass
+        key = id(self)
+        self.app.reaper.arm(key, self.connection, REQUEST_DEADLINE)
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+            self.close_connection = True
+        finally:
+            self.app.reaper.disarm(key)
+
+    def parse_request(self):
+        ok = super().parse_request()
+        if not self.app.reaper.disarm(id(self)):            # too slow: the socket is shut already
+            self.close_connection = True
+            return False
+        return ok
 
     def send_json(self, obj, code=200, extra=None):
         body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
@@ -1025,6 +1160,9 @@ class PublicHandler(Base):
         except ValueError:
             last = None
         q, backlog = self.app.hub.subscribe(last)
+        if q is None:
+            self.close_connection = True
+            return self.send_json({"error": "too many live viewers, try again soon"}, 503, {"Retry-After": "10"})
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache, no-transform")
@@ -1033,15 +1171,17 @@ class PublicHandler(Base):
         self.common_headers()
         self.end_headers()
         self.close_connection = True
+        end = time.monotonic() + SSE_LIFETIME            # then the browser's EventSource reconnects (Last-Event-ID)
         try:
+            self.connection.settimeout(SSE_SEND_TIMEOUT)
             self.wfile.write(b"retry: 3000\n\n")
             self.wfile.write(("event: hello\ndata: %s\n\n" % json.dumps({"t": time.time(), "version": VERSION})).encode())
             for item in backlog:
                 self.write_event(item)
             self.wfile.flush()
-            while not self.app.hub.closed.is_set():
+            while not self.app.hub.closed.is_set() and time.monotonic() < end:
                 try:
-                    item = q.get(timeout=1.0)
+                    item = q.get(timeout=max(0.01, min(1.0, end - time.monotonic())))
                 except queue.Empty:
                     if q not in self.app.hub.clients:       # dropped as too slow
                         break
@@ -1124,6 +1264,7 @@ class PublicHandler(Base):
             self.end_headers()
             if self.command == "HEAD" or not length:
                 return
+            self.connection.settimeout(SEND_TIMEOUT)
             fh.seek(start)
             left = length
             while left > 0:
@@ -1142,13 +1283,34 @@ class IngestHandler(Base):
             return lambda: self.not_allowed("POST")
         raise AttributeError(name)
 
+    def host_ok(self):
+        """DNS rebinding: a page of evil.example that resolves to 127.0.0.1 still sends Host: evil.example."""
+        hosts = self.headers.get_all("Host") or []
+        if len(hosts) != 1:
+            return False
+        host = hosts[0].strip().lower()
+        port = self.server.server_address[1]
+        ok = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"} | self.app.ingest_hosts
+        return host in ok
+
+    def refuse(self, why):
+        self.close_connection = True                # the request body (if any) is not read
+        return self.send_json({"error": why}, 403)
+
     def do_GET(self):
+        if not self.host_ok():
+            return self.refuse("Host must be 127.0.0.1 or localhost with the ingest port")
         if self.path == "/ingest/health":
             return self.send_json({"ok": True, "version": VERSION})
         return self.send_json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self.host_ok():
+            return self.refuse("Host must be 127.0.0.1 or localhost with the ingest port")
+        if self.headers.get(INGEST_HEADER, "").strip() != "1":
+            return self.refuse(f"the header {INGEST_HEADER}: 1 is required (tools/review/client.py sends it)")
         if self.path != "/ingest/event":
+            self.close_connection = True
             return self.send_json({"error": "not found"}, 404)
         try:
             n = int(self.headers.get("Content-Length") or "-1")
@@ -1193,9 +1355,12 @@ def main(argv=None):
     p.add_argument("--public-port", type=int, default=8790)
     p.add_argument("--ingest-port", type=int, default=8791)
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--ingest-host", action="append", default=(os.environ.get("REVIEW_INGEST_HOSTS") or "").split(","),
+                   help="another accepted Host of the ingest port (host:port), e.g. when it is published on another "
+                        "port; 127.0.0.1|localhost|[::1]:<ingest port> are always accepted")
     a = p.parse_args(argv)
     mimetypes.init()
-    app = App(a.db, a.media, a.web, a.host, a.public_port, a.ingest_port, a.quiet).start()
+    app = App(a.db, a.media, a.web, a.host, a.public_port, a.ingest_port, a.quiet, a.ingest_host).start()
     print(f"film-lab-review {VERSION}: public :{app.public_port} (read-only) · ingest :{app.ingest_port} · "
           f"db {a.db} · media {a.media}", flush=True)
     try:

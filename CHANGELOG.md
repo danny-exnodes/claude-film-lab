@@ -22,6 +22,29 @@
 - Sửa: chuyển từ một build sang build khác khi trang trước còn tải GLB làm model của build trước hiện trong trang sau;
   mỗi trang giờ vẽ vào khung riêng, trang cũ bị huỷ khi tải xong (`web/route.js`, test node).
 
+#### Sửa sau review PR #48
+- **Lộ thông tin**: `comfy.py` và `blender.py` chỉ gửi lên server loại lỗi cố định (`failed: execution error`,
+  `failed: prompt refused`, `failed: blender error`…) và tên file (`turntable chuc-long.glb (ink-wash)`), không bao giờ
+  đường dẫn tuyệt đối, nội dung ngoại lệ, prompt hay `node_errors` (chi tiết vẫn ở ledger và stderr). `server.py` và
+  `client.py` cùng lọc mọi trường chữ (tiêu đề, nhãn, thông báo, bước hiện tại, stats): đường dẫn kiểu `C:\…`, `D:/…`,
+  `/home/…`, `/mnt/…`, `\\server\…`, `~/…` thành tên file, cắt độ dài.
+- **Chống DoS**: tối đa 64 luồng SSE cùng lúc (quá thì 503 + `Retry-After`), mỗi luồng SSE sống tối đa 10 phút
+  (EventSource tự nối lại); socket timeout 15 giây khi đọc request, hạn 20 giây cho cả phần đầu request (chặn
+  slow-loris), 60 giây cho mỗi khối file gửi đi, 30 giây cho người đọc SSE bị kẹt.
+- **DNS rebinding trên cổng ghi**: cổng 8791 chỉ nhận `Host` là `127.0.0.1|localhost|[::1]:<cổng>` (một header `Host`
+  duy nhất; thêm tên khác bằng `--ingest-host`/`REVIEW_INGEST_HOSTS`) và mọi POST phải có header `X-Film-Review: 1`
+  (403 nếu thiếu). `client.py` tự gửi header (mọi publisher đi qua nó; `monitor.py` dùng `client.INGEST_HEADERS`), người
+  gọi không phải đổi gì. Giữ dữ liệu có giới hạn: ≤ 500 build (bỏ build cập nhật lâu nhất), ≤ 2000 bước, ≤ 500 render,
+  ≤ 200 job mỗi build, lịch sử máy ≤ 24 giờ + 60 dòng.
+- **CSP**: `connect-src 'self' blob:` để Chromium tải được texture nhúng trong GLB.
+- **`review.py down` / pid**: chỉ giết tiến trình đã kiểm (`ngrok.pid` phải là ngrok(.exe); `monitor.pid` phải là python
+  chạy `tools/review/monitor.py`, đọc dòng lệnh bằng PowerShell `Get-CimInstance Win32_Process` hoặc `/proc`); pid cũ hay
+  của chương trình khác thì xoá file pid, không giết; `up` không còn bỏ qua việc bật monitor vì pid cũ.
+- `monitor.py`: kẹp số đo vào đúng khoảng server nhận trước khi gửi; server trả 4xx thì ghi log (mỗi thông báo một lần),
+  gửi bản rút gọn (chỉ số chính) và không lùi thời gian; chỉ lùi khi mất kết nối hoặc 5xx.
+- Web app: bản chụp `/api/builds` đầu tiên không còn ghi đè cập nhật SSE mới hơn (gộp theo `updated`); đường dẫn `#/…`
+  mã hoá hỏng mở bảng theo dõi kèm thông báo thay vì trang trắng.
+
 ### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
 Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với
 MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026-11-25-local-engines-design.md`.

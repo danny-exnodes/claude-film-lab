@@ -16,8 +16,10 @@ command line, path, window title, environment variable or user name. The ComfyUI
 its text is sent. A python process counts as "ComfyUI (python)" when it listens on the ComfyUI port (Windows) or runs
 ComfyUI's main.py (Linux, read locally, never sent).
 
-Offline-safe: a collector that fails gives null values; when the review server does not answer the monitor backs off
-(2 s -> 60 s) and keeps collecting; the loop never exits on an error. `review.py up` starts it detached
+Offline-safe: a collector that fails gives null values; when the review server does not answer (or answers 5xx) the
+monitor backs off (2 s -> 60 s) and keeps collecting; the loop never exits on an error. Values are clamped to the
+server's ranges before sending; a 4xx answer is logged (once per distinct message) and a reduced event (core numbers
+only) is sent instead, without backing off. `review.py up` starts it detached
 (out/_review/monitor.pid), `review.py down` or `review.py monitor --stop` stops it.
 Env: FILM_REVIEW_URL, FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_LOG (default
 $FILM_COMFY_WORK/server.log, else <lab>/out/_comfy/server.log: the log that `comfy.py start` writes). For the Comfy
@@ -35,6 +37,7 @@ import struct
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -554,6 +557,77 @@ def comfy_port(url):
     return int(m.group(1)) if m else 80
 
 
+# ------------------------------------------------------------------ server ranges (server.py validate_sys)
+BIG = 1e16
+GPU_RANGES = {"util": (0, 100), "mem_used": (0, BIG), "mem_total": (0, BIG), "temp": (-50, 200), "power": (0, 5000)}
+CURRENT_RANGES = {"step": (0, 1e7), "total": (1, 1e7), "pct": (0, 100), "s_per_step": (0, 1e7), "elapsed": (0, 1e8),
+                  "eta": (0, 1e8), "bar": (1, 1e4), "job_elapsed": (0, 1e8)}
+HISTORY_RANGES = {"t": (0, 1e11), "duration": (0, 1e8), "steps": (0, 1e7), "s_per_step": (0, 1e7), "bars": (0, 1e4)}
+INTS = ("mem_used", "mem_total", "step", "total", "bar", "steps", "bars")
+GPU_NAME = re.compile(r"^[A-Za-z0-9 ._()+-]{1,60}$")
+DISK_NAME = re.compile(r"^(?:[A-Z]:|/)$")
+
+
+def clamp(v, lo, hi, integer=False):
+    """A number inside [lo, hi] (None for a non-number, NaN or infinity)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or abs(v) == float("inf"):
+        return None
+    v = min(hi, max(lo, v))
+    return int(v) if integer else v
+
+
+def clamp_event(ev):
+    """A metrics/comfy event inside the server's validation ranges: numbers clamped, list lengths capped, names that the
+    server would refuse dropped. Anything else is returned as is."""
+    kind = ev.get("type")
+    if kind == "metrics":
+        out = dict(ev, cpu=clamp(ev.get("cpu"), 0, 100), ram_used=clamp(ev.get("ram_used"), 0, BIG, True),
+                   ram_total=clamp(ev.get("ram_total"), 0, BIG, True), gpus=[], disks=[], procs=[])
+        for g in (ev.get("gpus") or [])[:8]:
+            name = g.get("name")
+            d = {"name": name if isinstance(name, str) and GPU_NAME.fullmatch(name) else "GPU"}
+            for f, (lo, hi) in GPU_RANGES.items():
+                d[f] = clamp(g.get(f), lo, hi, f in INTS)
+            out["gpus"].append(d)
+        for d in (ev.get("disks") or [])[:26]:
+            if isinstance(d.get("name"), str) and DISK_NAME.fullmatch(d["name"]):
+                out["disks"].append({"name": d["name"], "free": clamp(d.get("free"), 0, BIG, True),
+                                     "total": clamp(d.get("total"), 0, BIG, True)})
+        labels = set(HEAVY.values()) | {COMFY_PY}
+        out["procs"] = [{"name": p["name"], "count": clamp(p.get("count"), 1, 9999, True) or 1}
+                        for p in (ev.get("procs") or [])[:20] if p.get("name") in labels]
+        return out
+    if kind == "comfy":
+        out = dict(ev, running=clamp(ev.get("running"), 0, 100000, True),
+                   pending=clamp(ev.get("pending"), 0, 100000, True))
+        if out.get("prompt_id") is not None and not PROMPT_ID.fullmatch(str(out["prompt_id"])):
+            out["prompt_id"] = None
+        cur = ev.get("current")
+        if cur is not None:
+            cur = {f: clamp(cur.get(f), lo, hi, f in INTS) for f, (lo, hi) in CURRENT_RANGES.items()}
+            out["current"] = cur if cur["step"] is not None and cur["total"] is not None else None
+        hist = []
+        for h in (ev.get("history") or [])[-10:]:
+            d = {f: clamp(h.get(f), lo, hi, f in INTS) for f, (lo, hi) in HISTORY_RANGES.items()}
+            d["status"] = h.get("status") if h.get("status") in ("ok", "failed", "interrupted") else "ok"
+            pid = h.get("prompt_id")
+            d["prompt_id"] = pid if isinstance(pid, str) and PROMPT_ID.fullmatch(pid) else None
+            hist.append(d)
+        out["history"] = hist
+        return out
+    return ev
+
+
+def minimal(ev):
+    """The reduced event sent after a 4xx: only the core numbers (the lists and nested objects are dropped)."""
+    if ev.get("type") == "metrics":
+        return {k: ev.get(k) for k in ("type", "t", "cpu", "ram_used", "ram_total")}
+    if ev.get("type") == "comfy":
+        return {"type": "comfy", "t": ev.get("t"), "up": bool(ev.get("up")), "running": ev.get("running"),
+                "pending": ev.get("pending")}
+    return ev
+
+
 # ------------------------------------------------------------------ the collector
 class Monitor:
     def __init__(self, ingest=None, comfy_url=None, comfy_log=None, interval=2.0, clock=time.time):
@@ -570,6 +644,7 @@ class Monitor:
         self.next_post = 0.0
         self.online = None
         self.comfy_pids = set()
+        self.last_refusal = None
 
     # --- metrics
     def cpu(self):
@@ -649,10 +724,41 @@ class Monitor:
     # --- delivery
     def post(self, ev):
         body = json.dumps(ev, separators=(",", ":")).encode("utf-8")
-        req = urllib.request.Request(self.ingest, data=body, method="POST",
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(self.ingest, data=body, method="POST", headers=dict(client.INGEST_HEADERS))
         with _OPENER.open(req, timeout=POST_TIMEOUT) as r:
             r.read()
+
+    def deliver(self, ev):
+        """Send one event, clamped to the server's ranges. A 4xx answer (the server refused a field) is logged and the
+        reduced event (minimal()) is sent instead: no back-off, the next sample goes out as usual. -> True when one of
+        the two was accepted. Raises on connection errors and 5xx (tick() backs off on those)."""
+        ev = clamp_event(ev)
+        try:
+            self.post(ev)
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code >= 500:
+                raise
+            self.refused(ev.get("type"), e)
+        small = minimal(ev)
+        try:
+            self.post(small)
+            return True
+        except urllib.error.HTTPError as e:
+            if e.code >= 500:
+                raise
+            self.refused(f"{small.get('type')} (reduced)", e)
+        return False
+
+    def refused(self, kind, e):
+        try:
+            msg = json.loads(e.read().decode("utf-8")).get("error") or e.reason
+        except Exception:
+            msg = e.reason
+        text = f"review server refused {kind}: HTTP {e.code}: {msg}"
+        if text != self.last_refusal:                # once per distinct refusal: the log never floods
+            self.last_refusal = text
+            say(text + " (sending the reduced event; no back-off)")
 
     def tick(self):
         """Collect both events and send them unless backing off. -> (metrics, comfy, delivered)."""
@@ -664,8 +770,8 @@ class Monitor:
         if now < self.next_post:
             return m, c, False
         try:
-            self.post(m)
-            self.post(c)
+            ok = self.deliver(m)
+            ok = self.deliver(c) and ok
         except Exception as e:
             self.backoff = min(MAX_BACKOFF, max(self.interval, self.backoff * 2))
             self.next_post = now + self.backoff
@@ -676,7 +782,7 @@ class Monitor:
         if self.online is False:
             say("review server back")
         self.online, self.backoff, self.next_post = True, 0.0, 0.0
-        return m, c, True
+        return m, c, ok
 
     def run(self):
         say(f"monitor: every {self.interval:g} s -> {self.ingest} · ComfyUI {self.comfy_url} · log "
@@ -719,8 +825,8 @@ def main(argv=None):
             print(json.dumps(c, ensure_ascii=False, indent=1))
             return 0
         try:
-            mon.post(m)
-            mon.post(c)
+            if not (mon.deliver(m) and mon.deliver(c)):
+                raise RuntimeError(mon.last_refusal)
         except Exception as e:
             print(f"monitor: not delivered ({type(e).__name__}: {e})", file=sys.stderr)
             return 1

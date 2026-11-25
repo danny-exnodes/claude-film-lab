@@ -3,6 +3,19 @@
 // box it may still write into is already detached. Views get alive() to stop early after their own awaits.
 // No DOM import: tests/test_review.py runs this module under node with a fake container.
 
+// '#/build/giot%20demo' -> { key: 'build', args: ['giot demo'], error: null }. A segment that is not valid
+// percent-encoding ('%E0%A4%A') would throw in decodeURIComponent: the dashboard opens with a message instead of a
+// blank page.
+export function parseRoute(hash, names) {
+  const path = String(hash || '').replace(/^#\/?/, '');
+  const [name, ...rest] = path.split('/');
+  let bad = false;
+  const args = rest.map((s) => { try { return decodeURIComponent(s); } catch (e) { bad = true; return s; } })
+    .filter(Boolean);
+  if (bad) return { key: '', args: [], error: `Đường dẫn không hợp lệ: #/${path}` };
+  return { key: names.includes(name) ? name : '', args, error: null };
+}
+
 export function makeRouter(view, makeBox, onError = () => {}) {
   let seq = 0;
   let current = null;

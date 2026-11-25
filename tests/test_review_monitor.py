@@ -3,6 +3,7 @@ readers, the allow list of job names (nothing but labels may reach the public pa
 validation, the 10 min ring + 24 h downsampled history, the SSE throttle, the API, and the web app's route guard.
 Standard library only; servers on 127.0.0.1 port 0; no Docker, no GPU, no ComfyUI."""
 import http.client, json, os, shutil, socket, subprocess, sys, threading, time, unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -416,7 +417,8 @@ class ApiCase(TmpDirCase, unittest.TestCase):
         c = http.client.HTTPConnection("127.0.0.1", port or self.app.public_port, timeout=5)
         try:
             data = json.dumps(body).encode() if body is not None else None
-            c.request(method, path, body=data, headers={"Content-Type": "application/json"} if data else {})
+            c.request(method, path, body=data,
+                      headers={"Content-Type": "application/json", "X-Film-Review": "1"} if data else {})
             r = c.getresponse()
             return r.status, json.loads(r.read() or b"{}")
         finally:
@@ -515,17 +517,86 @@ class TestReviewCliMonitor(TmpDirCase, unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("--interval 5", out)
 
+    def fake_procs(self):
+        """A fake process table for review.process_info, the pid files in tmp."""
+        self.table = {}
+        self.mpid, self.npid = self.tmp / "monitor.pid", self.tmp / "ngrok.pid"
+        for p in (mock.patch.object(review, "process_info", lambda pid: self.table.get(int(pid)) if pid else None),
+                  mock.patch.object(review, "MONITOR_PID", str(self.mpid)),
+                  mock.patch.object(review, "NGROK_PID", str(self.npid)),
+                  mock.patch.object(review, "STATE", str(self.tmp)),
+                  mock.patch.object(review, "MONITOR_LOG", str(self.tmp / "monitor.log"))):
+            p.start()
+            self.addCleanup(p.stop)
+
+    MON = {"name": "python.exe", "cmdline": "C:\\Python314\\python.exe D:\\lab\\tools\\review\\monitor.py"}
+    OTHER_PY = {"name": "python.exe", "cmdline": "python.exe C:\\uv\\Scripts\\serena.exe start-mcp-server"}
+    NGROK = {"name": "ngrok.exe", "cmdline": "ngrok http 127.0.0.1:8790 --log stdout"}
+    CHROME = {"name": "chrome.exe", "cmdline": "chrome.exe --type=renderer"}
+
     def test_monitor_pid_is_checked_before_use(self):
-        pidfile = self.tmp / "monitor.pid"
-        with mock.patch.object(review, "MONITOR_PID", str(pidfile)):
+        self.fake_procs()
+        self.assertIsNone(review.monitor_pid())
+        self.mpid.write_text("not a pid")
+        with mock.patch("sys.stdout"):
             self.assertIsNone(review.monitor_pid())
-            pidfile.write_text("not a pid")
-            self.assertIsNone(review.monitor_pid())
-            pidfile.write_text(str(os.getpid()))
-            with mock.patch.object(review, "process_name", return_value="python3"):
-                self.assertEqual(review.monitor_pid(), os.getpid())
-            with mock.patch.object(review, "process_name", return_value="explorer.exe"):
-                self.assertIsNone(review.monitor_pid(), "a reused pid of another program is never killed")
+        self.assertFalse(self.mpid.exists(), "a broken pid file is stale")
+        self.table[100] = self.MON
+        self.mpid.write_text("100")
+        self.assertEqual(review.monitor_pid(), 100)
+        self.table[100] = dict(self.MON, name="/usr/bin/python3.12", cmdline="python3 /lab/tools/review/monitor.py")
+        self.assertEqual(review.monitor_pid(), 100)
+        for stale in (self.OTHER_PY, self.CHROME, {"name": "python.exe", "cmdline": None}, None):
+            self.table[100] = stale
+            self.mpid.write_text("100")
+            with mock.patch("sys.stdout"):
+                self.assertIsNone(review.monitor_pid(), stale)
+            self.assertFalse(self.mpid.exists(), stale)
+
+    def test_ngrok_pid_and_down_kill_only_verified_processes(self):
+        self.fake_procs()
+        self.table.update({100: self.OTHER_PY, 200: self.CHROME})
+        self.mpid.write_text("100")
+        self.npid.write_text("200")
+        with mock.patch.object(review.shutil, "which", return_value=None), \
+                mock.patch.object(review.subprocess, "run") as run, mock.patch.object(review.os, "kill") as kill:
+            run_main(review.main, ["down"])
+        run.assert_not_called()
+        kill.assert_not_called()
+        self.assertFalse(self.mpid.exists() or self.npid.exists(), "stale pid files are removed")
+        self.table.update({100: self.MON, 200: self.NGROK})
+        self.mpid.write_text("100")
+        self.npid.write_text("200")
+        self.assertEqual(review.ngrok_pid(), 200)
+        with mock.patch.object(review.shutil, "which", return_value=None), \
+                mock.patch.object(review.subprocess, "run") as run, mock.patch.object(review.os, "kill") as kill:
+            code, out, _ = run_main(review.main, ["down"])
+        killed = {int(c.args[0][2]) for c in run.call_args_list} | {c.args[0] for c in kill.call_args_list}
+        self.assertEqual(killed, {100, 200})
+        self.assertIn("stopped ngrok (pid 200)", out)
+
+    def test_up_starts_the_monitor_over_a_stale_pid(self):
+        self.fake_procs()
+        self.table[100] = self.OTHER_PY
+        self.mpid.write_text("100")
+        with mock.patch.object(review.subprocess, "Popen") as popen, mock.patch("sys.stdout"):
+            popen.return_value.pid = 4242
+            self.assertEqual(review.start_monitor(review.argparse.Namespace(interval=None, comfy_log=None)), 0)
+        popen.assert_called_once()
+        self.assertEqual(self.mpid.read_text(), "4242")
+        self.table[4242] = self.MON
+        with mock.patch.object(review.subprocess, "Popen") as popen, mock.patch("sys.stdout"):
+            review.start_monitor(review.argparse.Namespace(interval=None, comfy_log=None))
+        popen.assert_not_called()
+
+    def test_process_info_reads_this_process(self):
+        if os.name == "nt":
+            self.skipTest("PowerShell query: exercised on the lab machine")
+        info = review.process_info(os.getpid())
+        self.assertIsNotNone(info)
+        self.assertIn("python", (info["name"] + " " + (info["cmdline"] or "")).lower())
+        self.assertIsNone(review.process_info(0))
+        self.assertIsNone(review.process_info("x"))
 
 
 NODE = shutil.which("node")
@@ -583,6 +654,134 @@ class TestWebFiles(unittest.TestCase):
         sysjs = (web / "sys.js").read_text(encoding="utf-8")
         for needle in ("metrics?window=", "api('comfy')", "drawChart", "LOW_DISK", "limit: 90", "limit: 83"):
             self.assertIn(needle, sysjs)
+
+
+# ------------------------------------------------------------------ review fixes of PR #48
+class RefusingIngest:
+    """An ingest port that answers `code` for metrics events with a non-empty gpus list, 200 otherwise."""
+
+    def __init__(self, code=400):
+        self.events, self.headers, self.code = [], [], code
+        fake = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                ev = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
+                fake.events.append(ev)
+                fake.headers.append(dict(self.headers))
+                bad = ev.get("type") == "metrics" and ev.get("gpus")
+                body = json.dumps({"error": "metrics: gpus[0].name must match ..."} if bad else {"ok": True}).encode()
+                self.send_response(fake.code if bad else 200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def stop(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+WILD = {"type": "metrics", "t": 1.0, "cpu": 140.0, "ram_used": -5, "ram_total": 2 ** 34,
+        "gpus": [{"name": "RTX 5070 Ti", "util": 250, "mem_used": 3.5, "mem_total": 1e20, "temp": 400,
+                  "power": float("nan")}] * 9,
+        "disks": [{"name": "C:", "free": 10, "total": 20}, {"name": "\\\\server\\share", "free": 1, "total": 2}],
+        "procs": [{"name": "blender", "count": 0}, {"name": "C:\\x\\evil.exe", "count": 1}]}
+
+
+class TestMonitorRefusals(TmpDirCase, unittest.TestCase):
+    def test_values_are_clamped_to_the_server_ranges(self):
+        ev = monitor.clamp_event(WILD)
+        kind, clean = server.validate_sys(ev)                      # the server takes it as is
+        self.assertEqual((clean["cpu"], clean["ram_used"], len(clean["gpus"])), (100, 0, 8))
+        g = clean["gpus"][0]
+        self.assertEqual((g["util"], g["mem_used"], g["mem_total"], g["temp"], g["power"]), (100, 3, 1e16, 200, None))
+        self.assertEqual([d["name"] for d in clean["disks"]], ["C:"])
+        self.assertEqual(clean["procs"], [{"name": "blender", "count": 1}])
+        c = monitor.clamp_event({"type": "comfy", "t": 1, "up": True, "running": -1, "pending": 1e9, "prompt_id": "x y",
+                                 "current": {"step": 5, "total": 0, "pct": 140, "eta": -3},
+                                 "history": [{"duration": -1, "steps": 2.5, "status": "weird", "prompt_id": "ok-1"}] * 12})
+        _, cc = server.validate_sys(c)
+        self.assertEqual((cc["running"], cc["pending"], cc["prompt_id"]), (0, 100000, None))
+        self.assertEqual((cc["current"]["total"], cc["current"]["pct"], cc["current"]["eta"]), (1, 100, 0))
+        self.assertEqual((len(cc["history"]), cc["history"][0]["status"], cc["history"][0]["steps"]), (10, "ok", 2))
+
+    def test_a_4xx_is_logged_and_the_reduced_event_goes_without_back_off(self):
+        fake = RefusingIngest(400)
+        self.addCleanup(fake.stop)
+        mon = monitor.Monitor(fake.url, f"http://127.0.0.1:{free_port()}", None, interval=2)
+        with mock.patch.object(mon, "metrics", return_value=dict(WILD)), mock.patch("sys.stdout") as out:
+            m, c, ok = mon.tick()
+            self.assertTrue(ok)
+            self.assertEqual((mon.backoff, mon.next_post, mon.online), (0.0, 0.0, True))
+            self.assertEqual(mon.tick()[2], True, "the next tick posts again at once")
+        kinds = [(e["type"], bool(e.get("gpus"))) for e in fake.events]
+        self.assertEqual(kinds[:3], [("metrics", True), ("metrics", False), ("comfy", False)])
+        self.assertEqual(fake.events[0]["gpus"][0]["util"], 100, "clamped before sending")
+        self.assertEqual(set(fake.events[1]), {"type", "t", "cpu", "ram_used", "ram_total"})
+        logged = "".join(str(a.args[0]) for a in out.write.call_args_list if a.args)
+        self.assertEqual(logged.count("review server refused metrics: HTTP 400: metrics: gpus[0].name"), 1,
+                         "logged once per distinct refusal")
+        self.assertTrue(all(h.get("X-Film-Review") == "1" for h in fake.headers))
+
+    def test_a_5xx_backs_off(self):
+        fake = RefusingIngest(503)
+        self.addCleanup(fake.stop)
+        mon = monitor.Monitor(fake.url, f"http://127.0.0.1:{free_port()}", None, interval=2)
+        with mock.patch.object(mon, "metrics", return_value=dict(WILD)), mock.patch("sys.stdout"):
+            self.assertFalse(mon.tick()[2])
+        self.assertEqual(mon.backoff, 2)
+        self.assertGreater(mon.next_post, 0)
+
+
+WEB_TEST = r"""
+import { parseRoute } from '%s';
+import { mergeBuilds } from '%s';
+const names = ['', 'build', 'model', 'timeline'];
+const out = {
+  ok: parseRoute('#/build/giot%%20demo', names),
+  bad: parseRoute('#/build/%%E0%%A4%%A', names),
+  lone: parseRoute('#/model/50%%', names),
+  unknown: parseRoute('#/nope/x', names),
+  home: parseRoute('', names),
+};
+const m = new Map();
+mergeBuilds(m, [{ id: 'a', updated: 5, v: 'sse' }]);                       // an SSE update arrives first ...
+mergeBuilds(m, [{ id: 'a', updated: 3, v: 'snap' }, { id: 'b', updated: 1, v: 'snap' }]);   // ... then the snapshot
+out.merged = [...m.values()].map((b) => b.v);
+mergeBuilds(m, [{ id: 'a', updated: 9, v: 'new' }, { id: 'b', updated: 1, v: 'same' }]);
+out.newer = [...m.values()].map((b) => b.v);
+console.log(JSON.stringify(out));
+"""
+
+
+@unittest.skipIf(NODE is None, "node is missing")
+class TestWebFixes(unittest.TestCase):
+    def test_bad_hash_and_snapshot_merge(self):
+        web = REPO / "tools" / "review" / "web"
+        src = WEB_TEST % ((web / "route.js").resolve().as_uri(), (web / "lib.js").resolve().as_uri())
+        r = subprocess.run([NODE, "--input-type=module", "-e", src], capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual(out["ok"], {"key": "build", "args": ["giot demo"], "error": None})
+        for k in ("bad", "lone"):
+            self.assertEqual((out[k]["key"], out[k]["args"]), ("", []), k)
+            self.assertIn("không hợp lệ", out[k]["error"])
+        self.assertEqual((out["unknown"]["key"], out["home"]["key"]), ("", ""))
+        self.assertEqual(out["merged"], ["sse", "snap"], "the older snapshot row never replaces a newer SSE row")
+        self.assertEqual(out["newer"], ["new", "same"])
+        app = (web / "app.js").read_text(encoding="utf-8")
+        self.assertIn("parseRoute(location.hash", app)
+        self.assertIn("mergeBuilds(builds, d.builds)", app)
+        self.assertNotIn("map(decodeURIComponent)", app)
+        self.assertNotIn("builds = new Map(d.builds", app)
 
 
 if __name__ == "__main__":

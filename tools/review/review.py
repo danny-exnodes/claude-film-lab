@@ -18,6 +18,7 @@ Exit: 0 ok · 1 failed (Docker, ngrok, server unreachable) · 2 refused (vendor 
 import argparse
 import json
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -121,37 +122,88 @@ def monitor_cmd(a):
     return cmd
 
 
-def process_name(pid):
-    """The image name of a live process ('python.exe'), else None."""
+PYTHON_EXE = re.compile(r"^python(\d+(\.\d+)*)?w?$")
+PS_QUERY = ("[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+            "$p = Get-CimInstance Win32_Process -Filter 'ProcessId = %d'; "
+            "if ($p) { [pscustomobject]@{name = $p.Name; cmdline = $p.CommandLine} | ConvertTo-Json -Compress }")
+
+
+def process_info(pid):
+    """{'name': image name, 'cmdline': command line or None} of a live process, else None (also when it cannot be
+    read). Windows: PowerShell Get-CimInstance Win32_Process (no wmic); elsewhere /proc."""
     try:
         pid = int(pid)
     except (TypeError, ValueError):
         return None
+    if pid <= 0:
+        return None
     if os.name == "nt":
         try:
-            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
-                               timeout=10, creationflags=0x08000000)
-        except (OSError, subprocess.SubprocessError):
+            r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", PS_QUERY % pid],
+                               capture_output=True, timeout=30, creationflags=0x08000000)
+            d = json.loads(r.stdout.decode("utf-8", "replace").strip() or "null")
+        except (OSError, subprocess.SubprocessError, ValueError):
             return None
-        line = r.stdout.decode("utf-8", "replace").strip()
-        return line.split('","')[0].strip('"') if line.startswith('"') else None
+        return {"name": str(d.get("name") or ""), "cmdline": d.get("cmdline")} if isinstance(d, dict) else None
     try:
         os.kill(pid, 0)
         with open(f"/proc/{pid}/comm", encoding="utf-8") as f:
-            return f.read().strip()
+            name = f.read().strip()
     except (OSError, ValueError):
         return None
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    except OSError:
+        cmd = None
+    return {"name": name, "cmdline": cmd}
+
+
+def exe_base(name):
+    """'C:\\Python314\\python.exe' -> 'python' (lower case, no folder, no .exe)."""
+    base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1].strip().lower()
+    return base[:-4] if base.endswith(".exe") else base
+
+
+def is_ngrok(info):
+    return exe_base(info.get("name")) == "ngrok"
+
+
+def is_monitor(info):
+    """A python whose command line runs tools/review/monitor.py (a reused pid of any other program is not)."""
+    cmd = str(info.get("cmdline") or "").replace("\\", "/").lower()
+    return bool(PYTHON_EXE.match(exe_base(info.get("name")))) and "tools/review/monitor.py" in cmd
+
+
+def checked_pid(path, verify, what):
+    """The pid in `path` when that process is alive and verify(info) holds; else the pid file is stale: it is deleted
+    and None is returned (the process, if any, is never killed)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError):
+        pid = None
+    info = process_info(pid) if pid else None
+    if info and verify(info):
+        return pid
+    try:
+        os.remove(path)
+        say(f"stale {what} pid file removed (pid {pid} is not our {what}); nothing was stopped")
+    except OSError:
+        pass
+    return None
 
 
 def monitor_pid():
-    """PID of our running monitor (from monitor.pid, checked to be a live python), else None."""
-    try:
-        with open(MONITOR_PID, encoding="utf-8") as f:
-            pid = int(f.read().strip())
-    except (OSError, ValueError):
-        return None
-    name = (process_name(pid) or "").lower()
-    return pid if name.startswith("python") else None
+    """PID of our running monitor (monitor.pid, verified: python running tools/review/monitor.py), else None."""
+    return checked_pid(MONITOR_PID, is_monitor, "monitor")
+
+
+def ngrok_pid():
+    """PID of the ngrok that `up` started (ngrok.pid, verified: the image is ngrok(.exe)), else None."""
+    return checked_pid(NGROK_PID, is_ngrok, "ngrok")
 
 
 def start_monitor(a):
@@ -284,16 +336,15 @@ def cmd_down(a):
     else:
         err("docker not found on PATH")
         rc = 1
-    if os.path.isfile(NGROK_PID):
+    pid = ngrok_pid()                   # verified to be ngrok: a reused pid of another program is never killed
+    if pid:
         try:
-            with open(NGROK_PID, encoding="utf-8") as f:
-                pid = int(f.read().strip())
             if os.name == "nt":
                 subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True)
             else:
                 os.kill(pid, 15)
             say(f"stopped ngrok (pid {pid})")
-        except (OSError, ValueError):
+        except OSError:
             pass
         try:
             os.remove(NGROK_PID)

@@ -74,6 +74,17 @@ export async function api(path) {
 
 export function clamp(x, a, b) { return Math.max(a, Math.min(b, x)); }
 
+// Build summaries by id: a row replaces the stored one unless the stored one is newer (`updated`), so a slow
+// /api/builds snapshot never undoes the SSE updates that arrived while it loaded. -> the map.
+export function mergeBuilds(map, rows) {
+  for (const b of rows || []) {
+    if (!b || b.id == null) continue;
+    const cur = map.get(b.id);
+    if (!cur || !(Number(cur.updated) > Number(b.updated))) map.set(b.id, b);
+  }
+  return map;
+}
+
 export function store(key, value) {
   try {
     if (value === undefined) return JSON.parse(localStorage.getItem('review.' + key) || 'null');

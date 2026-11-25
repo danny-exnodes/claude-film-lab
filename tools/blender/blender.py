@@ -303,16 +303,42 @@ def render_entry(out, info, label):
             "seconds_per_frame": info.get("mean_seconds_per_frame")}
 
 
+def failure_category(e):
+    """A fixed text for the public review page: never the exception text (paths, Blender's output tail)."""
+    if isinstance(e, KeyboardInterrupt):
+        return "interrupted"
+    if isinstance(e, Refused):
+        return "refused"
+    if isinstance(e, Failed):
+        text = str(e)
+        if text.startswith("cannot start Blender"):
+            return "blender did not start"
+        if "did not finish" in text:
+            return "timeout"
+        if text.startswith("ffmpeg failed"):
+            return "encode failed"
+        if text.startswith("Blender exited"):
+            return "blender error"
+        return "render failed"
+    return f"error ({type(e).__name__})"
+
+
+def asset_label(asset):
+    """'preset:giot' as is, a file as its base name only (the review page is public)."""
+    s = str(asset)
+    return s if s.startswith("preset:") else os.path.basename(s.replace("\\", "/"))
+
+
 def with_review(hook, start_msg, work):
-    """Run work() -> (result, renders) with the hook's start / failed / finish around it. -> result."""
+    """Run work() -> (result, renders) with the hook's start / failed / finish around it. -> result.
+    The review server gets a fixed failure category; the full error stays on stderr (raised to the caller)."""
     if hook:
         hook.start(start_msg)
     try:
         result, renders = work()
     except BaseException as e:
         if hook:
-            text = str(e).strip()
-            hook.failed(text.splitlines()[0][:300] if text else type(e).__name__)
+            hook.failed(f"failed: {failure_category(e)}")
         raise
     if hook and result is not None:
         hook.finish([r for r in renders if r.get("video") or r.get("image")])
@@ -517,7 +543,7 @@ def cmd_turntable(a):
         stem = os.path.splitext(os.path.basename(a.asset.replace("preset:", "")))[0]
         return info, [render_entry(a.out, info, f"turntable {stem} ({look})")]
 
-    info = with_review(hook, f"turntable {a.asset} ({look})", work)
+    info = with_review(hook, f"turntable {asset_label(a.asset)} ({look})", work)
     if info is None:
         return 0
     print(f"turntable {a.asset} ({look}) {info['frame_count']} frames · {info['mean_seconds_per_frame']} s/frame -> {a.out}")

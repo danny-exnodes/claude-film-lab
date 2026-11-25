@@ -8,7 +8,10 @@ Docker trên máy chủ lab.
 > **Bảo mật — lựa chọn của chủ lab:** URL công khai **không có đăng nhập**. Ai có link là xem được **mọi thứ đã
 > publish** (tên build, tiến độ, model GLB, video, ảnh). Chỉ file trong `out/_review/media/` được phục vụ (mount chỉ
 > đọc); cổng công khai 8790 chỉ đọc (GET/HEAD, mọi phương thức khác bị 405); cổng ghi 8791 chỉ nghe trên 127.0.0.1,
-> không bao giờ qua ngrok. Đừng publish thứ không muốn người có link thấy; tắt link khi không dùng (`review.py down`).
+> không bao giờ qua ngrok, chỉ nhận `Host` là `127.0.0.1|localhost|[::1]:8791` và POST có header `X-Film-Review: 1`
+> (chặn DNS rebinding; `client.py` tự gửi). Mọi chữ được lọc: đường dẫn tuyệt đối thành tên file; lỗi của
+> `blender.py`/`comfy.py` chỉ là loại lỗi cố định (chi tiết ở ledger, stderr). Đừng publish thứ không muốn người có link
+> thấy; tắt link khi không dùng (`review.py down`).
 
 | File | Chạy ở đâu | Việc |
 |---|---|---|
@@ -47,7 +50,9 @@ python tools/review/monitor.py --once --print    # đo một lần, in hai sự 
 ```
 
 - Chạy nền tách khỏi cửa sổ (Windows: `DETACHED_PROCESS`), PID ở `out/_review/monitor.pid`, log ở
-  `out/_review/monitor.log`. `up` bật monitor (trừ `--no-monitor`), `down` tắt, `status` in trạng thái + số đo mới nhất.
+  `out/_review/monitor.log`. Trước khi dừng, `review.py` kiểm pid: `monitor.pid` phải là python chạy
+  `tools/review/monitor.py`, `ngrok.pid` phải là ngrok (Windows: PowerShell `Get-CimInstance`); không đúng thì xoá file pid
+  và không giết gì. `up` bật monitor (trừ `--no-monitor`), `down` tắt, `status` in trạng thái + số đo mới nhất.
 - **Máy**: CPU % (`GetSystemTimes`), RAM (`GlobalMemoryStatusEx`), GPU %, VRAM, nhiệt độ, công suất (`nvidia-smi`; không có
   thì bỏ GPU, thử lại mỗi phút), dung lượng trống mọi ổ cố định (C:, D:…), job nặng. Linux: đọc `/proc`. Biểu đồ vùng
   (canvas) 10 phút (mẫu 2 giây) hoặc 24 giờ (trung bình 1 phút). Màu cảnh báo: VRAM > 90 %, GPU > 83 °C, ổ còn < 10 GB
@@ -64,8 +69,11 @@ python tools/review/monitor.py --once --print    # đo một lần, in hai sự 
   Comfy Desktop: `--comfy-log %LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI\logs\comfyui.log` và
   `FILM_COMFY_URL` trỏ cổng của Desktop. Job do `comfy.py run --review B` chạy được nối với build `B` (job review tên
   `comfy-<prompt id>`) và có link trên thẻ.
-- Server không có (chưa `up`): monitor vẫn đo, thử gửi lại với khoảng chờ 2 → 60 giây, không bao giờ thoát vì lỗi.
+- Server không có (chưa `up`) hoặc trả 5xx: monitor vẫn đo, thử gửi lại với khoảng chờ 2 → 60 giây, không bao giờ thoát
+  vì lỗi. Số đo được kẹp vào khoảng server nhận; server trả 4xx thì ghi log một lần và gửi bản rút gọn, không lùi.
 - SSE: tối đa một sự kiện `metrics` và một `comfy` mỗi 2 giây (bản mới nhất thắng), không vào bộ đệm phát lại.
+- Giới hạn chống DoS: tối đa 64 luồng SSE (quá thì 503), mỗi luồng sống 10 phút (trình duyệt tự nối lại); đọc request
+  timeout 15 giây, cả phần đầu request phải tới trong 20 giây; mỗi khối file gửi đi 60 giây.
 
 ## Publish
 
@@ -115,7 +123,8 @@ progress 0..1, expected_steps, current, message, thumb, started/updated/finished
 glb, image, t), `renders` (build, label, video, image, frames, fps, duration, engine, seconds_per_frame, t), `jobs` (build,
 job, tool `blender|comfy`, status `queued|running|done|failed`, progress, gpu_s, message, started, t). Sự kiện ingest:
 `build`, `step`, `progress`, `render`, `job`, `done`, `fail`; kiểu hay trường lạ, đường dẫn media ra ngoài
-`<build>/` bị từ chối (400). Sự kiện `metrics` và `comfy` (của `monitor.py`, không có build): 10 phút mẫu 2 giây nằm trong
+`<build>/` bị từ chối (400). Giữ có giới hạn: ≤ 500 build (build cập nhật lâu nhất bị xoá cùng bước/render/job; file
+media trong `out/_review/media/` giữ nguyên), ≤ 2000 bước, ≤ 500 render, ≤ 200 job mỗi build. Sự kiện `metrics` và `comfy` (của `monitor.py`, không có build): 10 phút mẫu 2 giây nằm trong
 bộ nhớ; bảng `metrics_min` (t, JSON trung bình 1 phút) giữ 24 giờ, xoá dần khi ghi phút mới. API: `/api/metrics?window=10m|24h`,
 `/api/comfy`.
 

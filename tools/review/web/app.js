@@ -1,6 +1,6 @@
 // Film Lab Review: router + dashboard. Views with three.js load on demand (blueprint.js, viewer.js, timeline.js).
-import { h, chip, bar, api, mediaUrl, fmtDur, ago, Live, STATUS_VI, JOB_VI } from './lib.js';
-import { makeRouter } from './route.js';
+import { h, chip, bar, api, mediaUrl, fmtDur, ago, Live, STATUS_VI, JOB_VI, mergeBuilds } from './lib.js';
+import { makeRouter, parseRoute } from './route.js';
 import { systemPanels } from './sys.js';
 
 const view = document.getElementById('view');
@@ -18,11 +18,12 @@ const ROUTES = {
 };
 
 function route() {
-  const path = location.hash.replace(/^#\/?/, '');
-  const [name, ...rest] = path.split('/');
-  const key = name in ROUTES ? name : '';
-  for (const a of document.querySelectorAll('.tabs a')) a.classList.toggle('on', a.dataset.route === key);
-  return router.go(ROUTES[key], rest.map(decodeURIComponent).filter(Boolean), live);
+  const r = parseRoute(location.hash, Object.keys(ROUTES));
+  for (const a of document.querySelectorAll('.tabs a')) a.classList.toggle('on', a.dataset.route === r.key);
+  return router.go(ROUTES[r.key], r.args, live).then((v) => {
+    if (v && r.error && view.firstElementChild) view.firstElementChild.prepend(h('p', { class: 'empty', text: r.error }));
+    return v;
+  });
 }
 window.addEventListener('hashchange', route);
 route();
@@ -117,7 +118,8 @@ function dashboard(root, _args, live) {
   function update(msg) {
     const b = msg.build;
     if (!b) return;
-    builds.set(b.id, b);
+    mergeBuilds(builds, [b]);
+    if (builds.get(b.id) !== b) return;               // an older row than the one shown
     const el = cards.get(b.id);
     if (el) {
       fill(el, b);
@@ -129,7 +131,12 @@ function dashboard(root, _args, live) {
 
   const off = live.on('*', update);
   const timer = setInterval(() => { for (const [id, el] of cards) { const b = builds.get(id); if (b && ACTIVE.has(b.status)) tick(el, b); } }, 1000);
-  api('builds').then((d) => { builds = new Map(d.builds.map((b) => [b.id, b])); paint(); for (const b of d.builds) { const el = cards.get(b.id); if (el) fill(el, b); } })
+  // The snapshot may be older than SSE updates that arrived while it loaded: merge by `updated`, the newer row wins.
+  api('builds').then((d) => {
+    mergeBuilds(builds, d.builds);
+    paint();
+    for (const [id, b] of builds) { const el = cards.get(id); if (el) fill(el, b); }
+  })
     .catch((e) => { empty.textContent = `Không tải được danh sách: ${e.message}`; empty.hidden = false; });
   return { destroy() { off(); clearInterval(timer); sys.destroy(); } };
 }

@@ -893,12 +893,14 @@ def run(a):
         hook.key = f"comfy-{pid}"          # the review monitor links ComfyUI's running prompt to this build by it
         hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
 
-    def final(status, note="", usage=""):
+    def final(status, note="", usage="", cat=None):
+        """The ledger row (full detail). The review server is public: it gets a fixed category only (`cat`), never
+        the note (paths, exception text, prompt text, node_errors stay in the ledger and on stderr)."""
         if not state["logged"]:
             ark.log_row(a, req, rid, status, "; ".join(x for x in (seed_note, note) if x), usage=usage)
             state["logged"] = True
             if hook and status != "ok":
-                hook.failed(f"{status}: {note}" if note else status)
+                hook.failed(f"{status}: {cat}" if cat else status)
 
     try:
         try:
@@ -912,7 +914,7 @@ def run(a):
                 detail = (j.get("error") or {}).get("message", "") + (" | " + " | ".join(errs) if errs else "")
             except ValueError:
                 pass
-            final("failed", "prompt refused by ComfyUI: " + " ".join(detail.split())[:300])
+            final("failed", "prompt refused by ComfyUI: " + " ".join(detail.split())[:300], cat="prompt refused")
             print(f"ComfyUI refused the prompt: {detail}", file=sys.stderr)
             return FAILED
         print(f"queued prompt {r.get('prompt_id', pid)} (req {rid[:12]})", flush=True)
@@ -925,7 +927,7 @@ def run(a):
             except ComfyError as e:
                 errors += 1
                 if errors > POLL_ERRORS:
-                    final("failed", f"polling stopped: {e}", f"gpu_s={round(el, 1)}")
+                    final("failed", f"polling stopped: {e}", f"gpu_s={round(el, 1)}", cat="server lost")
                     print(f"lost the server while polling ({e}); prompt {pid} may still run: "
                           f"python tools/comfy/comfy.py interrupt --prompt-id {pid}", file=sys.stderr)
                     return FAILED
@@ -936,7 +938,7 @@ def run(a):
                 break
             if el > a.timeout:
                 note = stop_prompt(pid)
-                final("interrupted", f"timeout after {a.timeout:g}s ({note})", f"gpu_s={round(el, 1)}")
+                final("interrupted", f"timeout after {a.timeout:g}s ({note})", f"gpu_s={round(el, 1)}", cat="timeout")
                 print(f"timeout after {a.timeout:g}s: prompt {pid} stopped ({note})", file=sys.stderr)
                 return FAILED
             s = queue_state(pid)
@@ -952,24 +954,24 @@ def run(a):
         msgs = exec_messages(entry)
         if st.get("status_str") != "success" or "execution_error" in msgs or "execution_interrupted" in msgs:
             if "execution_interrupted" in msgs:
-                final("interrupted", "interrupted on the server", usage)
+                final("interrupted", "interrupted on the server", usage, cat="interrupted on the server")
                 print(f"prompt {pid} was interrupted", file=sys.stderr)
                 return FAILED
             err = msgs.get("execution_error") or {}
             why = f"{err.get('node_type', '?')} (node {err.get('node_id', '?')}): {err.get('exception_message', st)}"
-            final("failed", "execution error: " + " ".join(str(why).split())[:300], usage)
+            final("failed", "execution error: " + " ".join(str(why).split())[:300], usage, cat="execution error")
             print(f"ComfyUI execution error: {why}", file=sys.stderr)
             return FAILED
         item = find_output(entry, meta["output"]["node"])
         if not item:
-            final("failed", "no mp4 in the prompt's history outputs", usage)
+            final("failed", "no mp4 in the prompt's history outputs", usage, cat="no output")
             print("the prompt finished but its history lists no mp4 output", file=sys.stderr)
             return FAILED
         try:
             download_view(item, a.out)
         except (ComfyError, OSError) as e:
             final("failed", f"download failed: {e}; the clip is in ComfyUI's output folder: "
-                            f"{item.get('subfolder', '')}/{item['filename']}", usage)
+                            f"{item.get('subfolder', '')}/{item['filename']}", usage, cat="download failed")
             print(f"DOWNLOAD FAILED ({e}); the clip is in ComfyUI's output folder as "
                   f"{item.get('subfolder', '')}/{item['filename']}", file=sys.stderr)
             return FAILED
@@ -1011,9 +1013,10 @@ def run(a):
     except BaseException as e:
         if not state["logged"]:
             if isinstance(e, ark.Interrupted):
-                final("interrupted", f"{e} ({stop_prompt(pid)})", f"gpu_s={round(time.monotonic() - t0, 1)}")
+                final("interrupted", f"{e} ({stop_prompt(pid)})", f"gpu_s={round(time.monotonic() - t0, 1)}",
+                      cat="stopped")
             else:
-                final("failed", ark.err_note(e))
+                final("failed", ark.err_note(e), cat=f"error ({type(e).__name__})")
         raise
 
 

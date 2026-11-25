@@ -33,6 +33,7 @@ class FakeIngest:
 
     def __init__(self):
         self.events = []
+        self.headers = []
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -41,6 +42,7 @@ class FakeIngest:
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
+                fake.headers.append(dict(self.headers))
                 fake.events.append(json.loads(self.rfile.read(n)))
                 body = b'{"ok":true}'
                 self.send_response(200)
@@ -82,7 +84,7 @@ class ServerCase(TmpDirCase, unittest.TestCase):
     def request(self, method, path, body=None, headers=None, port=None):
         c = http.client.HTTPConnection("127.0.0.1", port or self.app.public_port, timeout=5)
         try:
-            c.putrequest(method, path, skip_accept_encoding=True)
+            c.putrequest(method, path, skip_accept_encoding=True, skip_host="Host" in (headers or {}))
             for k, v in (headers or {}).items():
                 c.putheader(k, v)
             data = body if isinstance(body, bytes) or body is None else json.dumps(body).encode()
@@ -102,8 +104,10 @@ class ServerCase(TmpDirCase, unittest.TestCase):
         self.assertEqual(code, 200, body)
         return json.loads(body)
 
-    def post(self, ev, ctype="application/json"):
-        code, _, body = self.request("POST", "/ingest/event", ev, {"Content-Type": ctype}, port=self.app.ingest_port)
+    def post(self, ev, ctype="application/json", headers=None):
+        hdr = {"Content-Type": ctype, "X-Film-Review": "1"}
+        hdr.update(headers or {})
+        code, _, body = self.request("POST", "/ingest/event", ev, hdr, port=self.app.ingest_port)
         return code, json.loads(body or b"{}")
 
     def ok(self, ev):
@@ -195,7 +199,8 @@ class TestIngestApi(ServerCase):
     def test_ingest_wants_json(self):
         code, _ = self.post({"type": "done", "build": "b1"}, ctype="text/plain")
         self.assertEqual(code, 415)
-        code, _, _ = self.request("POST", "/ingest/event", b"{not json", {"Content-Type": "application/json"},
+        code, _, _ = self.request("POST", "/ingest/event", b"{not json", {"Content-Type": "application/json",
+                                                                          "X-Film-Review": "1"},
                                   port=self.app.ingest_port)
         self.assertEqual(code, 400)
         code, _, _ = self.request("GET", "/ingest/event", port=self.app.ingest_port)
@@ -343,7 +348,8 @@ class TestFiles(ServerCase):
         digest = base64.b64encode(hashlib.sha256(IMPORTMAP.encode()).digest()).decode()
         self.assertEqual(script, ["'self'", f"'sha256-{digest}'"])
         self.assertIn("default-src 'none'", csp)
-        self.assertIn("connect-src 'self'", csp)
+        self.assertIn("connect-src 'self' blob:", csp)       # GLTFLoader fetch()es a GLB's embedded textures
+        self.assertIn("img-src 'self' data: blob:", csp)
         self.assertIn("frame-ancestors 'none'", csp)
         self.assertNotIn("unsafe-eval", csp)
         code, h, _ = self.get("/app.js")
@@ -749,7 +755,9 @@ class TestComfyHook(tc.ComfyCase if tc else unittest.TestCase):
         code, _, _ = self.run_clip(tc.I2V)
         self.assertEqual(code, 1)
         self.assertEqual(self.fake.types()[-1], "fail")
-        self.assertIn("CUDA out of memory", self.fake.of("fail")[0]["message"])
+        self.assertEqual(self.fake.of("fail")[0]["message"], "failed: execution error")
+        self.assertNotIn("CUDA", json.dumps(self.fake.events), "the exception text stays in the ledger")
+        self.assertIn("CUDA out of memory", self.rows()[-1]["note"])
 
     def test_dry_run_publishes_nothing(self):
         code, _, se = self.run_clip(tc.I2V, "--dry-run", "--review", "clip-c")
@@ -769,3 +777,274 @@ class SnapshotExportTest(unittest.TestCase):
         self.assertIn("export_apply=True", src)
         # a skin without animation shows the rest pose in viewers: posed parts (hair proxies) float away from it
         self.assertIn("export_skins=bool(animations)", src)
+
+
+# ------------------------------------------------------------------ review fixes of PR #48
+B = chr(92)                     # a backslash, without escaping trouble
+WIN = f"D:{B}Projects{B}Danny{B}out{B}son hai{B}clip.mp4"
+LEAKS = [("download failed: " + WIN, "download failed: clip.mp4"),
+         (f"C:{B}Program Files{B}Blender Foundation{B}Blender 5.3{B}blender.exe -b", "blender.exe -b"),
+         ("D:/Projects/x/y.glb missing", "y.glb missing"), ("/home/bob/My Files/x.png", "x.png"),
+         ("see /mnt/d/a.txt", "see a.txt"), (B + B + f"server{B}share{B}f.png", "f.png"), ("~/x/y.blend", "y.blend"),
+         ("C:" + B, "\u2026"), ("line\nbreak\x00", "line break")]
+KEEP = ["frame 3/12 · 1/2", "running · 12 s / ~600 s", "comfy:h3-i2v", "EEVEE failed: rendering with Cycles",
+        "turntable chuc-long.glb (ink-wash)", "queued (0 ahead)", "out/rel/path.png"]
+ABS_PATH = re.compile(r"[A-Za-z]:[\\/]|\\\\|(?<![\w.:])/(?:home|mnt|tmp|Users|root|var|etc|opt)/")
+
+
+def has_path(text):
+    """True when text holds something like an absolute path (what the public page must never show)."""
+    return bool(ABS_PATH.search(text))
+
+
+class TestScrub(unittest.TestCase):
+    def test_paths_become_base_names(self):
+        for text, want in LEAKS:
+            self.assertEqual(server.scrub(text), want, text)
+            self.assertEqual(client.scrub(text), want, text)
+        for text in KEEP:
+            self.assertEqual(server.scrub(text), text)
+        self.assertEqual(len(server.scrub("x" * 900, 500)), 500)
+        self.assertEqual(server.scrub_obj({"file": WIN, "n": 3, "l": ["/home/a/b.glb"]}),
+                         {"file": "clip.mp4", "n": 3, "l": ["b.glb"]})
+
+    def test_client_and_server_share_the_pattern(self):
+        self.assertEqual(client.PATHLIKE.pattern, server.PATHLIKE.pattern)
+        self.assertEqual(client.TEXT_FIELDS, {k: server.MAX_STR[k] for k in client.TEXT_FIELDS})
+
+
+class TestServerScrubs(ServerCase):
+    def test_every_stored_text_is_scrubbed(self):
+        self.ok({"type": "build", "build": "b1", "title": "T " + WIN, "project": "/home/bob/proj"})
+        self.ok({"type": "step", "build": "b1", "label": "body " + WIN, "stats": {"src": WIN}})
+        self.ok({"type": "progress", "build": "b1", "progress": 0.5, "message": "at " + WIN})
+        self.ok({"type": "job", "build": "b1", "tool": "blender", "status": "running", "message": "job " + WIN})
+        self.ok({"type": "render", "build": "b1", "label": "r " + WIN, "image": "b1/a.png", "engine": "/opt/x/e"})
+        self.ok({"type": "fail", "build": "b1", "message": "boom " + WIN})
+        for path in ("/api/builds", "/api/builds/b1", "/api/renders"):
+            body = self.get(path)[2].decode("utf-8")
+            self.assertFalse(has_path(body), (path, body))
+            self.assertIn("clip.mp4", body)
+
+
+class TestIngestGuard(ServerCase):
+    def test_host_and_header_are_required(self):
+        ev = {"type": "done", "build": "b1"}
+        port = self.app.ingest_port
+        self.assertEqual(self.post(ev, headers={"Host": f"evil.example:{port}"})[0], 403)
+        self.assertEqual(self.post(ev, headers={"Host": "127.0.0.1:1"})[0], 403)
+        self.assertEqual(self.post(ev, headers={"X-Film-Review": "0"})[0], 403)
+        code, _, body = self.request("POST", "/ingest/event", json.dumps(ev).encode(),
+                                     {"Content-Type": "application/json"}, port=port)
+        self.assertEqual(code, 403, body)
+        self.assertEqual(self.get_json("/api/builds")["builds"], [], "nothing was written")
+        for host in (f"127.0.0.1:{port}", f"localhost:{port}", f"LOCALHOST:{port}", f"[::1]:{port}"):
+            self.assertEqual(self.post(ev, headers={"Host": host})[0], 200, host)
+        code, _, _ = self.request("GET", "/ingest/health", headers={"Host": "evil.example"}, port=port)
+        self.assertEqual(code, 403)
+        body = json.dumps(ev).encode()
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as s:        # two Host headers: refused
+            s.sendall(b"POST /ingest/event HTTP/1.1\r\nHost: 127.0.0.1:%d\r\nHost: evil.example\r\nX-Film-Review: 1\r\n"
+                      b"Content-Type: application/json\r\nContent-Length: %d\r\n\r\n%s" % (port, len(body), body))
+            self.assertIn(b" 403 ", s.recv(200))
+
+    def test_extra_hosts(self):
+        app = server.App(":memory:", str(self.media), None, host="127.0.0.1", public_port=0, ingest_port=0,
+                         quiet=True, ingest_hosts=["film-lab-review:8791", " "]).start()
+        self.addCleanup(app.stop)
+        code, _, _ = self.request("POST", "/ingest/event", b'{"type":"done","build":"b1"}',
+                                  {"Content-Type": "application/json", "X-Film-Review": "1",
+                                   "Host": "film-lab-review:8791"}, port=app.ingest_port)
+        self.assertEqual(code, 200)
+
+    def test_every_publisher_sends_the_header(self):
+        fake = FakeIngest()
+        self.addCleanup(fake.stop)
+        client.Review("h1", "T", url=fake.url, media=str(self.tmp / "m")).done()
+        self.assertTrue(fake.headers)
+        self.assertTrue(all(h.get("X-Film-Review") == "1" for h in fake.headers))
+        rv = client.Review("h2", "T", url=self.ingest_url, media=str(self.media))       # the real server takes it
+        self.assertTrue(rv.progress(0.5, "half"))
+        for name in ("review.py", "bpy_snapshot.py", "demo_build_giot.py"):              # they publish via client.py
+            src = (REPO / "tools" / "review" / name).read_text(encoding="utf-8")
+            self.assertNotIn("urllib.request.Request(", src, name)
+        mon = (REPO / "tools" / "review" / "monitor.py").read_text(encoding="utf-8")
+        self.assertIn("headers=dict(client.INGEST_HEADERS)", mon)
+
+
+class TestRetention(ServerCase):
+    def test_rows_are_capped(self):
+        with mock.patch.multiple(server, MAX_BUILDS=3, MAX_STEPS=5, MAX_RENDERS=2, MAX_JOBS=2):
+            for i in range(1, 6):
+                self.ok({"type": "build", "build": f"b{i}", "title": f"t{i}"})
+                time.sleep(0.01)
+            self.assertEqual(sorted(b["id"] for b in self.get_json("/api/builds")["builds"]), ["b3", "b4", "b5"])
+            for i in range(8):
+                self.ok({"type": "step", "build": "b5", "label": f"s{i}"})
+            self.assertEqual([s["n"] for s in self.get_json("/api/builds/b5/steps")["steps"]], [4, 5, 6, 7, 8])
+            for i in range(4):
+                self.ok({"type": "render", "build": "b5", "label": f"r{i}", "image": f"b5/r{i}.png"})
+                time.sleep(0.01)
+            self.assertEqual([r["label"] for r in self.get_json("/api/builds/b5/renders")["renders"]], ["r2", "r3"])
+            for i in range(3):
+                self.ok({"type": "job", "build": "b5", "tool": "blender", "status": "done", "job": f"j{i}"})
+                time.sleep(0.01)
+            self.assertEqual([j["job"] for j in self.get_json("/api/builds/b5/jobs")["jobs"]], ["j1", "j2"])
+            time.sleep(0.01)
+            self.ok({"type": "step", "build": "b9", "label": "a new build via a step"})
+            ids = sorted(b["id"] for b in self.get_json("/api/builds")["builds"])
+            self.assertEqual(ids, ["b4", "b5", "b9"])
+            orphans = self.app.store.db.execute("SELECT COUNT(*) FROM steps WHERE build NOT IN "
+                                                "(SELECT id FROM builds)").fetchone()[0]
+            self.assertEqual(orphans, 0, "the steps of a pruned build go with it")
+        with mock.patch.object(server, "MAX_MINUTES", 3):
+            self.app.store.save_minutes([{"t": 60 * i} for i in range(1, 6)], 0)
+            self.assertEqual([r["t"] for r in self.app.store.minutes(0)], [180, 240, 300])
+
+
+class TestSlowClients(ServerCase):
+    def connect(self):
+        s = socket.create_connection(("127.0.0.1", self.app.public_port), timeout=5)
+        self.addCleanup(s.close)
+        return s
+
+    def wait_closed(self, s, seconds, feed=None):
+        """True when the server closes the connection within `seconds` (feed(): bytes to trickle meanwhile)."""
+        end = time.monotonic() + seconds
+        s.settimeout(0.1)
+        while time.monotonic() < end:
+            if feed:
+                try:
+                    s.sendall(feed())
+                except OSError:
+                    return True
+            try:
+                if s.recv(4096) == b"":
+                    return True
+            except socket.timeout:
+                pass
+            except OSError:
+                return True
+        return False
+
+    def test_an_idle_connection_is_closed(self):
+        with mock.patch.object(server, "PUBLIC_TIMEOUT", 0.4):
+            s = self.connect()
+            t0 = time.monotonic()
+            self.assertTrue(self.wait_closed(s, 4))
+            self.assertLess(time.monotonic() - t0, 3)
+
+    def test_a_slow_loris_head_is_cut(self):
+        with mock.patch.object(server, "REQUEST_DEADLINE", 0.6):
+            s = self.connect()
+            s.sendall(b"GET /api/health HTTP/1.1\r\nHost: x\r\n")
+            t0 = time.monotonic()
+            self.assertTrue(self.wait_closed(s, 5, feed=lambda: b"X-Slow: 1\r\n"))
+            self.assertLess(time.monotonic() - t0, 4)
+        self.assertEqual(self.get_json("/api/health")["ok"], True, "the server still answers")
+
+    def test_sse_is_capped_and_ends(self):
+        with mock.patch.object(server, "MAX_SSE", 2):
+            for _ in range(2):
+                c = http.client.HTTPConnection("127.0.0.1", self.app.public_port, timeout=5)
+                self.addCleanup(c.close)
+                c.request("GET", "/api/stream")
+                r = c.getresponse()
+                self.assertEqual(r.status, 200)
+                r.fp.readline()
+            deadline = time.monotonic() + 3
+            while len(self.app.hub.clients) < 2 and time.monotonic() < deadline:
+                time.sleep(0.02)
+            code, h, body = self.get("/api/stream")
+            self.assertEqual((code, h.get("retry-after")), (503, "10"), body)
+        with mock.patch.object(server, "SSE_LIFETIME", 0.5):
+            c = http.client.HTTPConnection("127.0.0.1", self.app.public_port, timeout=5)
+            self.addCleanup(c.close)
+            t0 = time.monotonic()
+            c.request("GET", "/api/stream")
+            data = c.getresponse().read()                      # returns when the server ends the stream
+            self.assertIn(b"event: hello", data)
+            self.assertLess(time.monotonic() - t0, 4)
+
+    def test_the_limits_are_sane(self):
+        self.assertTrue(0 < server.PUBLIC_TIMEOUT <= 30)
+        self.assertTrue(0 < server.REQUEST_DEADLINE <= 60)
+        self.assertTrue(0 < server.SSE_LIFETIME <= 15 * 60)
+        self.assertTrue(0 < server.MAX_SSE <= 128)
+
+
+class TestHooksNeverLeakPaths(tb.FakeBlenderCase):
+    def setUp(self):
+        super().setUp()
+        self.fake = FakeIngest()
+        self.addCleanup(self.fake.stop)
+        self.renv = mock.patch.dict(os.environ, {"FILM_REVIEW_URL": self.fake.url,
+                                                 "FILM_REVIEW_MEDIA": str(self.tmp / "media")})
+        self.renv.start()
+        self.addCleanup(self.renv.stop)
+        os.environ.pop("FILM_REVIEW_BUILD", None)
+
+    def sent(self):
+        return json.dumps(self.fake.events, ensure_ascii=False)
+
+    def test_a_failing_render_posts_a_category_only(self):
+        os.environ["FAKE_BLENDER_FAIL"] = "early"
+        code, _, err = self.run_cli("render", self.spec_path, "--out", self.tmp / "bad", "--review", "leak-a")
+        self.assertEqual(code, 1)
+        self.assertIn("Traceback", err, "the full error still reaches stderr")
+        self.assertEqual(self.fake.of("fail")[0]["message"], "failed: blender error")
+        self.assertEqual(self.fake.of("job")[-1]["message"], "failed: blender error")
+        text = self.sent()
+        self.assertFalse(has_path(text), text)
+        self.assertNotIn(str(self.tmp), text)
+        self.assertNotIn("Traceback", text)
+
+    def test_turntable_of_a_file_names_its_base_name_only(self):
+        glb = self.tmp / "deep" / "chuc-long.glb"
+        glb.parent.mkdir()
+        glb.write_bytes(b"glTF")
+        os.environ["FAKE_BLENDER_FAIL"] = "early"
+        self.run_cli("turntable", glb, "--out", self.tmp / "tt", "--review", "leak-b", "--look", "toon-ink")
+        self.assertEqual(self.fake.of("job")[0]["message"], "turntable chuc-long.glb (toon-ink)")
+        self.assertFalse(has_path(self.sent()), self.sent())
+
+    def test_categories(self):
+        bl = tb.bl
+        self.assertEqual(bl.failure_category(bl.Failed("Blender did not finish in 9 s (killed)")), "timeout")
+        self.assertEqual(bl.failure_category(bl.Failed("ffmpeg failed: " + WIN)), "encode failed")
+        self.assertEqual(bl.failure_category(KeyboardInterrupt()), "interrupted")
+        self.assertEqual(bl.failure_category(OSError(WIN)), "error (OSError)")
+        self.assertEqual(bl.asset_label("preset:giot"), "preset:giot")
+        self.assertEqual(bl.asset_label(WIN), "clip.mp4")
+
+
+@unittest.skipIf(tc is None, "Pillow is missing (tests/test_comfy.py)")
+class TestComfyHookNeverLeaks(tc.ComfyCase if tc else unittest.TestCase):
+    def setUp(self):
+        super().setUp()
+        self.fake = FakeIngest()
+        self.addCleanup(self.fake.stop)
+        os.environ["FILM_REVIEW_URL"] = self.fake.url
+        os.environ["FILM_REVIEW_MEDIA"] = str(self.tmp / "media")
+
+    def test_refused_prompt_sends_no_node_errors_paths_or_prompt(self):
+        f = self.server()
+        f.prompt_status = 400
+        f.prompt_error = {"error": {"message": "Prompt outputs failed validation"}, "node_errors": {"5": {"errors": [
+            {"message": "Value not in list", "details": f"ckpt: C:{B}models{B}secret-model.safetensors"}]}}}
+        code, _, err = self.run_clip(tc.I2V, "--review", "leak-c")
+        self.assertEqual(code, 1)
+        self.assertIn("secret-model", err, "the detail stays on stderr")
+        text = json.dumps(self.fake.events)
+        self.assertEqual(self.fake.of("fail")[0]["message"], "failed: prompt refused")
+        for bad in ("secret", "dragon", "Value not in list"):
+            self.assertNotIn(bad, text)
+        self.assertFalse(has_path(text), text)
+        self.assertIn("secret-model", self.rows()[-1]["note"], "the ledger keeps the detail")
+
+    def test_interrupted_is_a_category(self):
+        f = self.server()
+        f.mode = "interrupted"
+        self.assertEqual(self.run_clip(tc.I2V, "--review", "leak-d")[0], 1)
+        self.assertEqual(self.fake.of("fail")[-1]["message"], "interrupted: interrupted on the server")
+        self.assertFalse(has_path(json.dumps(self.fake.events)))

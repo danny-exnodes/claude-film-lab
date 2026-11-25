@@ -14,6 +14,10 @@ Files given to step()/render() are hard-linked (else copied) into <lab>/out/_rev
 a different file with the same name gets a -2, -3 ... suffix), then the event is POSTed to FILM_REVIEW_URL
 (default http://127.0.0.1:8791/ingest/event).
 
+Every POST carries the header X-Film-Review: 1 (the server refuses a POST without it: a web page cannot send it
+cross-origin, so DNS rebinding cannot write). Text fields are scrubbed before they leave (an absolute path becomes its
+base name; the server scrubs again): the dashboard is public.
+
 Offline-safe: every call returns True/False and never raises into the caller. A request waits at most 2 s; after a
 timeout the client stays quiet for 15 s (progress/job/step events are skipped; build, render, done and fail are
 always tried) so a render never slows down because the review server is gone.
@@ -38,9 +42,27 @@ BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 TIMEOUT = 2.0
 QUIET_AFTER_TIMEOUT = 15.0
 ALWAYS = ("build", "render", "done", "fail")
+TEXT_FIELDS = {"title": 200, "label": 200, "message": 500, "project": 100, "engine": 60}     # server.py MAX_STR
 NAME_BAD = re.compile(r"[^A-Za-z0-9._-]+")
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # never through a system proxy
+# Every publisher (this client, monitor.py) sends these; server.py refuses a POST without X-Film-Review: 1.
+INGEST_HEADERS = {"Content-Type": "application/json", "X-Film-Review": "1"}
+# The same pattern as server.py PATHLIKE (a test keeps the two equal): an absolute path -> its base name.
+PATHLIKE = re.compile(r"(?:\\\\|(?<![A-Za-z0-9])[A-Za-z]:[\\/]|(?<![\w.:/~-])~?/(?=[^\s/]))"
+                      r"(?:[^\\/\"'<>|\r\n]*[\\/])*[^\s\\/\"'<>|]*")
+CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
+
+
+def _basename(m):
+    parts = [p.strip() for p in re.split(r"[\\/]", m.group(0)) if p.strip()]
+    last = parts[-1] if parts else ""
+    return "…" if not last or re.fullmatch(r"[A-Za-z]:|~", last) else last
+
+
+def scrub(text, limit=500):
+    """Text for the public dashboard: absolute paths -> base names, no control characters, at most `limit` chars."""
+    return PATHLIKE.sub(_basename, CONTROL.sub(" ", str(text))).strip()[:limit]
 
 
 def ingest_url(base=None):
@@ -244,9 +266,11 @@ class Review:
                 if not self.announce() and now < self._quiet_until:
                     return False
             ev = dict(ev, build=self.build)
+            for key, limit in TEXT_FIELDS.items():
+                if isinstance(ev.get(key), str):
+                    ev[key] = scrub(ev[key], limit)
             body = json.dumps(ev, ensure_ascii=False).encode("utf-8")
-            req = urllib.request.Request(self.url, data=body, method="POST",
-                                         headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(self.url, data=body, method="POST", headers=dict(INGEST_HEADERS))
             with _OPENER.open(req, timeout=TIMEOUT) as r:
                 r.read()
             self.last_error = None

@@ -117,6 +117,91 @@ class TestNormalize(unittest.TestCase):
         self.assertEqual(self.n("**Bắc Thị** là *thú* lạ."), "Bắc Thị là thú lạ.")
 
 
+class TestNormalizeTable(unittest.TestCase):
+    """Reading rules of normalize_vi, one row per case: (text, Southern reading, Northern reading or None = same
+    as the Southern one with ngàn/lẻ swapped for nghìn/linh)."""
+    CASES = [
+        # integers, thousands separators, the special units of Vietnamese counting
+        ("1 con", "một con", None),
+        ("11 con", "mười một con", None),
+        ("15 con", "mười lăm con", None),
+        ("21 con", "hai mươi mốt con", None),
+        ("31 con", "ba mươi mốt con", None),
+        ("45 con", "bốn mươi lăm con", None),
+        ("101 con", "một trăm lẻ một con", "một trăm linh một con"),
+        ("105 con", "một trăm lẻ năm con", "một trăm linh năm con"),
+        ("110 con", "một trăm mười con", None),
+        ("115 con", "một trăm mười lăm con", None),
+        ("3.000 người", "ba ngàn người", "ba nghìn người"),
+        ("1.234.567 người", "một triệu hai trăm ba mươi bốn ngàn năm trăm sáu mươi bảy người",
+         "một triệu hai trăm ba mươi bốn nghìn năm trăm sáu mươi bảy người"),
+        ("2.005 năm", "hai ngàn không trăm lẻ năm năm", "hai nghìn không trăm linh năm năm"),
+        ("15.000 quân", "mười lăm ngàn quân", "mười lăm nghìn quân"),
+        # decimals with a comma, percentages, negatives
+        ("3,5 dặm", "ba phẩy năm dặm", None),
+        ("3,05 dặm", "ba phẩy không năm dặm", None),
+        ("12,5%", "mười hai phẩy năm phần trăm", None),
+        ("40%", "bốn mươi phần trăm", None),
+        ("nhiệt độ -5°C", "nhiệt độ âm năm độ xê", None),
+        ("lỗ -3,5%", "lỗ âm ba phẩy năm phần trăm", None),
+        ("từ −20 độ", "từ âm hai mươi độ", None),
+        # ordinals, weekdays, centuries, Roman numerals and their ranges
+        ("thứ 2", "thứ hai", None),
+        ("thứ 4", "thứ tư", None),
+        ("thứ 1", "thứ nhất", None),
+        ("thế kỷ XIV", "thế kỷ thứ mười bốn", None),
+        ("thế kỷ XIV–XV", "thế kỷ thứ mười bốn đến thứ mười lăm", None),
+        ("thế kỷ 3-4", "thế kỷ thứ ba đến thứ tư", None),
+        ("chương 3–5", "chương ba đến năm", None),
+        ("quyển IV", "quyển bốn", None),
+        # dates and times
+        ("năm 1999", "năm một ngàn chín trăm chín mươi chín", "năm một nghìn chín trăm chín mươi chín"),
+        ("ngày 12/4/2024", "ngày mười hai tháng tư năm hai ngàn không trăm hai mươi bốn",
+         "ngày mười hai tháng tư năm hai nghìn không trăm hai mươi bốn"),
+        ("ngày 2-9-1945", "ngày hai tháng chín năm một ngàn chín trăm bốn mươi lăm",
+         "ngày hai tháng chín năm một nghìn chín trăm bốn mươi lăm"),
+        ("ngày 1/5", "ngày một tháng năm", None),
+        ("ngày 2-9", "ngày hai tháng chín", None),
+        ("ngày 3-5 tháng 6", "ngày ba đến năm tháng sáu", None),
+        ("vào 4/2024", "vào tháng tư năm hai ngàn không trăm hai mươi bốn",
+         "vào tháng tư năm hai nghìn không trăm hai mươi bốn"),
+        ("tỷ lệ 1/1000 giây", "tỷ lệ một phần một ngàn giây", "tỷ lệ một phần một nghìn giây"),
+        ("tháng 4", "tháng tư", None),
+        ("tháng 4/2024", "tháng tư năm hai ngàn không trăm hai mươi bốn", "tháng tư năm hai nghìn không trăm hai mươi bốn"),
+        ("8h30", "tám giờ ba mươi phút", None),
+        ("8h05", "tám giờ năm phút", None),
+        ("lúc 21h", "lúc hai mươi mốt giờ", None),
+        # fractions and ranges
+        ("1/2 số quân", "một phần hai số quân", None),
+        ("3/4 dân số", "ba phần tư dân số", None),
+        ("1/10", "một phần mười", None),
+        ("3–5 ngày", "ba đến năm ngày", None),
+        ("300-400 dặm", "ba trăm đến bốn trăm dặm", None),
+        ("1999–2001", "một ngàn chín trăm chín mươi chín đến hai ngàn không trăm lẻ một",
+         "một nghìn chín trăm chín mươi chín đến hai nghìn không trăm linh một"),
+        # what must stay as it is
+        ("Năm ấy – 1999 – trời hạn.", "Năm ấy – một ngàn chín trăm chín mươi chín – trời hạn.",
+         "Năm ấy – một nghìn chín trăm chín mươi chín – trời hạn."),
+        ("tháng giêng", "tháng giêng", None),
+        ("phần mềm, thứ di", "phần mềm, thứ di", None),
+    ]
+
+    def test_cases(self):
+        for text, nam, bac in self.CASES:
+            with self.subTest(text=text):
+                self.assertEqual(tts.normalize_vi(text), nam)
+                want = bac if bac is not None else nam
+                self.assertEqual(tts.normalize_vi(text, dialect="bac"), want)
+                self.assertEqual(tts.residue(tts.normalize_vi(text)), [])
+
+    def test_digit_names(self):
+        """mốt only after a tens word from twenty up, lăm after any tens word, mười for ten, mươi from twenty."""
+        for n, want in {11: "mười một", 21: "hai mươi mốt", 91: "chín mươi mốt", 5: "năm", 15: "mười lăm",
+                        55: "năm mươi lăm", 205: "hai trăm lẻ năm", 1015: "một ngàn không trăm mười lăm",
+                        10: "mười", 20: "hai mươi", 1000000000000: "một ngàn tỷ"}.items():
+            self.assertEqual(tts.num_words(n), want, n)
+
+
 class TestPron(TmpDirCase, unittest.TestCase):
     def test_map_whole_words_longest_first(self):
         p = self.tmp / "pron.csv"
@@ -217,7 +302,7 @@ class TestCli(TmpDirCase, unittest.TestCase):
         with mock.patch.dict(sys.modules, {"vieneu": None}):
             code, _, err = run_main(tts.main, ["--text", "Xin chào.", "--out", str(self.tmp / "vo")])
         self.assertEqual(code, tts.EXIT_MISSING)
-        self.assertIn("pip install vieneu==", err)
+        self.assertIn("pip install --break-system-packages vieneu==", err)
 
 
 class TestAudio(TmpDirCase, unittest.TestCase):
@@ -383,7 +468,7 @@ class TestLogSafety(CliCase, unittest.TestCase):
                 seen = []
 
                 def make(_):
-                    seen.append(sorted(p.name for p in out.iterdir()))
+                    seen.append(sorted(p.name for p in out.iterdir() if p.name != tts.LOCK_NAME))
                     return FakeEngine()
                 code, so, err = run_main(lambda a: tts.main(a, make_engine=make),
                                          ["--script", str(SCRIPT), "--out", str(out)])
@@ -788,6 +873,195 @@ class TestReviewHardening(CliCase, unittest.TestCase):
         self.assertEqual(len(list((self.out / "_stale").glob("VO2*.wav"))), 3)
 
 
+class NoWatermarkEngine(FakeEngine):
+    watermark = False
+
+
+class TestRequireWatermark(CliCase, unittest.TestCase):
+    """--require-watermark: exit 4 before the model loads when perth cannot be imported, and after it loads when
+    the model has no watermarker; --check --require-watermark looks at every log entry."""
+
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        write_script(self.ep, ["Một.", "Hai."])
+        self.base = ["--script", str(self.ep / "script.md"), "--length", "10", "--out", str(self.out)]
+
+    def off(self):
+        return mock.patch.object(tts, "watermark_available", return_value=(False, "ModuleNotFoundError: perth"))
+
+    def test_refused_before_the_model_loads(self):
+        with self.off():
+            for extra in ([], ["--dry-run"], ["--only", "VO1"]):
+                with self.subTest(extra=extra):
+                    code, so, err, eng, made = self.run_tool(self.base + ["--require-watermark"] + extra)
+                    self.assertEqual((code, made, eng.calls), (tts.EXIT_WATERMARK, [], []))
+                    self.assertIn("watermark is off", err)
+                    self.assertIn("resemble-perth==1.0.1", err)
+            code, _, err, _, made = self.run_tool(["--audition", "Nam Một", "--text", "Câu.", "--out",
+                                                   str(self.tmp / "aud"), "--require-watermark"])
+            self.assertEqual((code, made), (tts.EXIT_WATERMARK, []))
+        self.assertFalse(self.out.exists())
+        self.assertNotEqual(tts.EXIT_WATERMARK, tts.EXIT_MISSING)
+        self.assertNotIn(tts.EXIT_WATERMARK, (0, 1, tts.EXIT_INPUT))
+
+    def test_without_the_flag_a_render_still_runs(self):
+        with self.off():
+            code, so, _, _, made = self.run_tool(self.base, NoWatermarkEngine())
+        self.assertEqual((code, made), (0, [1]))
+        self.assertIn("watermark OFF", so)
+
+    def test_model_without_watermarker_is_refused_before_any_take(self):
+        with mock.patch.object(tts, "watermark_available", return_value=(True, "")):
+            code, _, err, eng, made = self.run_tool(self.base + ["--require-watermark"], NoWatermarkEngine())
+            self.assertEqual((code, made, eng.calls), (tts.EXIT_WATERMARK, [1], []))
+            self.assertIn("without its watermarker", err)
+            self.assertEqual(sorted(p.name for p in self.out.glob("*.wav")), [])
+            code, _, _, eng, _ = self.run_tool(self.base + ["--require-watermark"])
+            self.assertEqual((code, len(eng.calls)), (0, 2))
+
+    def test_check_requires_every_take_watermarked(self):
+        with self.off():
+            self.assertEqual(self.run_tool(self.base, NoWatermarkEngine())[0], 0)
+            code, so, _, _, made = self.run_tool(self.base + ["--check"])
+            self.assertEqual((code, made), (0, []), so)
+            code, so, _, _, made = self.run_tool(self.base + ["--check", "--require-watermark"])
+        self.assertEqual((code, made), (1, []))
+        self.assertIn("VO1: rendered with the watermark off", so)
+        self.assertIn("VO2: rendered with the watermark off", so)
+        with mock.patch.object(tts, "watermark_available", return_value=(True, "")):
+            self.assertEqual(self.run_tool(self.base + ["--only", "VO1"])[0], 0)
+        code, so, _, _, _ = self.run_tool(self.base + ["--check", "--require-watermark"])
+        self.assertEqual(code, 1)
+        self.assertNotIn("VO1:", so)
+        self.assertIn("VO2: rendered with the watermark off", so)
+
+    def test_watermark_available_reports_the_import_error(self):
+        with mock.patch.dict(sys.modules, {"perth": None}):
+            ok, why = tts.watermark_available()
+        self.assertFalse(ok)
+        self.assertIn("perth", why)
+
+
+class TestCheckSlots(CliCase, unittest.TestCase):
+    """--check takes the slots from the current marks: a mark moved after the render makes a take OVER."""
+
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        self.script = write_script(self.ep, ["Một.", "Hai."])
+        self.base = ["--script", str(self.script), "--length", "10", "--out", str(self.out)]
+        self.assertEqual(self.run_tool(self.base, FakeEngine(seconds=1.2))[0], 0)
+
+    def test_moved_mark_is_a_warning_and_fails_strict(self):
+        self.assertEqual(self.run_tool(self.base + ["--check", "--strict"])[0], 0)
+        self.script.write_text("# Lời bình\n[00:00] Một.\n[00:01] Hai.\n", encoding="utf-8")
+        code, so, _, _, made = self.run_tool(self.base + ["--check"])
+        self.assertEqual((code, made), (0, []), so)
+        self.assertRegex(so, r"WARN VO1: OVER \+0\.2 s: the take is 1\.20 s, the slot from the current marks is 1\.00 s")
+        self.assertIn("1 OVER warning(s)", so)
+        code, so, _, _, made = self.run_tool(self.base + ["--check", "--strict"])
+        self.assertEqual((code, made), (1, []))
+        self.assertRegex(so, r"VO1: OVER \+0\.2 s")
+        self.assertNotIn("VO2:", so)                     # 1.2 s in a 9 s slot
+
+    def test_shorter_episode_makes_the_last_line_over(self):
+        code, so, _, _, _ = self.run_tool(["--script", str(self.script), "--length", "6", "--out", str(self.out),
+                                           "--check", "--strict"])
+        self.assertEqual(code, 1)
+        self.assertIn("VO2: OVER", so)
+
+
+class TestAtempoFailure(CliCase, unittest.TestCase):
+    def test_ffmpeg_failure_is_a_clean_error_and_keeps_the_previous_take(self):
+        out = self.tmp / "vo"
+        argv = ["--text", "Một hai.", "--text", "Ba bốn.", "--out", str(out)]
+        self.assertEqual(self.run_tool(argv, FakeEngine(seconds=1))[0], 0)
+        before = (out / "T1.wav").read_bytes()
+        log_before = self.read_log(out)
+        boom = tts.subprocess.CalledProcessError(1, ["ffmpeg"], stderr="Error: atempo exploded\n")
+        with mock.patch.object(tts.shutil, "which", return_value="/usr/bin/ffmpeg"), \
+                mock.patch.object(tts.subprocess, "run", side_effect=boom):
+            code, so, err, eng, _ = self.run_tool(argv + ["--speed", "1.05"], FakeEngine(seconds=2))
+        self.assertEqual(code, 1)
+        self.assertNotIn("Traceback", so + err)
+        self.assertIn("ERROR T1: ffmpeg atempo=1.05 failed: Error: atempo exploded", err)
+        self.assertEqual(len(eng.calls), 1)                          # stops at the first broken take
+        self.assertEqual((out / "T1.wav").read_bytes(), before)
+        self.assertEqual(self.read_log(out), log_before)
+        self.assertEqual(sorted(p.name for p in out.iterdir() if p.name != tts.LOCK_NAME),
+                         ["T1.wav", "T2.wav", "tts-log.json"])        # no .raw.wav / .tempo.wav left behind
+
+    def test_missing_ffmpeg_at_run_time_is_a_take_error(self):
+        out = self.tmp / "vo"
+        with mock.patch.object(tts.shutil, "which", return_value="/usr/bin/ffmpeg"), \
+                mock.patch.object(tts.subprocess, "run", side_effect=FileNotFoundError(2, "No such file", "ffmpeg")):
+            code, so, err, _, _ = self.run_tool(["--text", "Một.", "--out", str(out), "--speed", "0.95"])
+        self.assertEqual(code, 1)
+        self.assertIn("ERROR T1: ffmpeg atempo=0.95 failed", err)
+        self.assertFalse((out / "T1.wav").exists())
+
+
+@unittest.skipUnless(tts.fcntl, "needs fcntl")
+class TestOutLock(CliCase, unittest.TestCase):
+    def test_second_render_into_a_locked_folder_is_refused_before_the_model(self):
+        import fcntl
+        out = self.tmp / "vo"
+        out.mkdir()
+        with open(out / tts.LOCK_NAME, "a") as held:
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            code, _, err, _, made = self.run_tool(["--text", "Một.", "--out", str(out)])
+        self.assertEqual((code, made), (tts.EXIT_INPUT, []))
+        self.assertIn("another render is writing to this folder", err)
+        self.assertFalse((out / "tts-log.json").exists())
+
+    def test_lock_is_released_after_each_run(self):
+        out = self.tmp / "vo"
+        for _ in range(2):
+            self.assertEqual(self.run_tool(["--text", "Một.", "--out", str(out)])[0], 0)
+        import fcntl
+        with open(out / tts.LOCK_NAME, "a") as f:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)        # would raise if a run had kept it
+
+
+class TestStrayWavs(CliCase, unittest.TestCase):
+    """A wav whose entry was lost with a corrupt log, and whose id left the script, is an ORPHAN too."""
+
+    def setUp(self):
+        super().setUp()
+        self.ep, self.out = self.tmp / "ep", self.tmp / "vo"
+        self.script = write_script(self.ep, ["Một.", "Hai.", "Ba."])
+        self.base = ["--script", str(self.script), "--length", "20", "--out", str(self.out)]
+        self.assertEqual(self.run_tool(self.base)[0], 0)
+        (self.out / "tts-log.json").write_text("{not json", encoding="utf-8")
+        self.script = write_script(self.ep, ["Một.", "Hai."])
+
+    def test_dry_run_and_check_report_it(self):
+        code, so, _, _, _ = self.run_tool(self.base + ["--dry-run"])
+        self.assertEqual(code, 0)
+        self.assertIn("ORPHAN VO3: VO3.wav has no log entry and is not in script", so)
+        code, so, _, _, _ = self.run_tool(self.base + ["--check"])
+        self.assertEqual(code, 1)
+        self.assertIn("ORPHAN VO3: VO3.wav has no log entry", so)
+
+    def test_full_render_moves_it_and_only_does_not(self):
+        code, so, _, _, _ = self.run_tool(self.base + ["--only", "VO1", "--allow-stale"])
+        self.assertEqual(code, 0, so)
+        self.assertTrue((self.out / "VO3.wav").exists())
+        self.assertIn("ORPHAN VO3", so)
+        code, so, _, _, _ = self.run_tool(self.base)
+        self.assertEqual(code, 0, so)
+        self.assertFalse((self.out / "VO3.wav").exists())
+        self.assertTrue((self.out / "_stale" / "VO3.wav").exists())
+        self.assertEqual(self.run_tool(self.base + ["--check"])[0], 0)
+
+    def test_audition_and_temp_files_are_not_orphans(self):
+        (self.out / "audition").mkdir()
+        (self.out / "audition" / "nam-mot_T1.wav").write_bytes(b"x")
+        (self.out / "VO1.wav.raw.wav").write_bytes(b"x")
+        self.assertEqual(tts.stray_wavs(str(self.out), {"VO1", "VO2"}, {}), ["VO3"])
+
+
 class TestNarratorAgent(unittest.TestCase):
     AGENTS = REPO / ".claude" / "agents"
 
@@ -807,6 +1081,18 @@ class TestNarratorAgent(unittest.TestCase):
         known = {o for a in tts.build_parser()._actions for o in a.option_strings}
         self.assertIn("--check", flags)
         self.assertEqual(flags - known, set())
+
+    def test_every_render_requires_the_watermark(self):
+        """#37: a final read without watermark had to be read again in full; the agent never renders without it."""
+        text = (self.AGENTS / "film-narrator.md").read_text(encoding="utf-8")
+        renders = [l for l in text.splitlines() if "vieneu_tts.py" in l and "--voice" in l]
+        self.assertTrue(renders)
+        for line in renders:
+            self.assertIn("--require-watermark", line)
+        self.assertIn("Không bao giờ bỏ `--require-watermark`", text)
+        readme = (REPO / "tools" / "tts" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("requirements-tts.txt", readme)
+        self.assertIn("| 4 |", readme)
 
 
 if __name__ == "__main__":

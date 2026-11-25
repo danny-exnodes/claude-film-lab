@@ -191,11 +191,52 @@ test('cloth rig: frames are pure functions of t; cloth:false and per-box overrid
     return strips[strips.length - 1].args[4];
   };
   assert.ok(tipX('right') > tipX('left'));
-  // alpha, breath and the per-shot offset reach the cloth as they reach the body
-  const veiled = onScreen(kit.record(() => C.stage(g, S, C.camera(2), (st) => st.plate('L4', { alpha: 0.5, dx: 40, breath: { amp: 0.02 } }))));
-  assert.deepEqual(veiled.map((k) => k.alpha), [0.5, 0.5, 0.5]);
-  assert.deepEqual(veiled[1].m, veiled[0].m);
+  // alpha < 1: body and cloth are put together on the plate's flat canvas first, then drawn once with the alpha,
+  // breath and the per-shot offset; the joint (body and cloth overlap in the feather) is not composited twice
+  const all = kit.record(() => C.stage(g, S, C.camera(2), (st) => st.plate('L4', { alpha: 0.5, dx: 40, breath: { amp: 0.02 } })));
+  const veiled = onScreen(all);
+  assert.deepEqual(veiled.map((k) => [k.img, k.alpha]), [[p.flat.label, 0.5]]);
+  const plain = onScreen(kit.record(() => C.stage(g, S, C.camera(2), (st) => st.plate('L4', { dx: 40, breath: { amp: 0.02 } }))));
+  assert.deepEqual(veiled[0].m, plain[0].m, 'the flat canvas is drawn exactly where the body would be');
+  const inside = all.filter((k) => k.op === 'drawImage' && k.on === p.flat.label);
+  assert.deepEqual(inside.map((k) => [k.img, k.alpha, k.comp]),
+    [[p.canvas.label, 1, 'source-over'], [p.cloths[0].scratch.label, 1, 'source-over'], [p.cloths[1].scratch.label, 1, 'source-over']]);
+  assert.deepEqual(inside[0].m, [1, 0, 0, 1, 0, 0], 'in the plate\'s own pixels');
   assert.equal(g.stack.length, 0);
+});
+
+test('cloth rig: a filter or a blend is applied once to the whole plate; eyelids are drawn over the cloth', async () => {
+  const kit = loadRigs({ sizeOf: (src) => CHAR[src] || [1000, 2000] });
+  const { C } = kit;
+  C.ANCHORS = { 'char.png': { ...ANCHORS['char.png'], eye_tl: [420, 640], eye_br: [500, 690] } };
+  await C.load({ seed: 7, plates: {
+    L4: { src: 'p/char.png', place: { x: 900, y: 900, h: 600, pivot: 'feet' },
+          rig: { cloth: TWO, eyes: { eye: { blinks: [{ at: 1, dur: 0.4 }] } } } },
+  } });
+  assert.deepEqual(C.report(), []);
+  const p = C.plates.L4, { g, S } = kit.screen();
+  const shot = (o) => kit.record(() => C.stage(g, S, C.camera(1.2), (st) => st.plate('L4', o)));
+  for (const o of [{ filter: 'blur(2px)' }, { blend: 'multiply' }, { alpha: 0.4, filter: 'blur(1px)', blend: 'screen' }]) {
+    const calls = shot(o), scr = onScreen(calls);
+    assert.equal(scr.length, 1, JSON.stringify(o));
+    assert.equal(scr[0].img, p.flat.label);
+    assert.equal(scr[0].filter, o.filter || 'none');
+    assert.equal(scr[0].comp, o.blend || 'source-over');
+    assert.ok(calls.filter((k) => k.on === p.flat.label).every((k) => k.filter === 'none' && k.alpha === 1));
+  }
+  // order inside the plate: body, cloth, then the eyelid patches (the lid stays on top of a cloth box it overlaps)
+  const order = (calls, on) => calls.filter((k) => k.op === 'drawImage' && k.on === on).map((k) => k.img);
+  const eye = p.eyes[0].patch.label;
+  for (const [o, on] of [[{}, 'screen'], [{ alpha: 0.5 }, p.flat.label]]) {
+    const seq = order(shot(o), on);
+    assert.deepEqual(seq.slice(0, 3), [p.canvas.label, p.cloths[0].scratch.label, p.cloths[1].scratch.label]);
+    assert.ok(seq.slice(3).length >= 1 && seq.slice(3).every((x) => x === eye), JSON.stringify(seq));
+  }
+  // nothing to flatten: a plain plate with alpha is one draw straight to the screen, as before
+  await C.load({ seed: 7, plates: { bare: { src: 'p/char.png', place: { x: 900, y: 900, h: 600 } } } });
+  const one = onScreen(kit.record(() => C.stage(g, S, C.camera(1), (st) => st.plate('bare', { alpha: 0.5, filter: 'blur(1px)' }))));
+  assert.deepEqual(one.map((k) => [k.img, k.alpha, k.filter]), [[C.plates.bare.canvas.label, 0.5, 'blur(1px)']]);
+  assert.equal(C.plates.bare.flat, undefined);
 });
 
 test('cloth rig: an anchor-point root, the amp cap, a missing or tiny box, a seq plate', async () => {
@@ -500,7 +541,7 @@ test('pose rig: frame 0 missing, or a host without the anchor, falls back withou
   assert.deepEqual(img(c, 1.5), [c.C.plates.L4.canvas.label]);
 });
 
-// Both files wrap COMPOSE.drawPlate: the result must not depend on which one inline.py's ORDER loads first.
+// stage.js drawPlate asks pose.js and cloth.js at draw time: the result must not depend on their load order.
 for (const files of [['cloth.js', 'pose.js'], ['pose.js', 'cloth.js']]) test(`pose + cloth (${files.join(', ')}): each pose plate flutters with its own cloth rig; the host draws nothing of its own`, async () => {
   const kit = loadRigs({ sizeOf: (src) => POSE_SIZES[src] }, files);
   const { C } = kit;
@@ -525,13 +566,30 @@ for (const files of [['cloth.js', 'pose.js'], ['pose.js', 'cloth.js']]) test(`po
   assert.equal(strips(1.5, C.plates.turn.cloths[0]).length, 600 / 5);
 });
 
-test('the rig files pass the kit lint (no Math.random, Date or performance.now) and wrap drawPlate once', () => {
+test('the rig files pass the kit lint (no Math.random, Date or performance.now); stage.js drawPlate calls them', () => {
   for (const f of ['cloth.js', 'pose.js']) {
     const code = fs.readFileSync(path.join(KIT_DIR, f), 'utf8').split('\n').map((l) => l.split('//')[0]).join('\n');
     assert.ok(!/Math\.random|\bDate\b|performance\.now/.test(code), f);
+    assert.ok(!/C\.drawPlate\s*=/.test(code), `${f} does not wrap drawPlate`);
   }
   const { C } = loadRigs();
-  assert.equal(C.cloth.installed, true);
-  assert.equal(C.pose.installed, true);
+  assert.equal(typeof C.pose.route, 'function');
+  assert.equal(typeof C.cloth.active, 'function');
   assert.deepEqual(C.rigs.map((r) => r.name).filter((n) => n === 'cloth' || n === 'pose').sort(), ['cloth', 'pose']);
+});
+
+test('pose.sequence: a hold, step, at or repeat that is not a number is a warning and its default, never a NaN time', () => {
+  const { C } = loadRigs();
+  const out = C.pose.sequence([[0, 1], [1, 'long'], [2, NaN], 3], { step: 'x', at: 'soon', repeat: 'twice' });
+  assert.ok(out.timeline.every((e) => Number.isFinite(e.at)), JSON.stringify(out));
+  assert.ok(Number.isFinite(out.end));
+  assert.deepEqual(out.timeline.map((e) => e.frame), [0, 1, 2, 3]);
+  assert.equal(out.timeline[0].at, 0, 'at: the default 0');
+  assert.equal(out.timeline[2].at - out.timeline[1].at, 0.25, 'hold "long": the step, itself the default 0.25');
+  const rep = C.report().join('\n');
+  for (const w of ['step x', 'at soon', 'repeat twice', 'hold long', 'hold NaN']) assert.ok(rep.includes(`pose.sequence: ${w} is not a number`), w);
+  // numbers as strings are numbers; valid input gives no warning
+  const k = loadRigs().C;
+  assert.deepEqual(k.pose.sequence([[0, '0.5'], [1, 0.25]], { at: 1 }).timeline, [{ at: 1, frame: 0 }, { at: 1.5, frame: 1 }]);
+  assert.deepEqual(k.report(), []);
 });

@@ -1,0 +1,26 @@
+{
+  "id": "luc-tuc-ngu",
+  "name": "Lục Túc Ngư",
+  "note": "Original design for the lab (not from any franchise): a long spotted fish-serpent with six short legs, fin ears and a dorsal fringe; it swims with its whole body.",
+  "seed": 59,
+  "body": {"length": 2.1, "radius": 0.19, "flat": 1.15, "belly": 0.8, "arch": 0.0, "rump": 0.78, "waist": 1.0, "chest": 0.95, "wave": 0.05},
+  "neck": {"length": 0.26, "radius": 0.16, "rise": 0.12},
+  "head": {"length": 0.38, "radius": 0.15, "pitch": -0.05, "snout": 0.62},
+  "legs": {"pairs": 3, "length": 0.32, "radius": 0.035, "foot": 0.06, "splay": 0.12},
+  "tails": {"count": 1, "length": 0.95, "radius": 0.135, "segments": 14, "spread": 0, "droop": 0.04, "curl": 0.0, "sway": 0.7, "lag": 0.05, "freq": 0.8},
+  "ears": {"count": 2, "length": 0.2, "radius": 0.06},
+  "mane": {"count": 10, "length": 0.2},
+  "eyes": {"count": 2, "radius": 0.026},
+  "pattern": {"kind": "spots", "scale": 1},
+  "palette": {"body": "#6E655C", "ink": "#1A1714", "accent": "#B02E22", "eye": "#1A1714"},
+  "demo": {
+    "seconds": 6,
+    "turntable": {"pos": [0, 1.9, 5.4], "target": [0, 0.15, 0], "fov": 36},
+    "env": {"water": true},
+    "timeline": {"start": {"at": [-3.4, 0.6], "face": "right", "mode": "swim"},
+                 "clips": [{"do": "swim", "t": [0, 4.6], "to": [0.6, 0.6]},
+                           {"do": "look", "t": [4.4, 6], "at": [0, 0.6, 5]}]},
+    "camera": {"pos": [0, 3.4, 5.4], "target": [0, 0.0, 0.2], "fov": 36, "follow": 0.7,
+               "move": {"t": [0, 6], "pos": [0.3, 3.0, 4.8], "target": [0.2, 0.0, 0.3]}}
+  }
+}

@@ -34,11 +34,11 @@ STAGES = {0: "Mở tập", 1: "Nghiên cứu nguồn", 2: "Kịch bản, shot li
 GATE_STAGE = {"G1": 2, "G2": 4, "G3": 8, "G4": 10}                      # the stage each gate closes
 GATES = list(GATE_STAGE)
 NEXT_HEADING = "## Việc tiếp theo"
-RE_SHOT = re.compile(r"_(s\d{2})_")
+RE_SHOT = re.compile(r"_(s\d{2,3})_")            # s<NN> or s<NNN> (tools/episode_id.py)
 RE_VERSION = re.compile(r"_v(\d{2})\.")
 RE_RENDER = re.compile(r"_(draft|final)_v(\d{2})\.mp4$")
 RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-STATUSES = ["ok", "cut-502", "failed", "pending"]
+STATUSES = ["ok", "cut-502", "failed", "abandoned", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
 METHODS = ("layers", "seedance", "code")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
@@ -248,7 +248,11 @@ def attention_section(rows, billed, ledger, media, bundled):
             if "lambda" in (r.get("note") or "").lower():
                 item["commands"].append(f"read jobs/{rid or '<req>'}.json from the bucket, then python3 tools/ark.py "
                                         f"lambda-job finish --status-json <file> --image <image> --ledger {led}")
+            if rid:      # an orphan that will never get a final row: close it (it stays counted)
+                item["close"] = f"python3 tools/ark.py ledger-close --req {rid} --ledger {led} --status abandoned"
             att["open"].append(item)
+        elif r.get("status") == "abandoned":
+            continue                                 # closed by ledger-close: counted, no file expected
         elif r.get("status") in ("cut-502", "failed"):
             if r.get("status") == "failed" and r.get("kind") == "video" and task:
                 item["commands"].append(resume)
@@ -491,6 +495,47 @@ def run_check(ep_dir, media):
     return p.returncode, lines[-1] if lines else f"no Summary line (exit {p.returncode})"
 
 
+def script_vo_ids(ep_dir):
+    """Ids VO1..VOn of the narration lines of script.md, numbered as tools/tts/vieneu_tts.py parse_script does
+    (None when script.md is missing or unreadable)."""
+    try:
+        text = check_episode.read_text(os.path.join(ep_dir, "script.md"))
+    except (OSError, check_episode.CheckError):
+        return None
+    n = 0
+    for _, line in check_episode.narration_lines(text):
+        m = check_episode.RE_MARK.match(line)
+        if m and m.group(3).strip():
+            n += 1
+    return {f"VO{i}" for i in range(1, n + 1)}
+
+
+def narration_watermark(media, ids=None):
+    """G4: (ok, text) for <media>/vo/tts-log.json of tools/tts/vieneu_tts.py: every take rendered with the audio
+    watermark on. No log = no narration rendered by the lab's TTS = n/a. With `ids` (the current script's VO ids),
+    takes VO<n> of lines cut from the script are ignored, as `vieneu_tts.py --check` does (the log keeps them);
+    takes with other ids (rendered from vo-lines.json with --lines) are always checked."""
+    path = os.path.join(media, "vo", "tts-log.json") if media else None
+    if not path or not os.path.isfile(path):
+        return True, "narration watermark: n/a (no vo/tts-log.json)"
+    try:
+        with open(path, encoding="utf-8") as f:
+            log = json.load(f)
+    except (OSError, ValueError) as e:
+        return False, f"narration watermark: vo/tts-log.json unreadable ({e})"
+    if not isinstance(log, list) or not log or not all(isinstance(e, dict) for e in log):
+        return False, "narration watermark: vo/tts-log.json is not a non-empty list of takes"
+    if ids is not None:      # VO<n> takes come from --script; other ids (vo-lines.json, --lines) are always checked
+        log = [e for e in log if str(e.get("id")) in ids or not re.fullmatch(r"VO\d+", str(e.get("id")))]
+        if not log:
+            return False, "narration watermark: vo/tts-log.json has no take of the current script.md"
+    off = [str(e.get("id", "?")) for e in log if e.get("watermark") is not True]
+    if off:
+        return False, (f"narration watermark on for every take (off: {', '.join(off[:6])}"
+                       f"{f', +{len(off) - 6} more' if len(off) > 6 else ''}; render again with --require-watermark)")
+    return True, f"narration watermark on for every take ({len(log)})"
+
+
 def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     req = []
 
@@ -557,6 +602,7 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     else:
         need(d["media"]["final"], f"final render ({d['media']['final'] or 'none'})")
         need(not n_open, f"no open paid request ({n_open} open)")
+        need(*narration_watermark(media, script_vo_ids(ep_dir)))
     missing = sum(1 for r in req if not r["ok"])
     return {"gate": gate, "ready": missing == 0, "missing": missing, "requirements": req}
 
@@ -581,7 +627,7 @@ def budget_text(d, notes):
             continue
         by = c["by_status"]
         parts = [f"ok {by['ok']:g}", f"cut-502 {by['cut-502']:g}"] + \
-                ([f"failed {by['failed']:g}"] if by["failed"] else []) + [f"pending {by['pending']:g}"]
+                [f"{s} {by[s]:g}" for s in ("failed", "abandoned") if by[s]] + [f"pending {by['pending']:g}"]
         out.append("  " + " · ".join([head] + parts))
     out += notes_text(notes)
     att = d["attention"]
@@ -591,6 +637,8 @@ def budget_text(d, notes):
         out.append(f"    OPEN     {short_id(o['req'])} {o['kind']} {os.path.basename(o['out']) or '-'} · "
                    f"agent {o['agent'] or '-'} · age {o['age']}" + ("" if o["commands"] else " (counted as spent)"))
         out += [f"             {c}" for c in o["commands"]]
+        if o.get("close"):
+            out.append(f"             never finishing: {o['close']}")
     for o in att["cut_failed"]:
         out.append(f"    {o['status'].upper():<8} {o['ts']} {o['model']} {o['size']} "
                    f"{os.path.basename(o['out']) or '-'} (billed or may be; do not retry unchanged)")

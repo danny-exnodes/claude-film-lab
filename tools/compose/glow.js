@@ -42,9 +42,10 @@
       const x = o.x ?? 1440, y = o.y ?? 300, r = o.r ?? 180, halo = r * (o.halo ?? 3);
       st.layer(o.depth ?? C.DEPTH.bg, (g) => {
         g.globalCompositeOperation = o.blend || 'screen';
-        g.globalAlpha = C.clamp(k * 0.45);
+        const inherited = g.globalAlpha;                 // a scene fading out (alpha set before COMPOSE.stage) fades it too
+        g.globalAlpha = inherited * C.clamp(k * 0.45);
         g.drawImage(spr, x - halo, y - halo, halo * 2, halo * 2);
-        g.globalAlpha = C.clamp(k);
+        g.globalAlpha = inherited * C.clamp(k);
         g.drawImage(spr, x - r * 2, y - r * 2, r * 4, r * 4);
       });
     },

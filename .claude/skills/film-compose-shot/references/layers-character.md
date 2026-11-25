@@ -67,11 +67,15 @@ function s03(g, k, t, S) {
 - Hộp không được chứa tay, mặt, vũ khí: mọi thứ trong hộp đều bị uốn theo. Hai hộp `cloth` của một tranh không chồng lên
   nhau (điểm ảnh chung chỉ thuộc hộp khai trước).
 - Vùng vải nên **đặc** (tách nền kiểu thân đặc, như `rembg` của L4): ở `feather` đầu tiên thân và vải đè lên nhau, nên vải
-  bán trong suốt (lụa mỏng, mực loang tách bằng luminance) sẽ đậm hơn một chút ở đoạn sát mép `root`.
+  bán trong suốt (lụa mỏng, mực loang tách bằng luminance) sẽ đậm hơn một chút ở đoạn sát mép `root`. Khi lớp vẽ với
+  `alpha` < 1 (mờ dần, hoà tan giữa hai tư thế), `filter` hay `blend`, thân và vải được ghép trên một canvas phụ rồi vẽ
+  một lần: đoạn nối không đậm thêm lần nữa, `blur` áp cho cả lớp.
 - Tham số không phải số (hoặc `gain` ≤ 0) không làm hỏng khung hình: giá trị mặc định được dùng, `gain` tối thiểu 0.1.
 - Cảnh báo (`compose:` trong `qc` của `make.py`): `cloth <tên> has no anchor box; held still`, `box is too small`,
   `amp ... is over the cap`, `has no anchor point for its root or tip; held still`.
-- Thứ tự file trong bộ mã: `cloth.js` và `pose.js` đứng sau `stage.js`, `strip-warp.js`, `eyelid.js`.
+- `stage.js` vẽ vải trong cùng lượt với thân: thân → dải `warp` → `cloth` → mí mắt, nên mí (`eyes`) luôn nằm trên một hộp
+  vải chồng lên nó. Thứ tự file trong bộ mã: `cloth.js` sau `strip-warp.js` và `eyelid.js` (chúng lấy mẫu ảnh trước khi
+  vải bị cắt ra); `pose.js` sau `stage.js`.
 
 ## 3. `pose-cycle`: đổi tư thế theo bậc
 
@@ -101,7 +105,8 @@ const PLATES = {
 - Thiếu tranh, thiếu điểm neo → cảnh báo `compose: plate L4: poses: frame 2: ...; frame 0 is shown` và khung đó hiện khung 0
   (không bao giờ nhảy vị trí).
 
-Hàm dựng timeline (thời gian luôn rơi đúng lưới fps):
+Hàm dựng timeline (thời gian luôn rơi đúng lưới fps; `hold`, `step`, `at`, `repeat` không phải số → cảnh báo
+`pose.sequence: ... is not a number` và dùng mặc định, không bao giờ ra thời điểm NaN):
 
 | Hàm | Dùng cho | Trả về |
 |---|---|---|

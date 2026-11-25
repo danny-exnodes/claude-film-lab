@@ -50,7 +50,11 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    250 KB ngữ cảnh). Luôn kéo: `PROJECT.md`, `SERIES.md`, `EPISODE.md`, `budget.yaml` của tập đang làm và **mọi** bản
    `ledger.csv`. File khác của `02_KinhThu/` và `03_KichBan/ep<NN>-<slug>/` (→ `projects/<project>/…`): chỉ những gì
    khâu sắp chạy cần – các file agent của khâu đó ghi ở dòng `Đầu vào` trong `.claude/agents/<agent>.md` và các file sẽ
-   sửa. Sau mỗi file: `wc -c` phải bằng `fileSize` của Drive, lệch thì tải lại.
+   sửa. **Sau mỗi `download_file_content`** ghi file xuống đĩa bằng
+   `python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <đường dẫn> --size <fileSize>` (đọc kết quả
+   trong bản ghi phiên, kiểm kích thước, đánh dấu đã kéo; nhiều file một lệnh được). **Không bao giờ chép lại base64
+   bằng tay.** Mỗi file vẫn tốn ≈ 1,33 × kích thước của nó trong ngữ cảnh: vẫn kéo theo khâu. Lệch kích thước hay
+   không thấy kết quả → tải lại; file do agent con tải → `--transcript <glob>` (CONVENTIONS §11.6 bước 2).
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
    ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
    `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –
@@ -59,7 +63,9 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 3. Chụp dấu và giờ kéo, **một lần** sau lần kéo đầu của container:
    `python3 tools/drive_sync.py snapshot projects/<project> --include-out out/<project>`
    (ghi `.pulled.sha256` và `.pulled.at`; shell tương đương ở CONVENTIONS §11.6 bước 4 của mục kéo). Đã có snapshot
-   (kéo thêm cho khâu sau, container cũ): `python3 tools/drive_sync.py pulled projects/<project> <các file vừa kéo>`.
+   (kéo thêm cho khâu sau, container cũ): `save` đã đánh dấu file nó ghi; file kéo cách khác thì
+   `python3 tools/drive_sync.py pulled projects/<project> <các file vừa kéo>`. Lỡ tạo file mới trước lần chụp đầu:
+   `snapshot projects/<project> --only <các file vừa kéo>`.
    `snapshot` từ chối (mã thoát 1) khi còn thay đổi chưa đẩy: đẩy chúng trước, không dùng `--force` để cho qua.
 4. Có file trong `01_TaiLieuGoc/_ChoPhanLoai/`: đặt tên theo §11.4, chuyển vào đúng thư mục, ghi `DanhMuc.csv`, báo người dùng.
 
@@ -78,7 +84,7 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `plan` sau vẫn là CHANGED); rồi chạy lại câu `search_files` và `update_file` **mọi kết quả trừ ID vừa tạo** vào `99_LuuTru/`
    với tên `plan` in sẵn (`<thư mục logic, / → __>__<tên>_<YYYYMMDD-HHMM>.<đuôi>`, CONVENTIONS §11.6 – connector không
    ghi đè nội dung được). `ledger.csv`: làm khối `pre` của nó **trước** `create_file` (tải mọi bản trên Drive,
-   `ledger-merge`, chạy lại `plan`); ledger đẩy sau mỗi khâu có tạo ảnh/video, không chờ duyệt.
+   `ledger-merge`, chạy lại `plan` đến khi khối in `pre done`, xoá bản tạm); ledger đẩy sau mỗi khâu có tạo ảnh/video, không chờ duyệt.
 3. Cập nhật dòng của tập trong `TienDo_SanXuat` (khâu, tên khâu, ngày qua cổng, `cap_nhat`, `viec_tiep_theo`, link)
    theo §11.6 bước 5.
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy
@@ -241,8 +247,8 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Chỉ **một** `film-compositor` mỗi tập.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.
-- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-<v>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
-  bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-<v>.txt` (`--probe`:
+- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-v<N>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
+  bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-v<N>.txt` (`--probe`:
   ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
   Reviewer tự ghi `review/qc-<v>.md` và MEMORY.md của nó (có Write/Edit trong `tools`; `memory: project` không tự cấp).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,

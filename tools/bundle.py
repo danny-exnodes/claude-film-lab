@@ -131,8 +131,8 @@ def add_member(z, arc, compress_type, src=None, data=None):
 
 
 def bundle(media, shot, series_dir=None, today=None, with_film=False):
-    if not re.fullmatch(r"s\d{2}", shot):
-        raise SystemExit(f"--shot must be s<NN> (got {shot!r})")
+    if not episode_id.RE_SHOT.match(shot):
+        raise SystemExit(f"--shot must be s<NN> or s<NNN> (got {shot!r})")
     if not os.path.isdir(media):
         raise SystemExit(f"{media}: media folder not found")
     ep = os.path.basename(os.path.normpath(media))

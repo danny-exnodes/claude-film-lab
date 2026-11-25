@@ -31,7 +31,8 @@ Methods
 Then cleanup: alpha < low -> 0, alpha > high -> 255, linear in between.
 
 With --style/--layer the method, low/high and the key colour come from style.yaml matte.per_layer
-(layer codes P1-x map to P). Explicit flags override the style. Without --layer the code is read from
+(layer codes P1-x map to P, pose plates L4b, L4c... map to L4 unless per_layer has their own key). Explicit flags
+override the style. Without --layer the code is read from
 the IN file name when it follows ep<NN>_s<NN>_<layer>_... or q<NN>t<NN>_s<NN>_<layer>_... . --preview composites the
 result over pure red for checking edges. OUT is always an RGBA PNG. A WARNING is printed when an L2/L3
 result is under 10% transparent (paper not removed: try --paper auto or a higher --low).
@@ -41,13 +42,16 @@ import argparse, contextlib, fcntl, os, re, sys, time
 import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import episode_id  # noqa: E402  (tools/episode_id.py: episode ids, shot ids and layer codes, CONVENTIONS §2)
+
 METHODS = ("none", "luminance", "chroma", "rembg")
 CHROMA_FULL = 160.0   # RGB distance from the key at which a pixel is fully opaque (before cleanup)
 DESPILL_RADIUS = 3    # px: despill pixels within this distance of a non-opaque pixel
 BORDER_FRAC = 0.03    # --paper auto: border band width as a fraction of the short edge (>= 2 px)
 REMBG_LOCK = os.environ.get("FILM_REMBG_LOCK", "/tmp/film-lab-rembg.lock")
 LOW_TRANSPARENCY = 10.0   # % transparent below which an L2/L3 matte is flagged
-RE_LAYER = re.compile(r"^(?:ep\d{2}|q\d{2}t\d{2})_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_")
+RE_LAYER = re.compile(rf"^{episode_id.ID}_{episode_id.SHOT}_({episode_id.LAYER})_")   # group 1 = layer code
 
 
 def hex_rgb(s):
@@ -96,8 +100,8 @@ def rembg_lock(path=None, log=sys.stderr):
 
 
 def style_key(layer):
-    """Layer code -> per_layer key in style.yaml (P1-duoi -> P)."""
-    return "P" if re.fullmatch(r"P\d+-[a-z0-9-]+", layer) else layer
+    """Layer code -> per_layer key in style.yaml (P1-duoi -> P; pose plate L4b -> L4, matted like the base pose)."""
+    return episode_id.layer_family(layer)
 
 
 def style_settings(style_dir, layer):
@@ -267,7 +271,7 @@ def main(argv=None):
                                    "or #RRGGBB. style.yaml paper_bg is only printed as a hint; pass it here to force it")
     p.add_argument("--low", type=int); p.add_argument("--high", type=int)
     p.add_argument("--style", help="styles/<id>: read matte settings from style.yaml")
-    p.add_argument("--layer", help="layer code (L1-L4, P<n>-<part>, FX); default from IN file name")
+    p.add_argument("--layer", help="layer code (L1-L4, L4b.., P<n>-<part>, FX); default from IN file name")
     p.add_argument("--preview", help="also write the result composited over pure red")
     p.add_argument("--overwrite", action="store_true", help="replace an existing OUT (never IN)")
     p.add_argument("--rembg-model", metavar="NAME",

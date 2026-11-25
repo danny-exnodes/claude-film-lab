@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Vietnamese narration with VieNeu-TTS, local on CPU, no API key, no per-character cost (AI Film Lab).
 
-  python3 tools/tts/vieneu_tts.py --script projects/<p>/ep<NN>-<slug>/script.md --out out/<p>/ep<NN>/vo --voice "Thái Sơn"
+  python3 tools/tts/vieneu_tts.py --script projects/<p>/ep<NN>-<slug>/script.md --out out/<p>/ep<NN>/vo --voice "Thái Sơn" --require-watermark
   python3 tools/tts/vieneu_tts.py --lines audio/vo-lines.json --out out/<p>/ep<NN>/vo --voice "Thái Sơn" [--only VO3 VO7]
   python3 tools/tts/vieneu_tts.py --script .../script.md [--out ...] --dry-run [--strict]   # no model: parse, normalise, estimate
-  python3 tools/tts/vieneu_tts.py --script .../script.md --out ... --voice "Thái Sơn" --check   # no model: is the render done?
+  python3 tools/tts/vieneu_tts.py --script .../script.md --out ... --voice "Thái Sơn" --check [--strict] [--require-watermark]
   python3 tools/tts/vieneu_tts.py --list-voices [--gender male] [--region nam]
   python3 tools/tts/vieneu_tts.py --audition "Thái Sơn,Đức Trí" --text "Câu một." --text "Câu hai." --out .../audition
 
@@ -24,14 +24,22 @@ Output (in --out)
   A table of real durations vs the script's time slots is printed. Each take is ok, OVER (longer than its slot),
   EMPTY (under 0.2 s or below -50 dBFS), CLIPPED or NOSLOT (no slot known).
 Stale takes (--script/--lines)
-  STALE <id> = the line's text changed since its take; ORPHAN <id> = the take's id left the script. A render
-  without --only moves orphan wavs to <out>/_stale/; --only refuses to leave another line stale (--allow-stale).
+  STALE <id> = the line's text changed since its take; ORPHAN <id> = the take's id left the script, or a wav with
+  no log entry whose id is not in the script. A render without --only moves orphan wavs to <out>/_stale/; --only
+  refuses to leave another line stale (--allow-stale). One render per --out at a time (lock <out>/.tts-log.lock).
+--check (no model) recomputes every slot from the current marks: a take longer than its slot is a WARN, a problem
+  with --strict.
+Watermark: --require-watermark refuses (exit 4) before the model loads when resemble-perth cannot be imported, and
+  again if the model comes up without its watermarker; with --check, every take must carry watermark: true.
 Exit codes
   0 ok · 1 a take or a check failed (EMPTY always; with --strict also OVER, CLIPPED, an unread token, NOSLOT for
-  --script; --check) · 2 input error, nothing rendered · 3 vieneu is not installed
+  --script; --check; ffmpeg failing during --speed, the previous take is kept) · 2 input error, nothing rendered
+  (also: another render holds the folder) · 3 vieneu is not installed · 4 --require-watermark and the watermark is off
 
 Text normalisation (Vietnamese): pronunciation map first (--pron CSV "term,doc", e.g. Hán Việt names), then
-abbreviations (TCN, SCN), Roman numerals and ordinals (thế kỷ IV -> thế kỷ thứ tư), dates, times, percentages, units
+abbreviations (TCN, SCN), Roman numerals and ordinals with their ranges (thế kỷ XIV–XV -> thế kỷ thứ mười bốn đến thứ
+mười lăm), months (tháng 4 -> tháng tư), dates (12/4/2024, 2-9-1945, ngày 1/5), times (8h30), fractions (3/4 -> ba
+phần tư; a bare a/b is a fraction), ranges (3–5 -> ba đến năm), negatives (-5 -> âm năm), percentages, units
 (km, m, kg, °C, ...), decimals (3,5), thousands (3.000) and plain numbers/years, read the Southern way
 (ngàn, lẻ) with --numbers nam (default) or the Northern way (nghìn, linh) with --numbers bac. A token that still
 holds a digit, a Han character, 《 》 or one of & + = ^ $ / ° after that is reported: WARN <id>: unread token.
@@ -40,9 +48,14 @@ Licence rule (tools/tts/README.md): only Apache-2.0 models whose preset voices a
 v3 Turbo (final) and v3 Nano (fast draft). VieNeu-TTS 0.3B and the legacy 0.5B presets (voices.json says
 CC BY-NC 4.0) are not offered. The library's audio watermark (resemble-perth) is applied whenever it is installed.
 
-Not installed? pip install vieneu==3.8.3 (see tools/tts/README.md); the tool prints the hint and exits 3.
+Not installed? docs/setup-script.sh installs vieneu==3.8.3 and the watermark (requirements-tts.txt); by hand see
+tools/tts/README.md. Without vieneu the tool prints the hint and exits 3.
 """
 import argparse, csv, hashlib, json, math, os, re, shutil, subprocess, sys, time, unicodedata, wave
+try:
+    import fcntl                # one render per --out at a time (Linux, like the rest of the lab's tools)
+except ImportError:             # pragma: no cover
+    fcntl = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LAB = os.path.dirname(os.path.dirname(HERE))
@@ -50,10 +63,13 @@ sys.path.insert(0, os.path.dirname(HERE))
 import check_episode  # noqa: E402  (tools/check_episode.py: the one script.md parser)
 
 VIENEU_PIN = "3.8.3"
-INSTALL_HINT = (f"vieneu is not installed. Install it once per session (about 2 min, ~300 MB of models on first use):\n"
-                f"  pip install vieneu=={VIENEU_PIN}\n"
-                f"  # optional, keeps the library's audio watermark on (CPU torch, ~1 GB):\n"
-                f"  pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu && pip install resemble-perth==1.0.1\n"
+WATERMARK_INSTALL = ("pip install --break-system-packages --index-url https://download.pytorch.org/whl/cpu torch==2.15.0"
+                     " torchaudio && pip install --break-system-packages resemble-perth==1.0.1")
+INSTALL_HINT = (f"vieneu is not installed. docs/setup-script.sh installs it with the environment; by hand (about 2 min,"
+                f" ~300 MB of models on first use):\n"
+                f"  pip install --break-system-packages vieneu=={VIENEU_PIN}\n"
+                f"  # the library's audio watermark (CPU torch, ~1 GB), needed for every final take:\n"
+                f"  {WATERMARK_INSTALL}\n"
                 f"See tools/tts/README.md.")
 
 MODES = {
@@ -64,6 +80,7 @@ MODES = {
 }
 EXIT_INPUT = 2                  # bad script, lines file, arguments or stale takes: nothing was rendered
 EXIT_MISSING = 3                # vieneu is not installed
+EXIT_WATERMARK = 4              # --require-watermark and the audio watermark is off: nothing was rendered
 OVER_MARGIN_S = 0.0
 EMPTY_MAX_S = 0.2               # a take shorter than this, or quieter than EMPTY_RMS_DBFS, is EMPTY
 EMPTY_RMS_DBFS = -50.0
@@ -72,6 +89,7 @@ EST_OVER_TOLERANCE = 0.15       # --dry-run --strict fails when an estimate over
 SPEED_MIN, SPEED_MAX = 0.9, 1.1
 RE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 LOG_NAME = "tts-log.json"
+LOCK_NAME = ".tts-log.lock"
 STALE_DIR = "_stale"
 
 
@@ -212,6 +230,9 @@ UNITS = [  # longest first; matched only right after a number
     ("%", "phần trăm"),
 ]
 ORDINAL_WORDS = r"thế kỷ thứ|thế kỉ thứ|thế kỷ|thế kỉ|thứ|chương|quyển|hồi|tập|phần"
+# words before a bare m/yyyy that make it a month and year (vào 4/2024); without one it is a fraction
+MONTH_CUES = "vào|từ|đến|tới|cuối|đầu|giữa|trước|sau|hồi|khoảng"
+RANGE_DASH = "[-–—]"
 
 
 def _three(n, full, d):
@@ -308,7 +329,10 @@ def _int_of(s):
 
 
 def normalize_vi(text, pron=(), dialect="nam"):
-    """Narration text -> the words the model should say. Keeps diacritics and punctuation."""
+    """Narration text -> the words the model should say. Keeps diacritics and punctuation. Rules in order:
+    pronunciation map, abbreviations, ordinals and their ranges (thế kỷ XIV–XV), months (tháng 4, tháng 4/2024),
+    dates (12/4/2024, 2-9-1945, ngày 1/5), times (8h30), fractions (3/4), ranges (3–5), negatives (-5), numbers with
+    their unit. A bare a/b is a fraction; it is a day/month only after ngày, hôm, mùng or mồng."""
     t = nfc(text)
     t = re.sub(r"\*\*|__|(?<!\w)[*_](?=\w)|(?<=\w)[*_](?!\w)", "", t)          # markdown emphasis
     t = apply_pron(t, pron)
@@ -316,26 +340,53 @@ def normalize_vi(text, pron=(), dialect="nam"):
         t = re.sub(rx, rep, t)
     nw = lambda n: num_words(n, dialect)  # noqa: E731
 
+    def value(v):
+        return int(v) if v.isdigit() else roman_to_int(v)
+
     def ordinal(m):
-        word, val = m.group(1), m.group(2)
-        n = int(val) if val.isdigit() else roman_to_int(val)
-        if n is None:
+        word, a, b = m.group(1), value(m.group(2)), m.group(3) and value(m.group(3))
+        if a is None or b is None and m.group(3):
             return m.group(0)
         lw = word.lower()
-        if lw.endswith("thứ"):                       # thứ IV, thế kỷ thứ 4
-            return f"{word} {ordinal_words(n, dialect)}"
-        if lw.startswith("thế k"):                   # thế kỷ IV -> thế kỷ thứ tư
-            return f"{word} thứ {ordinal_words(n, dialect)}"
-        return f"{word} {nw(n)}"
-    t = re.sub(rf"(?<!\w)((?i:{ORDINAL_WORDS}))\s+([IVXLCDM]+|\d+)(?!\w)", ordinal, t)
+        if lw.endswith("thứ") or lw.startswith("thế k"):   # thứ IV, thế kỷ thứ 4, thế kỷ IV -> thế kỷ thứ tư
+            head = word if lw.endswith("thứ") else f"{word} thứ"
+            return f"{head} {ordinal_words(a, dialect)}" + (f" đến thứ {ordinal_words(b, dialect)}" if b else "")
+        return f"{word} {nw(a)}" + (f" đến {nw(b)}" if b else "")
+    val = r"([IVXLCDM]+|\d+)"
+    t = re.sub(rf"(?<!\w)((?i:{ORDINAL_WORDS}))\s+{val}(?:\s*{RANGE_DASH}\s*{val})?(?![\w/])", ordinal, t)
 
-    t = re.sub(r"\b(\d{1,2})/(\d{1,2})/(\d{3,4})\b",
-               lambda m: f"{nw(int(m.group(1)))} tháng {month_words(int(m.group(2)), dialect)} năm {nw(int(m.group(3)))}", t)
-    t = re.sub(r"\b(\d{1,2})/(\d{1,2})\b(?![/\d])",
-               lambda m: f"{nw(int(m.group(1)))} tháng {month_words(int(m.group(2)), dialect)}", t)
+    def month(n):
+        n = int(n)
+        return month_words(n, dialect) if 1 <= n <= 12 else None
+
+    def month_year(m):                               # tháng 4, tháng 4/2024
+        mo = month(m.group(2))
+        if mo is None:
+            return m.group(0)
+        return f"{m.group(1)} {mo}" + (f" năm {nw(int(m.group(3)))}" if m.group(3) else "")
+    t = re.sub(r"(?<!\w)((?i:tháng))\s+(\d{1,2})(?:/(\d{3,4}))?(?![\w/])", month_year, t)
+
+    def date(m):                                     # 12/4/2024, 2-9-1945
+        mo = month(m.group(3))
+        return m.group(0) if mo is None else f"{nw(int(m.group(1)))} tháng {mo} năm {nw(int(m.group(4)))}"
+    t = re.sub(r"(?<![\w.,])(\d{1,2})([/-])(\d{1,2})\2(\d{3,4})(?![\w/])", date, t)
+
+    def month_only(m):                               # vào 4/2024 (a bare 1/1000 is a fraction, not a date)
+        mo = month(m.group(2))
+        return m.group(0) if mo is None else f"{m.group(1)} tháng {mo} năm {nw(int(m.group(3)))}"
+    t = re.sub(rf"(?<!\w)((?i:{MONTH_CUES}))\s+(\d{{1,2}})/(\d{{4}})(?![\w/])", month_only, t)
+
+    def day_month(m):                                # ngày 1/5, ngày 2-9 (a bare 1/5 is a fraction)
+        mo = month(m.group(3))
+        return m.group(0) if mo is None else f"{m.group(1)} {nw(int(m.group(2)))} tháng {mo}"
+    t = re.sub(rf"(?<!\w)((?i:ngày|hôm|mùng|mồng))\s+(\d{{1,2}})(?:/|\s*{RANGE_DASH}\s*)(\d{{1,2}})(?![\w/])(?!\s+(?i:tháng))",
+               day_month, t)   # ngày 3-5 tháng 6 is a range
     t = re.sub(r"\b(\d{1,2})h(\d{2})\b", lambda m: f"{nw(int(m.group(1)))} giờ {nw(int(m.group(2)))} phút", t)
     t = re.sub(r"\b(\d{1,2})h\b", lambda m: f"{nw(int(m.group(1)))} giờ", t)
-    t = re.sub(r"(?<=\d)\s*[-–]\s*(?=\d)", " đến ", t)                        # 300-400 dặm
+    t = re.sub(r"(?<![\w.,/])(\d+)/(\d+)(?![\w/])",                          # 3/4 -> ba phần tư
+               lambda m: f"{nw(int(m.group(1)))} phần {'tư' if int(m.group(2)) == 4 else nw(int(m.group(2)))}", t)
+    t = re.sub(rf"(?<=\d)\s*{RANGE_DASH}\s*(?=\d)", " đến ", t)               # 300-400 dặm, 3–5 ngày
+    t = re.sub(r"(?<![\w.,])[-−](?=\d)", "âm ", t)                            # -5°C, −20 (no space after the sign)
 
     num = r"(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d+))?"
     def number(m):
@@ -423,14 +474,67 @@ def need_ffmpeg(a):
         fail(f"--speed {a.speed:g} needs ffmpeg on PATH for --mode {a.mode} (or drop --speed)")
 
 
-def atempo(path, speed):
-    """Post-process speed change with ffmpeg atempo (pitch kept). Used when the model has no native speed."""
-    if not shutil.which("ffmpeg"):
-        sys.exit("--speed needs ffmpeg for this model")
-    tmp = path + ".tempo.wav"
-    subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", path, "-filter:a", f"atempo={speed}", "-c:a", "pcm_s24le", tmp],
-                   check=True)
-    os.replace(tmp, path)
+class TakeError(RuntimeError):
+    """A take could not be finished after synthesis (ffmpeg failed): the run stops, earlier takes stay logged."""
+
+
+def atempo(src, dst, speed):
+    """Speed change with ffmpeg atempo (pitch kept), src -> dst; src is removed. Used when the model has no native
+    speed. On failure raises TakeError and leaves dst (the previous take, if any) untouched."""
+    tmp = dst + ".tempo.wav"
+    try:
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", src, "-filter:a", f"atempo={speed}", "-c:a", "pcm_s24le",
+                        tmp], check=True, capture_output=True, text=True)
+        os.replace(tmp, dst)
+    except (OSError, subprocess.SubprocessError) as e:
+        said = [ln for ln in (getattr(e, "stderr", None) or "").strip().splitlines() if ln.strip()]
+        raise TakeError(f"ffmpeg atempo={speed:g} failed: {said[-1] if said else e}") from None
+    finally:
+        for p in (src, tmp):
+            if os.path.exists(p):
+                os.remove(p)
+
+
+def watermark_available():
+    """(True, "") when the library's audio watermark can be applied, i.e. resemble-perth (and the torch under it)
+    imports. Checked before the model is loaded; VieneuEngine.watermark confirms it once the model is up."""
+    try:
+        import perth  # noqa: F401
+    except Exception as e:  # noqa: BLE001  (ImportError, or torch failing inside perth)
+        first = str(e).strip().splitlines()
+        return False, f"{type(e).__name__}: {first[0] if first else 'cannot import perth'}"
+    return True, ""
+
+
+def require_watermark(a):
+    """--require-watermark: refuse (exit 4) before the model loads when resemble-perth cannot be imported."""
+    if not a.require_watermark:
+        return
+    ok, why = watermark_available()
+    if not ok:
+        fail(f"--require-watermark: the audio watermark is off (resemble-perth: {why}); nothing rendered.\n"
+             f"  {WATERMARK_INSTALL}\n  (tools/tts/README.md, Cài đặt)", EXIT_WATERMARK)
+
+
+def engine_watermark(a, eng):
+    """--require-watermark once the model is up: the library must really have attached its watermarker."""
+    if a.require_watermark and not eng.watermark:
+        fail(f"--require-watermark: perth imports but vieneu {eng.version} came up without its watermarker;"
+             f" nothing rendered (tools/tts/README.md)", EXIT_WATERMARK)
+
+
+def lock_out(out):
+    """One render per --out at a time: an exclusive flock on <out>/.tts-log.lock until the file is closed. Two
+    renders into one folder would otherwise lose each other's log entries. -> the open lock file (None: no fcntl)."""
+    if fcntl is None:
+        return None
+    f = open(os.path.join(out, LOCK_NAME), "a", encoding="utf-8")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        f.close()
+        fail(f"--out {out}: another render is writing to this folder (lock {LOCK_NAME}); wait for it to end")
+    return f
 
 
 # --- engine ------------------------------------------------------------------------------------------------------
@@ -645,12 +749,25 @@ def compare_log(lines, log):
     return stale, [i for i in by_id if i not in ids]
 
 
-def report_stale(stale, orphans, skip=()):
+def stray_wavs(out, ids, logged):
+    """Takes in <out> that neither the script nor the log knows (<id>.wav with a safe id, no entry, id not in the
+    script): left behind when a corrupt log was set aside, or by hand. A compositor globbing vo/*.wav would use them."""
+    try:
+        names = os.listdir(out)
+    except OSError:
+        return []
+    return sorted(n[:-4] for n in names if n.endswith(".wav") and RE_ID.match(n[:-4]) and n[:-4] not in ids
+                  and n[:-4] not in logged and os.path.isfile(os.path.join(out, n)))
+
+
+def report_stale(stale, orphans, skip=(), strays=()):
     for i in stale:
         if i not in skip:
             print(f"STALE {i}: text changed since render")
     for i in orphans:
         print(f"ORPHAN {i}: not in script")
+    for i in strays:
+        print(f"ORPHAN {i}: {i}.wav has no log entry and is not in script")
 
 
 def retire_orphans(out, by_id, orphans):
@@ -726,7 +843,8 @@ def dry_run(a, lines, all_lines, unread):
         log, err = read_log(os.path.join(a.out, LOG_NAME))
         if err:
             print(f"{os.path.join(a.out, LOG_NAME)}: {err} (a render will set it aside)", file=sys.stderr)
-        report_stale(*compare_log(all_lines, log))
+        stale, orphans = compare_log(all_lines, log)
+        report_stale(stale, orphans, strays=stray_wavs(a.out, {ln["id"] for ln in all_lines}, {e["id"] for e in log}))
     if not a.strict:
         return 0
     bad = 0
@@ -759,29 +877,48 @@ def run_lines(a, lines, pron, make_engine, all_lines=None):
         os.makedirs(a.out, exist_ok=True)
     except OSError as e:
         fail(f"--out {a.out}: cannot create the folder: {e}")
+    lock = lock_out(a.out)
+    try:
+        return render_lines(a, lines, all_lines, make_engine)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def render_lines(a, lines, all_lines, make_engine):
+    """The render itself, with <out> locked: log bookkeeping, the model, one take per line."""
     tracked = bool(a.script or a.lines)             # --text takes are one-offs: no stale/orphan bookkeeping
     log_path = os.path.join(a.out, LOG_NAME)
     by_id = {e["id"]: e for e in open_log(log_path)}
     order = [ln["id"] for ln in all_lines]
     selected = {ln["id"] for ln in lines}
     stale, orphans = compare_log(all_lines, list(by_id.values())) if tracked else ([], [])
-    report_stale(stale, orphans, skip=selected)
+    strays = stray_wavs(a.out, set(order), by_id) if tracked else []
+    report_stale(stale, orphans, skip=selected, strays=strays)
     left_stale = [i for i in stale if i not in selected]
     if left_stale and not a.allow_stale:
         fail(f"--only: {', '.join(left_stale)} would stay stale (text changed since render): render them too, or"
              f" pass --allow-stale")
     eng = make_engine(a)
+    engine_watermark(a, eng)
     voice = a.voice or eng.default_voice()
-    entries, total_audio, total_cpu = [], 0.0, 0.0
+    entries, total_audio, total_cpu, broken = [], 0.0, 0.0, None
     for ln in lines:
         path = os.path.join(a.out, f"{ln['id']}.wav")
         t0 = time.time()
         wav, rate = eng.synth(ln["spoken"], voice, seed=a.seed, speed=a.speed)
         total_cpu += time.time() - t0
-        write_wav24(path, wav, rate)
         if a.speed != 1.0 and not eng.native_speed():
-            atempo(path, a.speed)
+            raw = path + ".raw.wav"                 # the previous take stays in place until ffmpeg succeeded
+            write_wav24(raw, wav, rate)
+            try:
+                atempo(raw, path, a.speed)
+            except TakeError as e:
+                broken = f"{ln['id']}: {e}"
+                break
             wav, rate = read_wav(path)
+        else:
+            write_wav24(path, wav, rate)
         stats = audio_stats(wav, rate)
         total_audio += stats["duration_s"]
         e = entry_for(ln, ln["spoken"], path, stats, eng, voice, a.seed, a.speed)
@@ -789,8 +926,13 @@ def run_lines(a, lines, pron, make_engine, all_lines=None):
         by_id[e["id"]] = e
         write_log(log_path, by_id, order)           # after every line: an interrupted run keeps what it rendered
         print(f"{ln['id']}: {path}  {stats['duration_s']:.2f} s  {e['fit'] or e['status']}", flush=True)
-    if tracked and not a.only and orphans:
-        retire_orphans(a.out, by_id, orphans)
+    if broken:
+        print_table(entries)
+        print(f"ERROR {broken}\n  the take before it (if any) is kept; the lines after it were not rendered."
+              f" Fix ffmpeg, then render the rest with --only", file=sys.stderr)
+        return 1
+    if tracked and not a.only and (orphans or strays):
+        retire_orphans(a.out, by_id, orphans + strays)
         write_log(log_path, by_id, order)
     print_table(entries)
     speed_x = total_audio / total_cpu if total_cpu else 0
@@ -819,10 +961,12 @@ def wav_seconds(path):
 
 
 def run_check(a, all_lines):
-    """No model: exit 0 only when every script line has a take that matches the script and the given settings."""
+    """No model: exit 0 only when every script line has a take that matches the script and the given settings.
+    Slots come from the current marks (a mark moved after the render is seen): a take longer than its slot is a
+    WARN, a problem with --strict. --require-watermark: every take must have been rendered with the watermark on."""
     log_path = os.path.join(a.out, LOG_NAME)
     log, err = read_log(log_path)
-    problems = []
+    problems, warnings = [], []
     if err:
         problems.append(f"{log_path}: {err}")
     by_id = {e["id"]: e for e in log}
@@ -842,6 +986,8 @@ def run_check(a, all_lines):
             why.append(f"mode is {e.get('mode')!r}, not {a.mode!r}")
         if e.get("seed") != a.seed:
             why.append(f"seed is {e.get('seed')!r}, not {a.seed!r}")
+        if a.require_watermark and e.get("watermark") is not True:
+            why.append("rendered with the watermark off")
         dur = e.get("duration_s")
         if isinstance(dur, bool) or not isinstance(dur, (int, float)) or dur <= 0 or e.get("status") == "EMPTY":
             why.append("empty take")
@@ -857,19 +1003,32 @@ def run_check(a, all_lines):
                 why.append(f"{ln['id']}.wav holds no audio")
             elif isinstance(dur, (int, float)) and dur > 0 and abs(secs - dur) > 0.05:
                 why.append(f"{ln['id']}.wav is {secs:.2f} s, the log says {dur:.2f} s")
+            slot = ln.get("slot_s")
+            if secs > 0 and slot is not None and secs > slot + OVER_MARGIN_S:
+                over = (f"OVER +{secs - slot:.1f} s: the take is {secs:.2f} s, the slot from the current marks is"
+                        f" {slot:.2f} s (shorten the line or move the next mark)")
+                if a.strict:
+                    why.append(over)
+                else:
+                    warnings.append(f"{ln['id']}: {over}")
         if why:
             problems.append(f"{ln['id']}: {'; '.join(why)}")
     if not a.voice and len(voices) > 1:
         problems.append(f"voice: takes use {len(voices)} voices ({', '.join(map(str, voices))}); render with one --voice")
     _, orphans = compare_log(all_lines, log)
     problems += [f"ORPHAN {i}: not in script (a render without --only moves it to {STALE_DIR}/)" for i in orphans]
+    problems += [f"ORPHAN {i}: {i}.wav has no log entry and is not in script (a render without --only moves it to"
+                 f" {STALE_DIR}/)" for i in stray_wavs(a.out, {ln["id"] for ln in all_lines}, by_id)]
+    for w in warnings:
+        print(f"WARN {w}")
     for p in problems:
         print(p)
     if problems:
         print(f"check: FAILED, {len(problems)} problem(s) in {a.out}")
         return 1
     print(f"check: ok, {len(all_lines)} line(s) in {a.out} match the script · voice {a.voice or voices[0]}"
-          f" · mode {a.mode} · seed {a.seed}")
+          f" · mode {a.mode} · seed {a.seed}" + (" · watermark on" if a.require_watermark else "")
+          + (f" · {len(warnings)} OVER warning(s): --strict fails them" if warnings else ""))
     return 0
 
 
@@ -902,6 +1061,7 @@ def run_audition(a, lines, pron, make_engine):
     except OSError as e:
         fail(f"--out {a.out}: cannot create the folder: {e}")
     eng = make_engine(a)
+    engine_watermark(a, eng)
     voices = pick_voices(a.audition, eng)
     meta = {v["name"]: v for v in eng.voices()}
     rows = []
@@ -1006,7 +1166,11 @@ def build_parser():
                    help=f"--dry-run estimate: syllables per second (default {EST_SYLLABLES_PER_S:g})")
     p.add_argument("--strict", action="store_true",
                    help="exit 1 on a take longer than its slot (OVER), a clipped take, an unread token, or a --script"
-                        " line whose slot is unknown (NOSLOT); with --dry-run: an estimate more than 15%% over its slot")
+                        " line whose slot is unknown (NOSLOT); with --dry-run: an estimate more than 15%% over its slot;"
+                        " with --check: a take longer than its slot from the current marks")
+    p.add_argument("--require-watermark", action="store_true",
+                   help="exit 4 before the model loads when the library's audio watermark (resemble-perth) is off;"
+                        " with --check: every take must have been rendered with it on. Use it for every final render")
     p.add_argument("--list-voices", action="store_true")
     p.add_argument("--gender", choices=["male", "female"], help="--list-voices filter")
     p.add_argument("--region", choices=["bac", "trung", "nam"], help="--list-voices filter")
@@ -1033,6 +1197,7 @@ def main(argv=None, make_engine=None):
         return run_check(a, all_lines)
     if not a.out and not a.dry_run:
         fail("--out is required")
+    require_watermark(a)
     if a.audition:
         if a.dry_run:
             fail("--audition renders audio; drop --dry-run")

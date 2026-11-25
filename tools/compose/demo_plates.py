@@ -8,8 +8,8 @@ rocks and a pine · L4 RGBA 2048x2048 creature silhouette with a long tail (anch
 tail_tip, boxes tail and eye). Ink-wash-like on purpose, but they are only test shapes: never shown as a film.
 Needs Pillow and numpy (installed with rembg by the session hook).
 """
+import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -144,8 +144,10 @@ ANCHORS = {
 }
 
 
-def main():
-    root = Path(sys.argv[1] if len(sys.argv) > 1 else "out/demo")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("out", nargs="?", default="out/demo", help="folder for plates/ and anchors.json (default out/demo)")
+    root = Path(ap.parse_args(argv).out)            # --help (or a bad option) exits here: nothing is created
     (root / "plates").mkdir(parents=True, exist_ok=True)
     for name, make in (("ep00_s01_L1_demo-nui_v01.png", plate_l1), ("ep00_s01_L2_demo-day_v01.png", plate_l2),
                        ("ep00_s01_L3_demo-da_v01.png", plate_l3), ("ep00_s01_L4_demo-thu_v01.png", plate_l4)):

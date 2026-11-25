@@ -1,7 +1,7 @@
 """tools/drive_sync.py: snapshot / plan / record round trip on a temp project with fake Drive IDs (no network)."""
-import json, os, re, subprocess, sys, unittest, zipfile
+import base64, hashlib, json, os, re, shutil, subprocess, sys, time, unittest, zipfile
 
-from helpers import TmpDirCase, load, run_main
+from helpers import FIX, TmpDirCase, load, run_main
 
 ds = load("drive_sync.py", "film_drive_sync")
 
@@ -792,7 +792,7 @@ class TestCli(unittest.TestCase):
     def test_help_lists_commands(self):
         code, out, _ = run_main(ds.main, ["--help"])
         self.assertEqual(code, 0)
-        self.assertRegex(out, r"\{snapshot,pulled,plan,record\}")
+        self.assertRegex(out, r"\{save,snapshot,pulled,plan,record\}")
 
 
 class TestManifestErrors(DriveSyncCase):
@@ -825,6 +825,401 @@ class TestManifestErrors(DriveSyncCase):
         tpl = ds.load_manifest(os.path.join(os.path.dirname(ds.__file__), "..", "templates", "project"))
         self.assertIn("99_LuuTru", tpl["folders"])
         self.assertIsNone(ds.folder_id(tpl, "99_LuuTru"))
+
+
+# --- pull side: save, snapshot --only, out/ lines, symlinks, ledger pre block ------------------------------------
+
+DRIVE_FIX = FIX / "drive"         # synthetic transcripts: fake file IDs, fake tiny content (no real session)
+EP2 = b"---\nstage: 2\n---\n"     # newest FAKE-EP-0001 download in session-main.jsonl
+KEY_PNG = b"\x89PNG\r\n\x1a\n\xfb\xff\xfe\xfd\xfc"
+
+
+class SaveCase(DriveSyncCase):
+    """A fake Claude Code store: this repo's transcript folder (main session + a subagent) and another project's."""
+
+    def setUp(self):
+        super().setUp()
+        self.claude = self.tmp / "claude-home"
+        self.env = os.environ.get("CLAUDE_CONFIG_DIR")
+        os.environ["CLAUDE_CONFIG_DIR"] = str(self.claude)
+        store = self.claude / "projects"
+        self.own = store / ds.transcript_slug(os.getcwd())
+        (self.own / "session-main" / "subagents").mkdir(parents=True)
+        shutil.copy(DRIVE_FIX / "session-main.jsonl", self.own / "session-main.jsonl")
+        shutil.copy(DRIVE_FIX / "session-fallback.jsonl", self.own / "session-fallback.jsonl")
+        shutil.copy(DRIVE_FIX / "agent-sub.jsonl", self.own / "session-main" / "subagents" / "agent-sub.jsonl")
+        (store / "-other-project").mkdir()
+        shutil.copy(DRIVE_FIX / "session-old.jsonl", store / "-other-project" / "session-old.jsonl")
+
+    def tearDown(self):
+        if self.env is None:
+            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+        else:
+            os.environ["CLAUDE_CONFIG_DIR"] = self.env
+        super().tearDown()
+
+    def save(self, *argv):
+        return self.run_tool("save", "projects/demo", *argv)
+
+    def snap_text(self):
+        return (self.pd / ".pulled.sha256").read_text()
+
+    def transcript(self, name, records):
+        (self.own / name).write_text("".join(json.dumps(r) + "\n" for r in records))
+
+
+class TestDecode(unittest.TestCase):
+    def test_variants(self):
+        data = KEY_PNG + b"x"
+        std, url = base64.b64encode(data).decode(), base64.urlsafe_b64encode(data).decode()
+        self.assertNotEqual(std, url)
+        for text in (std, url, std.rstrip("="), url.rstrip("="), std[:8] + "\n " + std[8:]):
+            self.assertEqual(ds.decode_b64(text), data, text)
+
+    def test_refused(self):
+        for text in ("ab+-cd==", "abcde", "not base64!", "ab=c"):
+            with self.assertRaises(ValueError, msg=text):
+                ds.decode_b64(text)
+
+    def test_slug(self):
+        self.assertEqual(ds.transcript_slug("/home/user/claude-film-lab"), "-home-user-claude-film-lab")
+
+
+class TestSave(SaveCase):
+    def test_newest_result_written_and_marked_pulled(self):
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/research.md", "--size", "17")
+        self.assertEqual(code, 0, err)
+        target = self.pd / "ep01-bac-thi" / "research.md"
+        self.assertEqual(target.read_bytes(), EP2)
+        self.assertIn("saved     projects/demo/ep01-bac-thi/research.md  17 bytes  sha256 "
+                      f"{hashlib.sha256(EP2).hexdigest()[:12]}  <- FAKE-EP-0001 (session-main.jsonl:5)", out)
+        self.assertIn("pulled    projects/demo/ep01-bac-thi/research.md", out)
+        self.assertIn(f"{ds.sha256(target)}  projects/demo/ep01-bac-thi/research.md\n", self.snap_text())
+        self.assertNotIn(base64.b64encode(EP2).decode(), out + err)      # never prints the content
+        self.assertNotIn("stage: 2", out + err)
+        self.assertFalse((self.pd / ".pushed.log").exists())
+        code, plan = self.plan()
+        self.assertEqual(plan["actions"], [])
+        self.assertEqual([f for f in os.listdir(target.parent) if f.endswith(".part")], [])
+
+    def test_several_files_subagent_and_url_safe(self):
+        self.snapshot("--include-out", "out/demo")
+        code, out, err = self.save(
+            "--id", "FAKE-LEDGER-0002", "--to", "out/demo/ep01/ledger.drive-1.csv",
+            "--id", "FAKE-KEY-0003", "--to", "out/demo/characters/bac-thi/bac-thi_key_v01.png", "--size", "13",
+            "--id", "FAKE-SUB-0006", "--to", "characters/bac-thi/NOTES.md")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.out / "ep01" / "ledger.drive-1.csv").read_bytes(),
+                         b"ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note\n")
+        self.assertEqual((self.out / "characters" / "bac-thi" / "bac-thi_key_v01.png").read_bytes(), KEY_PNG)
+        self.assertEqual((self.pd / "characters" / "bac-thi" / "NOTES.md").read_bytes(), b"# nhan vat gia\n")
+        self.assertIn("(agent-sub.jsonl:2)", out)
+        self.assertIn("out/demo/ep01/ledger.drive-1.csv: temp file or Drive ledger copy, not marked pulled", out)
+        text = self.snap_text()
+        self.assertIn("  out/demo/characters/bac-thi/bac-thi_key_v01.png\n", text)
+        self.assertIn("  projects/demo/characters/bac-thi/NOTES.md\n", text)
+        self.assertNotIn("ledger.drive-1.csv", text)
+
+    def test_other_project_folder_is_searched_last(self):
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-OTHER-0008", "--to", "ep01-bac-thi/other.md")
+        self.assertEqual(code, 0, err)
+        self.assertIn("(session-old.jsonl:4)", out)
+        self.assertIn("no --size", out)
+
+    def test_timestamps_beat_file_times(self):
+        """--transcript: only those files; the newest result by record time, not by file mtime."""
+        t = self.tmp / "t"
+        t.mkdir()
+        for name in ("session-main.jsonl", "session-old.jsonl"):
+            shutil.copy(DRIVE_FIX / name, t / name)
+        later = time.time() + 100
+        os.utime(t / "session-old.jsonl", (later, later))        # written last, but its download is older
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/research.md",
+                                   "--transcript", str(t / "*.jsonl"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "research.md").read_bytes(), EP2)
+        code, _, err = self.save("--id", "FAKE-SUB-0006", "--to", "x.md", "--transcript", str(t / "*.jsonl"))
+        self.assertEqual(code, 2)
+        self.assertIn("--transcript", err)
+        code, _, err = self.save("--id", "FAKE-EP-0001", "--to", "x.md", "--transcript", str(t / "none-*.jsonl"))
+        self.assertEqual(code, 2)
+        self.assertIn("no file matches", err)
+
+    def test_persisted_output_file(self):
+        """A large result kept by Claude Code in a file beside the transcript is read from there."""
+        data = b"# lon\n" * 50
+        saved = self.own / "session-big" / "tool-results" / "toolu_FAKE_41.txt"
+        saved.parent.mkdir(parents=True)
+        saved.write_text(json.dumps({"id": "FAKE-BIG-0010", "content": base64.b64encode(data).decode()}))
+        outside = self.tmp / "elsewhere.txt"
+        outside.write_text(json.dumps({"id": "FAKE-OUT-0011", "content": base64.b64encode(b"x").decode()}))
+        recs = []
+        for uid, fid, path in (("toolu_FAKE_41", "FAKE-BIG-0010", saved), ("toolu_FAKE_42", "FAKE-OUT-0011", outside)):
+            recs.append({"type": "assistant", "timestamp": "2026-11-12T12:00:00Z", "message": {"content": [
+                {"type": "tool_use", "id": uid, "name": "mcp__x__download_file_content", "input": {"fileId": fid}}]}})
+            recs.append({"type": "user", "timestamp": "2026-11-12T12:00:01Z", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": uid, "content": [{"type": "text", "text":
+                 f"<persisted-output>\nOutput too large (2KB). Full output saved to: {path}\n\nPreview (first 2KB):\n"
+                 '{"id": "' + fid + '", "content": "IyBs\n...\n</persisted-output>'}]}]}})
+        self.transcript("session-big.jsonl", recs)
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-BIG-0010", "--to", "ep01-bac-thi/big.md", "--size", str(len(data)))
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "big.md").read_bytes(), data)
+        code, _, err = self.save("--id", "FAKE-OUT-0011", "--to", "ep01-bac-thi/out.md", "--size", "1")
+        self.assertEqual(code, 2)                # the file outside the store is not read; the preview is cut short
+        self.assertFalse((self.pd / "ep01-bac-thi" / "out.md").exists())
+
+    def test_errors_write_nothing(self):
+        self.snapshot()
+        before = self.snap_text()
+        cases = [
+            (("--id", "FAKE-ERR-0004", "--to", "a.md"), "the download failed"),
+            (("--id", "FAKE-TRUNC-0005", "--to", "a.md", "--size", "60"), "decoded 55 bytes, --size says 60"),
+            (("--id", "FAKE-NONE-0099", "--to", "a.md"), "no download_file_content result for file id(s) FAKE-NONE-0099"),
+            (("--id", "FAKE-EP-0001", "--to", "a.md", "--size", "18"), "decoded 17 bytes"),
+            (("--id", "FAKE-EP-0001", "--to", "b.md", "--id", "FAKE-NONE-0099", "--to", "a.md"), "FAKE-NONE-0099"),
+            (("--id", "FAKE-EP-0001", "--to", "a.md", "--id", "FAKE-SUB-0006", "--to", "a.md"), "given twice"),
+        ]
+        for argv, msg in cases:
+            code, out, err = self.save(*argv)
+            self.assertEqual(code, 2, argv)
+            self.assertIn(msg, err, argv)
+            self.assertFalse((self.pd / "a.md").exists(), argv)
+            self.assertFalse((self.pd / "b.md").exists(), argv)
+        self.assertEqual(self.snap_text(), before)
+
+    def test_size_in_the_result_warns_without_size(self):
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-TRUNC-0005", "--to", "ep01-bac-thi/research.md")
+        self.assertEqual(code, 0, err)
+        self.assertIn("WARN      projects/demo/ep01-bac-thi/research.md: the result says size 60, decoded 55 bytes", out)
+
+    def test_search_snippets_are_not_downloads(self):
+        self.transcript("session-search.jsonl", [
+            {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_FAKE_51",
+             "name": "mcp__claude_ai_Google_Drive__search_files", "input": {"query": "title = 'x'"}}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_FAKE_51",
+             "content": [{"type": "text", "text": json.dumps({"files": [
+                 {"id": "FAKE-SNIP-0012", "content": base64.b64encode(b"snip").decode()}]})}]}]}}])
+        code, _, err = self.save("--id", "FAKE-SNIP-0012", "--to", "a.md", "--size", "4")
+        self.assertEqual(code, 2)
+        self.assertIn("no download_file_content result", err)
+
+    def test_text_search_fallback_needs_size(self):
+        code, _, err = self.save("--id", "FAKE-FB-0007", "--to", "ep01-bac-thi/budget.yaml")
+        self.assertEqual(code, 2)
+        self.assertIn("found only by text search", err)
+        code, out, err = self.save("--id", "FAKE-FB-0007", "--to", "ep01-bac-thi/budget.yaml", "--size", "10")
+        self.assertEqual(code, 0, err)
+        self.assertIn("text search", out)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "budget.yaml").read_bytes(), b"images: 4\n")
+
+    def test_overwrite_guard(self):
+        self.snapshot()
+        script = self.write("ep01-bac-thi/script.md", "[00:05] sua tai cho\n", append=True)   # not pushed
+        local = script.read_bytes()
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/script.md")
+        self.assertEqual(code, 1)
+        self.assertIn("projects/demo/ep01-bac-thi/script.md: local changes not pushed yet", err)
+        self.assertIn("--to <path>.orig", err)
+        self.assertEqual(script.read_bytes(), local)
+        self.write("ep01-bac-thi/notes.md", "tu tao\n")                                         # made locally
+        code, _, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/notes.md")
+        self.assertEqual(code, 1)
+        self.assertIn("not in the snapshot", err)
+        # a file untouched since the pull is replaced by the newer Drive version; .orig beside a change is fine
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "SERIES.md",
+                                   "--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/script.md.orig")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.pd / "SERIES.md").read_bytes(), EP2)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "script.md.orig").read_bytes(), EP2)
+        self.assertNotIn("script.md.orig", self.snap_text())
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/script.md", "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(script.read_bytes(), EP2)
+
+    def test_no_snapshot_yet(self):
+        code, out, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/research.md")
+        self.assertEqual(code, 0, err)
+        self.assertIn("no .pulled.sha256 yet", out)
+        self.assertFalse((self.pd / ".pulled.sha256").exists())
+        code, _, err = self.save("--id", "FAKE-SUB-0006", "--to", "SERIES.md")            # exists, unknown origin
+        self.assertEqual(code, 1)
+        self.assertIn("no snapshot yet", err)
+        code, _, err = self.save("--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/EPISODE.md")  # same bytes
+        self.assertEqual(code, 0, err)
+
+    def test_new_project_folder(self):
+        code, out, err = self.run_tool("save", "projects/moi", "--id", "FAKE-EP-0001", "--to", "PROJECT.md")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.tmp / "projects" / "moi" / "PROJECT.md").read_bytes(), EP2)
+        self.assertIn("created   projects/moi/", out)
+        code, _, err = self.run_tool("save", "khac/moi", "--id", "FAKE-EP-0001", "--to", "PROJECT.md")
+        self.assertEqual(code, 2)
+        self.assertFalse((self.tmp / "khac").exists())
+
+    def test_paths_leaving_the_project(self):
+        (self.tmp / "elsewhere").mkdir()
+        os.symlink(self.tmp / "elsewhere", self.pd / "ep01-bac-thi" / "link")
+        (self.tmp / "projects" / "other").mkdir()
+        for to in ("../other/x.md", "projects/other/x.md", "out/other/x.md", str(self.tmp / "x.md"),
+                   ".hidden.md", "ep01-bac-thi/link/x.md", "ep01-bac-thi"):
+            code, _, err = self.save("--id", "FAKE-EP-0001", "--to", to)
+            self.assertEqual(code, 2, to)
+            self.assertIn("--to", err, to)
+        self.assertEqual(os.listdir(self.tmp / "elsewhere"), [])
+        self.assertFalse((self.tmp / "projects" / "other" / "x.md").exists())
+
+    def test_cli_groups(self):
+        for argv in (("--to", "a.md", "--id", "X"), ("--id", "X", "--to", "a.md", "--to", "b.md"),
+                     ("--id", "X", "--size", "abc", "--to", "a.md")):
+            code, _, _ = self.save(*argv)
+            self.assertEqual(code, 2, argv)
+        code, _, err = self.save("--id", "FAKE-EP-0001")
+        self.assertEqual(code, 2)
+        self.assertIn("--to", err)
+        code, _, err = self.save()
+        self.assertEqual(code, 2)
+
+
+class TestSnapshotOnly(DriveSyncCase):
+    def snap_text(self):
+        return (self.pd / ".pulled.sha256").read_text()
+
+    def test_first_snapshot_of_just_the_pulled_files(self):
+        self.write("ep01-bac-thi/notes.md", "tao truoc khi chup dau\n")
+        code, out, err = self.run_tool("snapshot", "projects/demo", "--only", "PROJECT.md", "SERIES.md",
+                                       "projects/demo/characters", "out/demo/ep01/ledger.csv")
+        self.assertEqual(code, 0, err)
+        keys = [l.split("  ", 1)[1] for l in self.snap_text().splitlines()]
+        self.assertEqual(keys, ["out/demo/ep01/ledger.csv", "projects/demo/PROJECT.md", "projects/demo/SERIES.md",
+                                "projects/demo/characters/bac-thi/CHARACTER.md"])
+        self.assertTrue((self.pd / ".pulled.at").exists())
+        self.assertIn("4 file(s) (--only", out)
+        code, plan = self.plan()
+        new = {a["local"] for a in plan["actions"] if a["status"] == "new"}
+        self.assertIn("projects/demo/ep01-bac-thi/notes.md", new)
+        self.assertNotIn("projects/demo/SERIES.md", new)
+
+    def test_refused_when_a_snapshot_exists(self):
+        self.snapshot()
+        before = self.snap_text()
+        code, _, err = self.run_tool("snapshot", "projects/demo", "--only", "SERIES.md")
+        self.assertEqual(code, 1)
+        self.assertIn("drive_sync.py pulled projects/demo", err)
+        self.assertEqual(self.snap_text(), before)
+        code, _, err = self.run_tool("snapshot", "projects/demo", "--only", "SERIES.md", "--force")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.snap_text().splitlines()), 1)
+
+    def test_errors(self):
+        code, _, err = self.run_tool("snapshot", "projects/demo", "--only", "SERIES.md", "--include-out", "out/demo")
+        self.assertEqual(code, 2)
+        code, _, err = self.run_tool("snapshot", "projects/demo", "--only", "nope.md")
+        self.assertEqual(code, 2)
+        self.assertFalse((self.pd / ".pulled.sha256").exists())
+
+
+class TestSnapshotKeepsOut(DriveSyncCase):
+    def test_snapshot_without_include_out_keeps_out_lines(self):
+        self.snapshot("--include-out", "out/demo")
+        line = f"{ds.sha256(self.out / 'ep01' / 'ledger.csv')}  out/demo/ep01/ledger.csv\n"
+        out = self.snapshot()
+        self.assertIn(line, (self.pd / ".pulled.sha256").read_text())
+        self.assertIn("2 out/ line(s) kept (no --include-out)", out)
+        code, plan = self.plan("--include-out", "out/demo")
+        self.assertEqual(plan["actions"], [])
+        self.snapshot("--include-out", "out/demo")              # not refused: the media lines are still there
+        code, _, err = self.run_tool("snapshot", "projects/demo", "--force")
+        self.assertEqual(code, 0, err)
+        self.assertIn(line, (self.pd / ".pulled.sha256").read_text())
+
+
+class TestSymlinkEscape(DriveSyncCase):
+    def setUp(self):
+        super().setUp()
+        outside = self.tmp / "secret.txt"
+        outside.write_text("not ours\n")
+        os.symlink(outside, self.pd / "ep01-bac-thi" / "link.md")
+        os.symlink(self.pd / "SERIES.md", self.pd / "ep01-bac-thi" / "series-link.md")    # inside: fine
+
+    def test_refused_everywhere(self):
+        code, _, err = self.run_tool("snapshot", "projects/demo")
+        self.assertEqual(code, 0, err)
+        self.assertIn("projects/demo/ep01-bac-thi/link.md: symlink to a file outside the project", err)
+        keys = [l.split("  ", 1)[1] for l in (self.pd / ".pulled.sha256").read_text().splitlines()]
+        self.assertNotIn("projects/demo/ep01-bac-thi/link.md", keys)
+        self.assertIn("projects/demo/ep01-bac-thi/series-link.md", keys)
+        for argv in (("pulled", "projects/demo", "ep01-bac-thi/link.md"),
+                     ("record", "projects/demo", "--uploaded", "ep01-bac-thi/link.md", "--id", "NEW")):
+            code, _, err = self.run_tool(*argv)
+            self.assertEqual(code, 2, argv)
+            self.assertIn("outside", err)
+        code, plan = self.plan()
+        self.assertEqual(code, 1)
+        self.assertIn({"local": "projects/demo/ep01-bac-thi/link.md", "reason": ds.ESCAPE_REASON}, plan["unmapped"])
+        self.assertNotIn("projects/demo/ep01-bac-thi/link.md", [a["local"] for a in plan["actions"]])
+        code, _, err = self.run_tool("pulled", "projects/demo", "ep01-bac-thi/series-link.md")
+        self.assertEqual(code, 0, err)
+
+
+LEDGER_HEAD = "ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note\n"
+ROW_A = "2026-11-10T10:00:00Z,image,m,2K,,1,ok,a.png,,,film-plate-maker,req=aa01\n"
+ROW_B = "2026-11-10T11:00:00Z,image,m,2K,,1,ok,b.png,,,film-plate-maker,req=bb02\n"
+
+
+class TestLedgerPreDone(DriveSyncCase):
+    def setUp(self):
+        super().setUp()
+        self.snapshot("--include-out", "out/demo")
+        (self.out / "ep01" / "ledger.csv").write_text(LEDGER_HEAD + ROW_A + ROW_B)
+
+    def pre(self):
+        code, plan = self.plan("--include-out", "out/demo")
+        return self.action(plan, "out/demo/ep01/ledger.csv")["pre"]["ledger_merge"]
+
+    def text(self):
+        _, out, _ = self.run_tool("plan", "projects/demo", "--include-out", "out/demo")
+        return out.split("CHANGED out/demo/ep01/ledger.csv", 1)[1]
+
+    def test_no_copies_yet(self):
+        self.assertNotIn("done", self.pre())
+        self.assertIn("this block says `pre done` once every copy is merged", self.text())
+
+    def test_done_when_every_copy_is_merged(self):
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + ROW_A)
+        (self.out / "ep01" / "ledger.drive-2.csv").write_text(LEDGER_HEAD)
+        pre = self.pre()
+        self.assertEqual((pre["done"], pre["unmerged"]), (True, []))
+        self.assertEqual(pre["copies"], ["out/demo/ep01/ledger.drive-1.csv", "out/demo/ep01/ledger.drive-2.csv"])
+        block = self.text()
+        self.assertIn("pre          done: every Drive copy (ledger.drive-1.csv, ledger.drive-2.csv) is merged", block)
+        self.assertNotIn("ledger-merge", block)
+
+    def test_not_done_lists_the_copy(self):
+        extra = "2026-11-10T12:00:00Z,video,v,720p,5,1,ok,c.mp4,t1,,film-animator,req=cc03\n"
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + ROW_A + extra)
+        pre = self.pre()
+        self.assertEqual((pre["done"], pre["unmerged"]), (False, ["out/demo/ep01/ledger.drive-1.csv"]))
+        block = self.text()
+        self.assertIn("ledger-merge", block)
+        self.assertIn("not merged yet: out/demo/ep01/ledger.drive-1.csv", block)
+
+    def test_a_second_identical_row_without_req_is_not_merged(self):
+        """Two identical old rows (no req=) are two requests to ledger-merge: one local copy of it is not enough."""
+        old = "2026-11-09T09:00:00Z,image,m,2K,,1,ok,o.png,,,film-plate-maker,\n"
+        (self.out / "ep01" / "ledger.csv").write_text(LEDGER_HEAD + old + ROW_A + ROW_B)
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + old + old)
+        self.assertEqual(self.pre()["unmerged"], ["out/demo/ep01/ledger.drive-1.csv"])
+
+    def test_a_copy_that_bills_more_for_a_request_is_not_merged(self):
+        more = ROW_A.replace(",1,ok,", ",2,ok,")
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + more)
+        self.assertEqual(self.pre()["unmerged"], ["out/demo/ep01/ledger.drive-1.csv"])
 
 
 if __name__ == "__main__":

@@ -96,11 +96,11 @@ class CodeEpisode(TmpDirCase, unittest.TestCase):
 
 
 class CodeStyles(unittest.TestCase):
-    """The eleven engine: code style packs pass the style check and agree with looks.json."""
+    """The twelve engine: code style packs pass the style check and agree with looks.json."""
     IDS = ["dat-nan-3d", "hoat-hinh-phang", "ban-ve-ky-thuat", "in-riso", "pixel-16bit",
-           "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up"]
+           "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up", "thuy-mac-3d"]
 
-    def test_all_eleven_pass(self):
+    def test_all_twelve_pass(self):
         for sid in self.IDS + ["_template-code"]:
             with self.subTest(style=sid):
                 code, out, _ = run_main(ce.main, ["style", str(REPO / "styles" / sid)])
@@ -120,6 +120,29 @@ class CodeStyles(unittest.TestCase):
         self.assertIn("render.post 'sepia'", text)
         self.assertIn("render.hold 9", text)
         self.assertIn("render.palette.sky", text)
+
+    def test_ink_style_uses_the_thuy_mac_palette(self):
+        import yaml
+        ink = yaml.safe_load((REPO / "styles" / "thuy-mac-3d" / "style.yaml").read_text(encoding="utf-8"))
+        img = yaml.safe_load((REPO / "styles" / "thuy-mac" / "style.yaml").read_text(encoding="utf-8"))
+        self.assertEqual(ink["render"]["look"], "ink-wash-3d")
+        for k in ("ink", "grey", "paper", "ochre", "accent"):
+            self.assertEqual(ink["palette"][k].upper(), img["palette"][k].upper(), k)
+
+    def test_creature_presets_and_cli_helpers(self):
+        toon = load("toon/toon.py", "film_toon_cli")
+        self.assertEqual(toon.creature_presets(), ["luc-tuc-ngu", "mac-loc", "van-dieu"])
+        for c in toon.creature_presets():
+            spec = toon.creature_of(c)
+            self.assertIn("demo", spec)
+            self.assertIn("Original design", spec["note"])
+        render = toon.style_render("thuy-mac-3d")[0]
+        self.assertTrue(toon.draws_creatures(render))
+        self.assertFalse(toon.draws_creatures(toon.style_render("hoat-hinh-phang")[0]))
+        sc = toon.scene_for(render, None, creature=toon.creature_of("luc-tuc-ngu"))
+        self.assertIs(sc["env"]["water"], True)
+        self.assertIn("creature", sc["cast"][0])
+        self.assertEqual(sc["camera"], toon.creature_of("luc-tuc-ngu")["demo"]["camera"])
 
     def test_looks_json_matches_kit(self):
         looks = json.loads((REPO / "tools" / "toon" / "looks.json").read_text(encoding="utf-8"))

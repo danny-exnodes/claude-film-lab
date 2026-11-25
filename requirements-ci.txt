@@ -1,0 +1,6 @@
+# Python packages for the free test suite (tools/ci.sh --install; docs/ci/tests.yml).
+# No rembg, onnxruntime or torch: the tests that need them skip cleanly. PyYAML = the pin in requirements.txt.
+numpy==2.5.5
+scipy==1.18.1
+pillow==13.0.0
+PyYAML==6.0.3

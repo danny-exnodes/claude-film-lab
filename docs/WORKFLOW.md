@@ -109,6 +109,8 @@ Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-m
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Kiểm ngân sách và ghi dòng `pending` nằm trong cùng
   một khóa, nên agent song song không vượt trần (CONVENTIONS §7).
+- Agent (có `FILM_AGENT`) không dùng được `--no-budget` hay `--force` (mã 2). Request mồ côi (dòng `pending` không bao
+  giờ có dòng cuối) đóng bằng `ark.py ledger-close --req <id> --ledger L --status abandoned`: vẫn tính vào trần.
 - Ảnh pro/4K đi qua Lambda (`lambda/README.md`) và vẫn vào cùng ledger: `ark.py lambda-job prepare` (kiểm trần, dòng
   `pending`, in payload) → Invoke → `ark.py lambda-job finish` (dòng cuối). Không có ledger thì không gọi Lambda.
 - Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm (ghi vào `## Nhật ký` của EPISODE.md khi bắt đầu khâu 4–6). Có

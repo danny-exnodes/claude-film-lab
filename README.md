@@ -36,7 +36,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/audio/` | Âm thanh tổng hợp local: dây gảy (cổ cầm, tỳ bà, koto), tiếng động theo sự kiện, `score.py` xuất stem WAV từ bản nhạc JSON |
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
 | `tools/layers/matte_seq.py` | Tách nền cả clip Seedance thành chuỗi khung, kèm số đo nhấp nháy |
-| `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài riêng, xem `tools/tts/README.md` |
+| `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài sẵn bởi `docs/setup-script.sh` (`requirements-tts.txt`), xem `tools/tts/README.md` |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (không tính phí) |
 | `docs/BACKLOG.md` | Lỗi đã biết chưa sửa và việc hoãn lại sau đợt kiểm toán 2026-11-10 |

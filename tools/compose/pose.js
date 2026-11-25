@@ -15,7 +15,8 @@
 // A pose plate or an anchor that is missing gives a warning and that frame shows frame 0.
 // Per shot: st.plate('L4', { poses: false }) draws the host plate itself; { poses: { start: 12.5, timeline: [...] } }.
 // Timelines: COMPOSE.pose.sequence / walk / once (below). There is no position or rotation tween here on purpose (the
-// sliding cut-out look); a slow drift of the whole figure belongs to the camera. Load pose.js after stage.js.
+// sliding cut-out look); a slow drift of the whole figure belongs to the camera. stage.js drawPlate asks
+// COMPOSE.pose.route first, so pose.js may load anywhere after stage.js.
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
@@ -26,7 +27,6 @@
   const stepOf = (t, cfg) => Math.floor((t - (cfg.start ?? 0)) * fpsOf(cfg) + EPS);
 
   function prepare(p) {
-    install();
     if (!p.rig || !p.rig.poses) return;
     const cfg = { ...p.rig.poses }, ids = Array.isArray(cfg.frames) ? cfg.frames : [];
     const warn = (m) => C.warn(`plate ${p.id}: poses: ${m}`);
@@ -94,6 +94,21 @@
       }
       return Number.isInteger(f) && f >= 0 && f < n ? f : 0;
     },
+    // Called first by stage.js drawPlate: a host with a pose rig draws the pose plate(s) of the moment, each through
+    // drawPlate with its own rigs, and returns true; any other plate (or { poses: false }) returns false.
+    route(st, p, o = {}) {
+      if (!p || !p.poses || o.poses === false) return false;
+      const { poses, ...rest } = o;
+      const cfg = poses && typeof poses === 'object' ? { ...p.poses.cfg, ...poses } : p.poses.cfg;
+      const parts = C.pose.at(o.t ?? st.t, cfg, p.poses.views.length);
+      // a dissolve: the heavier pose at full strength, the other over it at its weight; where both are opaque the
+      // mix is exact and the body never turns translucent
+      parts.forEach((part, i) => {
+        const v = p.poses.views[part.frame];
+        C.drawPlate(st, v.id, i === 0 ? rest : { ...rest, alpha: (rest.alpha ?? 1) * part.weight });
+      });
+      return true;
+    },
     frame: (t, cfg = {}, n = Infinity) => C.pose.frameAtStep(stepOf(t, cfg), cfg, n),
     // What is drawn at t: [{ frame, weight }], one entry, or two during a cross-dissolve (the heavier one first, the
     // incoming one first on a tie). The weights sum to 1.
@@ -112,15 +127,21 @@
     // Timeline builders. Each returns { timeline, end } or { timeline, loop } to spread into rig.poses next to
     // `frames`; times land on the fps grid. steps: [[frame, seconds held], ...] (a bare frame index is held o.step).
     //   sequence(steps, { at: 0, fps: 8, step: 0.25, repeat: 1, loop: false })
+    // A hold, step, at or repeat that is not a finite number (a typo, 0 / 0) is a warning and its default is used:
+    // one NaN would make every later time NaN, and the pose would freeze on its first frame.
     sequence(steps, o = {}) {
-      const fps = fpsOf(o), step = o.step ?? 0.25, timeline = [];
-      let k = Math.round((o.at ?? 0) * fps), last = null;                 // whole grid steps: no drift
-      for (let r = 0; r < Math.max(1, o.repeat ?? 1); r++) {
-        for (const s of steps) {
+      o = o && typeof o === 'object' ? o : {};
+      const bad = (what, v, d) => { C.warn(`pose.sequence: ${what} ${v} is not a number; ${d} used`, `pose-seq:${what}:${v}`); return d; };
+      const val = (what, v, d) => (v == null ? d : Number.isFinite(+v) && v !== '' && typeof v !== 'boolean' ? +v : bad(what, v, d));
+      const fps = fpsOf(o), step = Math.max(0, val('step', o.step, 0.25)), timeline = [];
+      let k = Math.round(val('at', o.at, 0) * fps), last = null;          // whole grid steps: no drift
+      const repeat = Math.max(1, Math.round(val('repeat', o.repeat, 1)));
+      for (let r = 0; r < repeat; r++) {
+        for (const s of Array.isArray(steps) ? steps : []) {
           const [frame, hold] = Array.isArray(s) ? s : [s, step];
           if (frame !== last) timeline.push({ at: k / fps, frame });
           last = frame;
-          k += Math.max(1, Math.round((hold ?? step) * fps));
+          k += Math.max(1, Math.round(val('hold', hold, step) * fps));
         }
       }
       return o.loop ? { timeline, loop: k / fps } : { timeline, end: k / fps };
@@ -142,25 +163,5 @@
     },
   };
 
-  // st.plate(host) draws the pose plate(s) of the moment in the host's place, each with its own rig.
-  function install() {
-    if (C.pose.installed || !C.drawPlate) return;
-    C.pose.installed = true;
-    const base = C.drawPlate;
-    C.drawPlate = (st, id, o = {}) => {
-      const p = C.plates[id];
-      if (!p || !p.poses || o.poses === false) return base(st, id, o);
-      const { poses, ...rest } = o;
-      const cfg = poses && typeof poses === 'object' ? { ...p.poses.cfg, ...poses } : p.poses.cfg;
-      const parts = C.pose.at(o.t ?? st.t, cfg, p.poses.views.length);
-      // a dissolve: the heavier pose at full strength, the other over it at its weight; where both are opaque the
-      // mix is exact and the body never turns translucent
-      parts.forEach((part, i) => {
-        const v = p.poses.views[part.frame];
-        C.drawPlate(st, v.id, i === 0 ? rest : { ...rest, alpha: (rest.alpha ?? 1) * part.weight });
-      });
-    };
-  }
   C.onRig('pose', prepare);
-  install();
 })(typeof window !== 'undefined' ? window : globalThis);

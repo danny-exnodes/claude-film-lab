@@ -184,6 +184,7 @@
     }
     return C.clamp(v);
   }
+  T.autoBlink = autoBlink;              // shared with creature.js
 
   // window weight of an overlay clip: 0 outside, eases in/out over `fade` s
   const win = (c, t, fade = 0.2) => {

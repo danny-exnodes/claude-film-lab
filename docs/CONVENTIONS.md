@@ -64,25 +64,30 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Bản làm việc dự án | `projects/<project>/` (git bỏ qua) | `projects/son-hai-kinh/` |
 | Thư mục tập (chữ) | `projects/<project>/ep<NN>-<slug>/` · `projects/<project>/q<NN>-t<NN>-<slug>/` | `projects/son-hai-kinh/ep01-bac-thi/` · `projects/son-hai-kinh/q01-t01-nam-son-kinh/` |
 | Thư mục tập (media) | `out/<project>/<id>/` | `out/son-hai-kinh/ep01/` · `out/son-hai-kinh/q01t01/` |
-| Shot id | `s<NN>` (2 chữ số, tăng dần) | `s03` |
+| Shot id | `s<NN>` (2 chữ số) hoặc `s<NNN>` (3 chữ số, tập trên 99 shot), tăng dần; một tập một độ dài | `s03` · `s103` |
 | Lớp tranh | `<id>_s<NN>_<lớp>_<chủ-thể>_v<NN>.<png\|jpg>` | `ep01_s03_L4_bac-thi_v02.png` · `q01t01_s03_L4_bac-di_v02.png` |
-| Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` |
+| Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `L4b`…`L4z` tư thế · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` · `L4b` |
 | Clip AI | `<id>_s<NN>_<model-ngắn>_v<NN>.mp4` | `ep01_s03_seedance25_v01.mp4` · `q01t01_s03_seedance25_v01.mp4` |
 | Bản dựng | `<id>_<draft\|final>_v<NN>.mp4` | `ep01_draft_v03.mp4` · `q01t01_draft_v01.mp4` |
 
-Regex chuẩn (dùng trong `tools/check_episode.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`):
+Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho `check_episode.py`, `status.py`, `bundle.py`,
+`drive_sync.py`, `layers/anchors.py`, `layers/matte.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`, `<S>` = `s(?:\d{2}|\d{3})`,
+`<L>` = `(?:L[1-4]|L4[b-z]|P\d+-[a-z0-9-]+|FX)`):
 - mã tập: `^(?:ep\d{2}|q\d{2}t\d{2})$`; thư mục tập: `^(?:ep\d{2}|q\d{2}-t\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$`
-- lớp: `^<ID>_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$`
-- clip: `^<ID>_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$`
+- shot: `^s(\d{2}|\d{3})$`; một tập dùng một độ dài (cả `s<NN>` hoặc cả `s<NNN>`), trộn hai độ dài là ERROR
+- lớp: `^<ID>_<S>_<L>_[a-z0-9-]+_v\d{2}\.(png|jpg)$`
+- clip: `^<ID>_<S>_[a-z0-9]+_v\d{2}\.mp4$`
 - bản dựng: `^<ID>_(draft|final)_v\d{2}\.mp4$`
-- khung đầu Seedance (trong `clips/`): `^<ID>_s\d{2}_start_v\d{2}\.png$`
+- khung đầu Seedance (trong `clips/`): `^<ID>_<S>_start_v\d{2}\.png$`
 - khung của clip: thư mục `clips/<tên clip không đuôi>/` (tên khớp regex clip, bỏ `.mp4`) chỉ chứa `^\d{6}\.png$`
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
 Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
-`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4`
-(`matte.py --layer L4`). Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4` (`matte.py`
+tự dùng `matte.per_layer.L4` cho `L4b`…, trừ khi style có khóa `L4b` riêng; `anchors.py` nhận file `L4b`). Tập
+`seedance` có `L4b` trong `layers` → WARN. Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+Khóa `L4b:` trong `PLATES` mà `matte_seq.py` in ra cho clip Seedance là tên lớp trong film.html, không phải mã lớp.
 
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/<id>/{plates,clips,renders}/`.
 Stem âm thanh của `tools/audio/score.py`: `out/<project>/<id>/audio/` (`music.wav`, `foley.wav`, `ambience.wav`,
@@ -180,7 +185,7 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
 | `score.json` | film-compositor | (tuỳ chọn) nhạc code và foley theo sự kiện cho `tools/audio/score.py`: `length_s`, `seed`, `scale`, `music`, `foley`, `silence` (`tools/audio/README.md`; mẫu `templates/episode/score.json`). Dữ liệu dự án: không commit, đẩy lên Drive như file chữ khác. Phần `music` chỉ khi người dùng đã chọn nhạc code |
-| `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-<v>.txt` |
+| `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-v<N>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
 
@@ -212,9 +217,11 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 gọi model nào. Không phân biệt hoa thường; giá trị khác → ERROR `method must be layers, seedance or code`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
 mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
 hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7). Với `code`: ERROR khi `images`, `video_seconds` hoặc
-bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
+bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`M-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
 style của tập không phải `engine: code` (và ngược lại: style `engine: code` chỉ cho tập `code`); không cần `prompts.csv`
 (có thì WARN). Nhân vật khóa ở G2 là `characters/<slug>/character.json` + `review/turntable-<slug>.png`.
+Một khóa ghi hai lần trong khối YAML (vd. `method: layers` rồi `method: seedance`) là ERROR: YAML lặng lẽ giữ giá trị sau
+(cũng vậy với `budget.yaml`).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
@@ -222,17 +229,22 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 
 `shots.csv`:
 `shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of`
-- `shot` = `s<NN>`; `from_s`/`to_s` số giây (thập phân được), liên tục: `from_s` = `to_s` shot trước; shot đầu từ 0; shot cuối kết thúc = `length_s`.
+- `shot` = `s<NN>` (`s01`…`s99`) hoặc `s<NNN>` (`s001`…`s999`, tập trên 99 shot); cả tập một độ dài, trộn là ERROR. `from_s`/`to_s` số giây (thập phân được), liên tục: `from_s` = `to_s` shot trước; shot đầu từ 0; shot cuối kết thúc = `length_s`.
 - Thời lượng mỗi shot 3–13 s. `shot_size` ∈ `extreme-wide, wide, medium, close, extreme-close, insert`.
 - `camera` = một chuyển động (`static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down, drift, handheld`).
   Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
   Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
-  Tập `method: code`: `layers` = `C-<nhân vật>`, `E-<bối cảnh>`, `FX` hoặc `FX-<hiệu ứng>`, `T` (chữ trên hình);
-  `camera` nhận thêm `orbit, dolly, crane, track`; `code_motion` dùng id `engine: toon` của `motions.json` (`walk-cycle`,
-  `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`); `ai_motion` trống.
+  Tập `method: code`: `layers` = `C-<nhân vật>` hoặc `M-<model>` (model 3D, đạo cụ), `E-<bối cảnh>`, `FX` hoặc
+  `FX-<hiệu ứng>`, `T` (chữ trên hình); `camera` nhận thêm `orbit, dolly, crane, track` và mọi id `engine: toon` có
+  `module` `toon/project.js` trong `motions.json`; `code_motion` dùng id `engine: toon` của `motions.json` (`walk-cycle`,
+  `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`…; checker đọc thẳng sổ đăng ký, id
+  mới thêm vào đó là hợp lệ ngay); id compose rig lớp tranh (`PLATES.<id>.rig…`: `cloth`, `strip-warp`…) là WARN;
+  `ai_motion` trống. Ngược lại, id `engine: toon` ở tập `layers`/`seedance` là WARN.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
+- Từ khâu 8 (G3), tập `seedance`: shot có `ai_motion` phải có clip `<id>_<shot>_<model>_v<NN>.mp4` trong `clips/` (shot có
+  `reuse_of` dùng clip của shot gốc; clip `approved=no` không tính), thiếu là ERROR.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp
   tranh); id lạ là WARN.
@@ -241,6 +253,9 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 `file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link`
 - `file` theo quy ước tên §2; `prompt_file` đường dẫn tương đối tới file prompt đã dùng (lưu trong thư mục tập, `prompts/`).
 - `refs` cách nhau bởi `;`; `usage` = JSON usage Ark nguyên văn; `approved` ∈ `yes, no, ''`.
+- Mỗi cặp (shot, lớp) chỉ một ảnh `approved=yes` và một clip `approved=yes` (dòng clip ghi lớp nó thay, nên L4 duyệt +
+  clip duyệt là hợp lệ); hai bản duyệt là ERROR. File trong `plates/` (không tính `plates/matte/`) không có dòng nào
+  trong `prompts.csv` → một WARN liệt kê (ảnh trả tiền chưa ghi prompt, hoặc file thử để nhầm chỗ).
 
 ## 7. Ngân sách và ledger (`tools/ark.py --budget/--ledger`)
 
@@ -255,18 +270,28 @@ ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có:
 `ledger.csv` (đặt ở `out/<project>/<id>/ledger.csv`; bản gốc trên Drive `04_SanXuat/<thư mục tập>/ledger.csv`, kéo về đầu
 phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
 `ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note`
-- `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
+- `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, abandoned, failed-unsent, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
 - Ngân sách không phải tuỳ chọn: `ark.py image|video` từ chối (thoát mã 2, không gọi API, không ghi ledger) nếu thiếu
   budget **hoặc** ledger (cờ `--budget/--ledger` hoặc env `FILM_BUDGET/FILM_LEDGER`); `--budget` không có ledger là lỗi.
-  Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính, agent không dùng.
+  Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính. Có biến
+  `FILM_AGENT` (agent) thì `--no-budget` và `--force` bị từ chối, mã 2, không gửi gì.
 - Mỗi request ghi dòng bằng khoá file (`fcntl.flock`, agent chạy song song):
   - trước lệnh POST tạo ảnh/video: một dòng `pending`, `note` = `req=<uuid4 hex>`;
   - video: có task id là ghi ngay dòng `pending` thứ hai có `task_id` (cùng `req=`) và in task id ra – còn lại cả khi bị SIGKILL;
-  - khi xong: một dòng cuối `ok`, `failed` hoặc `cut-502` cùng `req=` (`note` = `req=<id>; <chi tiết>`).
+  - khi xong: một dòng cuối `ok`, `failed` hoặc `cut-502` cùng `req=` (`note` = `req=<id>; <chi tiết>`). Phản hồi không
+    có dữ liệu ảnh → `failed` (`no image in the response`). Phản hồi nhiều ảnh: ảnh thứ n lưu `<stem>-<n><ext>`, file
+    đó đã có (hoặc là `out` của dòng khác trong lô) thì `<stem>-<n>-<8 ký tự đầu của req><ext>`: không ghi đè file nào.
   SIGTERM/SIGINT → dòng `failed` (`interrupted by SIGTERM`, video có `task_id`); SIGKILL → chỉ còn `pending`, vẫn tính là đã tính phí.
 - Cách đếm: gom các dòng theo `req=` (dòng không có `req=` nhưng có `task_id` thì gom theo `task_id`); mỗi request tính
   **một lần** theo dòng cuối (`ok/failed/cut-502`) mới nhất, chưa có dòng cuối thì theo dòng `pending` (coi như đã tính phí).
   Dòng không có cả `req=` lẫn `task_id` (ledger cũ) mỗi dòng tính một lần như trước. `refused-budget` không tính.
+  `abandoned` (dòng cuối do `ledger-close` ghi) vẫn tính; `failed-unsent` (job Lambda chưa gửi gì) đóng request và
+  **không** tính. `req=` chỉ nhận cả cụm chữ hex thường, sau đó là `;`, khoảng trắng hoặc hết `note`.
+- Request mồ côi (dòng `pending` không bao giờ có dòng cuối: agent bị giết khi đang gọi API ảnh, job Lambda đã
+  `prepare` mà không Invoke): `ark.py ledger-close --req <id> --ledger L --status abandoned [--note …]` ghi dòng
+  `abandoned` (vẫn tính vào trần, `tools/status.py` không còn báo OPEN). Từ chối (mã 2, không ghi) khi request
+  không có dòng `pending` hoặc đã có dòng cuối. Video còn `task_id` thì thử `video --resume-task` trước;
+  `ark.py video --resume-pending --ledger L` chạy `--resume-task` cho mọi task video đang mở của ledger, lần lượt.
 - Trước khi gọi API: tổng đã dùng + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget` (không có `pending`), thoát mã 3.
 - Kiểm và giữ chỗ là **một bước nguyên tử**: một khoá `LOCK_EX` trên `ledger.csv` bao quanh việc đọc ledger, cộng tổng
   và ghi dòng `pending` (hoặc `refused-budget`), rồi mới mở khoá. Việc chậm (nén ảnh `--ref`, đọc khung đầu, tạo thư mục,
@@ -292,7 +317,10 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
 - **Ảnh qua Lambda** (pro, 4K; `lambda/README.md`) dùng cùng ledger và cùng cách đếm:
   `ark.py lambda-job prepare` làm đúng bước nguyên tử ở trên (dòng `pending`, `note` = `req=<id>; lambda`, vượt trần →
   `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
-  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
+  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`); job `failed`
+  có `sent: false` → `failed-unsent` (không tính); job còn `running` quá `deadline` + 60 s → báo worker đã chết, mã 1,
+  `--give-up` ghi `failed` (vẫn tính); status không phải object JSON hay `--image` không phải ảnh (trang lỗi S3) → mã 2,
+  không ghi gì; `worker_sha256` khác `lambda/ark_image_worker.py` của repo → WARN. Không gọi
   Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
 - **Tạo ảnh theo lô** (`ark.py image-batch JOBS.csv --budget B --ledger L [--parallel N] [--dry-run] [--only ID …] [--fast]`):
   mỗi dòng CSV (`id,prompt,out,size,model,ref,seed,negative`; `prompt` dạng `@file` đọc từ file cạnh CSV, `ref` cách nhau
@@ -305,8 +333,12 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   (mã 130/143) thì thôi không bắt đầu dòng mới, dòng đang chạy vẫn ghi dòng cuối. Mã 1 = có request đã rời máy và lỗi.
   `--dry-run` chỉ kiểm và in kế hoạch, không ghi ledger. Chi tiết: `ark.py image-batch --help`.
 - **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
-  `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
-  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
+  `(req, status, task_id)` (hai bản khác nhau ở cột khác: giữ dòng tính nhiều hơn; kết quả không phụ thuộc thứ tự
+  đầu vào); dòng cũ không có `req=` gộp theo bội: mỗi dòng giống hệt giữ số lần nhiều nhất trong một bản (hai dòng
+  giống hệt trong một bản là hai request); sắp theo `ts`, `pending` trước dòng cuối của cùng thời điểm; ghi `OUT`
+  dưới `LOCK_EX`. Mọi dòng của mọi bản (kể cả `OUT`) được kiểm trước: header, số ô, `ts`, `kind`, `status`, `count`,
+  `seconds`, `req=`; lỗi in `<file>:<dòng>: <lý do>`, mã 2, không ghi gì. Bản gộp phải tính mỗi request ít nhất bằng
+  từng bản (trừ request đã đóng `failed-unsent`), không thì mã 2 `the copies disagree`: sửa tay rồi gộp lại. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
   không (gộp không bao giờ làm mất dòng đã tính phí). Dùng mỗi khi có hai bản ledger
   của một tập (hai phiên, hai file trên Drive, bản Drive + bản trong container): **không bao giờ** "lấy bản mới nhất"
   cho ledger, vì bản kia chứa các request đã tính phí (§11.6).
@@ -338,7 +370,7 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 | Ngân sách ghi bằng prompt | `ark.py --budget/--ledger` chặn trong công cụ |
 | `cost_note` | `usage` JSON nguyên văn (API không trả tiền) |
 | Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); ảnh pro/4K từ Lambda tải từ S3 về `out/` rồi vào gói như mọi ảnh. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
-| Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-<v>.txt` |
+| Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-v<N>.txt` |
 | Song song plate-maker | Tối đa 3 agent song song; ledger dùng khoá file |
 | Kiểm tra kịch bản bằng mắt | `tools/check_episode.py` kiểm schema, thời lượng, nhịp, tên file |
 | Ảnh `--ref` nặng | `ark.py` nén ref thành JPEG q90, cạnh ≤ 2048 trước khi gửi |
@@ -452,8 +484,18 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 1. `PROJECT.md`: ID thư mục lấy từ người dùng hoặc tìm một lần `parentId = '<lab_root>'` → `<ProjectName>` →
    `00_QuanLy`; tải `PROJECT.md` về `projects/<project>/PROJECT.md`.
 2. Với mỗi thư mục cần (bảng §11.3: kinh thư, tập đang làm, ledger): `search_files` với
-   `parentId = '<id>' and trashed = false`, tải từng file chữ (`download_file_content`, giải base64) về đúng đường dẫn;
-   thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
+   `parentId = '<id>' and trashed = false`, tải từng file chữ bằng `download_file_content` rồi **ngay sau đó** ghi
+   xuống đĩa: `python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <đường dẫn> --size <fileSize>`
+   (nhiều nhóm `--id … --to … --size …` trong một lệnh được). Connector trả base64 vào hội thoại, không ghi ra đĩa;
+   `save` đọc kết quả mới nhất của ID đó trong bản ghi phiên (`~/.claude/projects/<thư mục repo>/*.jsonl`, cả
+   `subagents/`; không thấy thì mọi dự án; bản ghi khác: `--transcript <glob>`), giải base64 (chuẩn hoặc url-safe), so
+   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). **Không bao giờ chép lại
+   chuỗi base64 bằng tay** (tốn gấp đôi ngữ cảnh, sai một ký tự là hỏng file). Mỗi file vẫn đi qua ngữ cảnh một lần
+   (≈ 1,33 × kích thước file), nên vẫn kéo theo khâu, không kéo cả cây. `--to` tương đối với `projects/<project>/`,
+   hoặc bắt đầu bằng `projects/<project>/` / `out/<project>/`; đường dẫn ra ngoài dự án (kể cả qua symlink) bị từ chối.
+   `save` từ chối (mã thoát 1, không ghi gì) khi file đích có thay đổi chưa đẩy: muốn so với bản Drive thì lưu cạnh
+   nó (`--to <file>.orig`, file tạm không bao giờ đẩy); `--force` chỉ khi chắc chắn bỏ phần sửa. Không in nội dung file.
+   Thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
    cũ vào `99_LuuTru/` theo bước 3 của mục đẩy. **Ngoại lệ `ledger.csv`:** tải **mọi** bản về
    (`out/<project>/ep<NN>/ledger.drive-1.csv`, `…-2.csv`) rồi gộp, không chọn bản mới nhất:
@@ -466,6 +508,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    từ chối (mã thoát 1, không ghi gì) khi còn thay đổi chưa đẩy, vì chụp lại sẽ đánh dấu chúng là đã đẩy; `--force`
    chỉ dùng khi chắc chắn bỏ các thay đổi đó khỏi danh sách đẩy. File tạm (`*.b64`, `*.orig`, `*.bak`, `*.tmp`,
    `*.part`, `*~`) và `ledger.drive-*.csv` không vào dấu, không vào danh sách đẩy.
+   Lỡ tạo file mới trước lần chụp dấu đầu: `snapshot projects/<project> --only <các file/thư mục vừa kéo>` chỉ chụp
+   những file đó (file khác vẫn là NEW); đã có snapshot thì `--only` từ chối, dùng `pulled`. `snapshot` không có
+   `--include-out` giữ nguyên các dòng `out/<project>/…` của dấu cũ. File là symlink trỏ ra ngoài `projects/<project>/`
+   và `out/<project>/` không vào dấu; `plan` in nó là UNMAPPED, `pulled`/`record`/`save` từ chối.
    Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
    `find projects/<project>` in ra, media dạng `out/<project>/…`; không có file nào bắt đầu bằng `.`) và
    `projects/<project>/.pulled.at` (`2026-11-10T15:30:00Z`). Tương đương bằng shell khi không chạy được công cụ:
@@ -512,7 +558,9 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    after every stage that generated; no approval gate` – ledger không chờ duyệt như media. Tải bản đang ở Drive về
    `out/<project>/ep<NN>/ledger.drive-1.csv`, `ark.py ledger-merge out/<project>/ep<NN>/ledger.csv
    out/<project>/ep<NN>/ledger.drive-1.csv -o out/<project>/ep<NN>/ledger.csv`, xoá bản tạm, rồi mới đẩy bản đã gộp
-   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào).
+   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào). Khi các
+   `ledger.drive-<n>.csv` còn trên đĩa và mọi dòng của chúng đã có trong ledger, `plan` in `pre done` (JSON:
+   `done: true`, `unmerged: []`) thay cho các bước: xoá bản tạm rồi tải lên.
 4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
    trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
    dùng), xung đột thì hỏi người dùng; rồi mới đẩy. Với file NEW, mọi kết quả `search_files` có ID không nằm trong

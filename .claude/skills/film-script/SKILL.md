@@ -93,7 +93,8 @@ Mốc tăng dần, nằm trong `length_s`. Không dùng dấu gạch ngang ở b
 
 `shots.csv` theo CONVENTIONS §6, header đúng thứ tự:
 `shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of`
-- `shot` = `s01, s02…`; liên tục từ 0 tới `length_s`; mỗi shot 3–13 s.
+- `shot` = `s01, s02…` (tối đa `s99`); tập trên 99 shot (tập dài, tập `code`) dùng ba chữ số từ shot đầu: `s001, s002…`
+  (tối đa `s999`), không trộn hai kiểu. Liên tục từ 0 tới `length_s`; mỗi shot 3–13 s.
 - `shot_size` ∈ extreme-wide, wide, medium, close, extreme-close, insert; `camera` ∈ static, push-in, pull-out,
   pan-left, pan-right, tilt-up, tilt-down, drift, handheld (một giá trị).
 - `layers`: `L1;L2;L3;L4;P<n>-<bộ-phận>;FX`. `code_motion`: id module của style (`style.yaml` → `motion`).
@@ -106,9 +107,9 @@ Mốc tăng dần, nằm trong `length_s`. Không dùng dấu gạch ngang ở b
 bản cần thứ nhánh đang dùng không làm được: ghi vào báo cáo cho đạo diễn, không lén dùng nhánh kia.
 
 **`method: code`** (vẽ hoàn toàn bằng code, `.claude/skills/film-compose-shot/references/code-method.md` §4–§5):
-`ai_motion` trống; `layers` = `C-<nhân vật>;E-<bối cảnh>[;FX-<hiệu ứng>][;T]`; `code_motion` = hành động của rig
-(`walk-cycle`, `run-cycle`, `turn`, `wave`, `cheer`, `point`, `jump`, `bounce`, `look-at`); `camera` có thêm `orbit`,
-`dolly`, `crane`, `track`. Hành động liên tục được (đi, chạy, nhảy, quay người) vì chân không trượt; một hành động chính
+`ai_motion` trống; `layers` = `C-<nhân vật>` (hoặc `M-<model>` cho model 3D, đạo cụ)`;E-<bối cảnh>[;FX-<hiệu ứng>][;T]`;
+`code_motion` = hành động của rig, id `engine: toon` trong `tools/compose/motions.json` (`walk-cycle`, `run-cycle`,
+`turn`, `wave`, `cheer`, `point`, `jump`, `bounce`, `look-at`…); `camera` có thêm `orbit`, `dolly`, `crane`, `track`. Hành động liên tục được (đi, chạy, nhảy, quay người) vì chân không trượt; một hành động chính
 mỗi shot. Không viết thứ rig không có (cầm nắm đồ vật, nhiều nhân vật chạm nhau, nước chảy): ghi vào báo cáo.
 
 **`method: layers`** (chỉ ảnh + code, không Seedance; bảng tra đầy đủ:

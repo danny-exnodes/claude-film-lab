@@ -7,11 +7,15 @@ thời gian chạy thật), gọi API ảnh Ark trực tiếp nên không bị g
 - `jobs/<job_id>.json` – trạng thái `running` → `succeeded` | `failed` (model, usage, seconds, error) và:
   - `sent` – `false` cho tới lúc request đi tới Ark. Job `failed` có `sent: false` (secret sai dạng, thiếu ảnh
     tham chiếu, thiếu prompt) **chưa gửi gì, không tạo ảnh**; `sent: true` thì coi như có thể đã tính phí.
-    (`lambda-job finish` hiện vẫn ghi cả hai loại là `failed` và vẫn tính vào trần.)
+    `lambda-job finish` ghi job `sent: false` là `failed-unsent` (đóng request, không tính vào trần), còn lại là `failed`
+    (vẫn tính).
   - `deadline` (khi `running`) – giây epoch mà Lambda sẽ cắt lần chạy này. Quá `deadline` + 60 s mà vẫn `running`
-    thì worker đã chết (hết giờ/hết bộ nhớ): **ngừng đọc lại**, không Invoke lại, báo người dùng.
+    thì worker đã chết (hết giờ/hết bộ nhớ): **ngừng đọc lại**, không Invoke lại, báo người dùng. `lambda-job finish`
+    nhận ra trường hợp này (thoát mã 1, in lệnh); đóng request bằng `lambda-job finish … --give-up` (dòng `failed`,
+    vẫn tính).
   - `worker_sha256` – sha256 của file worker đang chạy; phải bằng `sha256sum lambda/ark_image_worker.py`
     (hoặc `python3 lambda/build_deploy.py --check`). Khác → đang chạy bản cũ, triển khai lại trước job kế tiếp.
+    `lambda-job finish` so trường này với file trong repo và in `WARN` khi khác (hoặc khi thiếu).
 
 **Quy tắc:** một lần gọi Lambda đi thẳng tới Ark, không qua `ark.py image`, nên **mọi job phải đi qua
 `ark.py lambda-job prepare` → Invoke → `ark.py lambda-job finish`**. Không có ledger thì không gọi Lambda; `job_id`
@@ -88,12 +92,18 @@ result
 python3 tools/ark.py lambda-job finish --status-json out/<project>/ep<NN>/lambda/<job_id>.json \
     --image out/<project>/ep<NN>/lambda/<job_id>.jpg --ledger out/<project>/ep<NN>/ledger.csv
 ```
-   `succeeded` → dòng `ok` (usage, `lambda; seconds=…`); `failed` → dòng `failed` (vẫn tính, không tự thử lại);
-   `running` → không ghi gì, thoát mã 1 (đọc lại sau). Chạy `finish` lần hai không thêm dòng.
+   `succeeded` → dòng `ok` (usage, `lambda; seconds=…`); `failed` → dòng `failed` (vẫn tính, không tự thử lại), hoặc
+   `failed-unsent` khi `sent: false` (không tính; sửa nguyên nhân rồi `prepare` job mới); `running` → không ghi gì,
+   thoát mã 1 (đọc lại sau); `running` quá `deadline` + 60 s → thoát mã 1 kèm lệnh `… --give-up` (dòng `failed`, vẫn
+   tính). File status không phải object JSON, hoặc `--image` không phải ảnh PNG/JPEG/WebP/GIF (trang lỗi XML của S3 khi
+   `curl` thiếu `-f`) → thoát mã 2, không ghi gì: tải lại bằng `curl -fsS -o` rồi chạy lại. Chạy `finish` lần hai không
+   thêm dòng.
 
 Job đã `prepare` mà không Invoke (hoặc không `finish`) để lại dòng `pending`: vẫn tính vào trần như mọi request bị bỏ dở
-(`docs/CONVENTIONS.md` §7). Invoke xong mới biết lỗi cấu hình (chưa nhập khóa…) thì `finish` với `jobs/<job_id>.json`
-báo `failed` để đóng request.
+(`docs/CONVENTIONS.md` §7). Chắc chắn không Invoke nữa → đóng nó: `python3 tools/ark.py ledger-close --req <job_id>
+--ledger <ledger> --status abandoned` (dòng `abandoned`, vẫn tính; `tools/status.py` hết báo OPEN). Invoke xong mới biết
+lỗi cấu hình (chưa nhập khóa…) thì `finish` với `jobs/<job_id>.json` báo `failed` để đóng request (`sent: false` →
+`failed-unsent`, không tính).
 
 ## Chi phí
 AWS: vài giây Lambda + vài MB S3 mỗi ảnh (không đáng kể). Phí tạo ảnh tính bên BytePlus như thường; trần riêng của

@@ -11,6 +11,8 @@
 // strips, offset sideways. The box must hold only what may move (and transparent space around it); the root end of
 // the box joins the body with zero offset, so there is no seam.
 // Per shot: st.plate('L4', { warp: false }) holds it still; { warp: { tail: { amp: 26, speed: 0.7 } } } overrides.
+// The regions foliage.js adds (rig.sway) answer to the `sway` key when the shot gives one, else to `warp` as well:
+// { sway: false } holds the trees and leaves the tail alone; { warp: false } alone holds both.
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
@@ -64,7 +66,13 @@
   C.onRig('strip-warp', prepare);
 
   C.stripWarp = {
-    active: (p, o) => o !== false && !!(p.warps && p.warps.length),
+    // The per-shot option of one region: `sway` for a foliage region when the shot passes it, else `warp`.
+    pick: (w, o, sway) => (w.cfg && w.cfg.foliage && sway !== undefined ? sway : o),
+    // Something moves: a region whose option (see pick) is not false. Else the plate is drawn whole (p.canvas).
+    active: (p, o, sway) => !!(p && p.warps && p.warps.length) && p.warps.some((w) => {
+      const sel = C.stripWarp.pick(w, o, sway);
+      return sel !== false && !(sel && typeof sel === 'object' && sel[w.name] === false);
+    }),
     // Offset (plate px) of the strip at u (0 root .. 1 tip) at time t.
     offset(u, t, cfg, seed = C.seed) {
       const amp = cfg.amp ?? 16, power = cfg.power ?? 1.6, waves = cfg.waves ?? 0.8, speed = cfg.speed ?? 0.45;
@@ -74,10 +82,11 @@
       const slow = wobble(seed, (t - u * lag) * 0.32, salt);
       return amp * Math.pow(C.clamp(u), power) * ((1 - sway) * wave + sway * slow);
     },
-    draw(g, p, t, o) {
+    draw(g, p, t, o, sway) {
       for (const w of p.warps) {
-        const over = o && typeof o === 'object' ? o[w.name] : null;
-        if (over === false) { g.drawImage(w.crop, w.x0, w.y0); continue; }
+        const sel = C.stripWarp.pick(w, o, sway);
+        const over = sel && typeof sel === 'object' ? sel[w.name] : null;
+        if (sel === false || over === false) { g.drawImage(w.crop, w.x0, w.y0); continue; }
         const cfg = over ? { ...w.cfg, ...over } : w.cfg, strip = w.sp;
         const len = w.axis === 'x' ? w.w : w.h, start = w.axis === 'x' ? w.x0 : w.y0;
         for (let pos = 0; pos < len; pos += strip) {

@@ -14,11 +14,38 @@
   const C = root.COMPOSE = root.COMPOSE || {};
   const TEX_W = 768, TEX_H = 192, OPEN_W = 320, OPEN_H = 180;
 
-  C.rgb = (hex) => {
-    let h = String(hex || '#ffffff').replace('#', '');
-    if (h.length === 3) h = h.split('').map((ch) => ch + ch).join('');
-    const n = parseInt(h.slice(0, 6), 16);
-    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  // A CSS colour -> [r, g, b]: '#rgb', '#rgba', '#rrggbb', '#rrggbbaa', 'rgb(r, g, b)' / 'rgba(...)' (numbers or %),
+  // [r, g, b], or any other colour a canvas understands ('white', 'hsl(...)': read back through a 1x1 canvas in the
+  // browser). A colour that cannot be read is a warning and `fallback` (white by default), never black.
+  const NAMED = { white: [255, 255, 255], black: [0, 0, 0], transparent: [0, 0, 0] };
+  let probe = null;
+  C.rgb = (c, fallback = [255, 255, 255]) => {
+    if (c == null || c === '') return fallback.slice();
+    if (Array.isArray(c)) return [0, 1, 2].map((i) => Math.round(C.clamp(+c[i] || 0, 0, 255)));
+    const s = String(c).trim().toLowerCase();
+    let m = s.match(/^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/);
+    if (m) {
+      let h = m[1];
+      if (h.length <= 4) h = h.slice(0, 3).split('').map((ch) => ch + ch).join('');
+      const n = parseInt(h.slice(0, 6), 16);
+      return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    }
+    m = s.match(/^rgba?\(\s*([-\d.]+%?)[\s,]+([-\d.]+%?)[\s,]+([-\d.]+%?)/);
+    if (m) {
+      const ch = (v) => Math.round(C.clamp(v.endsWith('%') ? (parseFloat(v) * 255) / 100 : parseFloat(v), 0, 255));
+      const out = [ch(m[1]), ch(m[2]), ch(m[3])];
+      if (out.every(Number.isFinite)) return out;
+    }
+    if (NAMED[s]) return NAMED[s].slice();
+    try {                                       // the browser's own parser: it writes back '#rrggbb' or 'rgba(...)'
+      if (!probe) probe = C.canvas(1, 1).getContext('2d');
+      probe.fillStyle = '#010203';
+      probe.fillStyle = s;
+      const back = String(probe.fillStyle);
+      if (back !== '#010203' && back !== s) return C.rgb(back, fallback);
+    } catch (e) { /* no canvas (a test, node): fall through */ }
+    C.warn(`colour ${JSON.stringify(c)} is not a colour the kit can read; rgb(${fallback.join(', ')}) used`, 'rgb:' + s);
+    return fallback.slice();
   };
 
   function bandTexture(seed, salt, rgb) {
@@ -67,6 +94,10 @@
     band(st, o = {}) {
       if (!C.mist.tex) throw new Error('COMPOSE.mist: textures not prepared (COMPOSE.load in READY\'s chain)');
       const t = st.t, seed = C.seed, salt = o.salt ?? 0, d = o.depth ?? 0.5, h = o.h ?? 300;
+      if (!(h > 0) || !Number.isFinite(+(o.speed ?? 0)) || !Number.isFinite(t)) {
+        C.warn(`mist band: h ${o.h} / speed ${o.speed} must be numbers (h above 0); not drawn`, 'mist-band-bad');
+        return;
+      }
       const tex = C.mist.tex[((o.variant ?? 0) % 3 + 3) % 3], tileW = h * (TEX_W / TEX_H);
       const breathe = o.breathe ?? 0.3;
       const alpha = (o.alpha ?? 0.5) * (1 - breathe + breathe * C.noise(seed, t * 0.18 + salt * 3.1, 61 + salt));

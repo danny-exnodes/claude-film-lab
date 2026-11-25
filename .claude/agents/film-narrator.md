@@ -28,16 +28,19 @@ Các bước, theo đúng thứ tự:
    `OVER? (est.)` dù mã thoát là 0: **dừng**, chép nguyên các dòng đó vào báo cáo. Không render khi bước này chưa sạch.
 2. `audition`: `--audition "<các giọng trong hợp đồng>" --text "<câu 1>" --text "<câu 2>" --out <media>/vo/audition`
    với đúng các giọng và hai câu ghi trong hợp đồng. Trả về danh sách file rồi dừng; người dùng chọn bằng tai.
-3. `render`: giọng, mode, seed **chỉ** lấy từ hợp đồng:
-   `python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --voice "<giọng>" --mode <mode> --seed <seed> --strict`
-   rồi chạy lại đúng lệnh đó với `--check` thay cho `--strict`. Xong = `--check` thoát mã 0.
+3. `render`: giọng, mode, seed **chỉ** lấy từ hợp đồng; mọi lần render không phải nghe thử đều có `--require-watermark`:
+   `python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --voice "<giọng>" --mode <mode> --seed <seed> --strict --require-watermark`
+   rồi chạy lại đúng lệnh đó, thêm `--check` (giữ `--strict` và `--require-watermark`). Xong = `--check` thoát mã 0.
 4. `rerender <ids>`: như bước 3, thêm `--only <ids>` vào lệnh render; lệnh `--check` thì **không** kèm `--only`
    (nó luôn kiểm cả kịch bản). Tool từ chối vì dòng khác đang `STALE`: dừng, báo các id đó (không tự thêm
    `--allow-stale`, trừ khi hợp đồng ghi rõ).
-- Chạy Bash với timeout dài (≥ 600000 ms). Mã thoát 3 (chưa cài `vieneu`): cài bằng `pip` đúng theo
-  `tools/tts/README.md` §Cài đặt rồi chạy lại; cài không được thì dừng, báo.
-- Mã thoát 1 sau render (`OVER`, `EMPTY`, `CLIPPED`, `NOSLOT`): không tự sửa, báo id kèm số đo. Dòng quá khung là
-  việc của biên kịch và đạo diễn (rút lời hoặc dời mốc).
+- Chạy Bash với timeout dài (≥ 600000 ms). Mã thoát 3 (chưa cài `vieneu`) hoặc 4 (watermark tắt, chưa nạp model):
+  cài bằng `pip` đúng theo `tools/tts/README.md` §Cài đặt (torch CPU trước, rồi `requirements-tts.txt`) rồi chạy lại;
+  cài không được thì dừng, báo. Không bao giờ bỏ `--require-watermark` để chạy cho xong.
+- Mã thoát 2 vì `another render is writing to this folder`: một lần render khác đang ghi `<media>/vo/`; dừng, báo.
+- Mã thoát 1 sau render (`OVER`, `EMPTY`, `CLIPPED`, `NOSLOT`, `ERROR VO<n>: ffmpeg atempo ...`) hoặc sau `--check`
+  (`OVER` theo mốc hiện tại, `ORPHAN`): không tự sửa, báo id kèm số đo. Dòng quá khung là việc của biên kịch và đạo
+  diễn (rút lời hoặc dời mốc).
 - Từ cần thêm vào bảng phát âm: đề xuất dòng `term,doc` trong báo cáo, không tự ghi file.
 
 Không bao giờ:

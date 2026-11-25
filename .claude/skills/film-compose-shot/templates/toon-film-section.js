@@ -33,7 +33,7 @@ const SHOTS = {
            clips: [{ do: 'jump', t: [0.4, 1.6], height: 0.35 }, { do: 'cheer', t: [1.6, 2.8] }] } }],
          camera: { pos: [0, 0.5, 3.0], target: [0, 0.62, 0], fov: 34, move: { t: [0, 3.5], pos: [0, 0.6, 2.6] } } },
 };
-const sceneOf = (id) => Object.assign({ seed: SEED }, STYLE, { cast: SHOTS[id].cast, camera: SHOTS[id].camera });
+const sceneOf = (id) => Object.assign({ seed: SEED }, STYLE, { cast: SHOTS[id].cast, camera: SHOTS[id].camera, write: SHOTS[id].write });
 
 // Chained into READY by inline.py: loadType(TYPE).then(loadFormulas).then(loadToon). Loads three.js (pinned locally,
 // FILM_THREE) when the look needs it, before the first frame, so capture says `deterministic: yes`.

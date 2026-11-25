@@ -4,13 +4,13 @@ from pathlib import Path
 
 from PIL import Image
 
-from helpers import FIX, REPO, TmpDirCase
+from helpers import CINECODE, FIX, REPO, TmpDirCase, exists
 
 INLINE = REPO / "tools" / "compose" / "inline.py"
 KEYFRAME = REPO / "tools" / "compose" / "keyframe.py"
 CINECODE_FIX = FIX / "cinecode"
 PIN = (REPO / "tools" / "compose" / "cinecode.ref").read_text().strip()
-INSTALLED = Path("/root/.claude/skills/cinecode")
+INSTALLED = CINECODE
 
 
 def run(script, *args):
@@ -251,7 +251,8 @@ class TestInlineAnchors(FilmCase):
         r = run(INLINE, self.film, "--init", "--anchors", self.anchors)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('COMPOSE.ANCHORS = {"a.png":{"eye":[10,20]}};', self.html())
-        self.assertRegex(self.html(), r"<!-- compose-kit begin v\S+ anchors=%s sha=[0-9a-f]{8}: " % re.escape(str(self.anchors)))
+        # recorded relative to the folder of film.html (here the same folder), so any working directory finds it
+        self.assertRegex(self.html(), r"<!-- compose-kit begin v\S+ anchors=anchors\.json sha=[0-9a-f]{8}: ")
         self.write({"a.png": {"eye": [99, 99]}})
         r = run(INLINE, self.film)                               # the refresh form of the docstring, no --anchors
         self.assertEqual(r.returncode, 0, r.stderr)
@@ -476,7 +477,7 @@ class TestCinecodePin(unittest.TestCase):
     def test_fixture_readme_names_the_pin_file(self):
         self.assertIn("tools/compose/cinecode.ref", (CINECODE_FIX / "README.md").read_text(encoding="utf-8"))
 
-    @unittest.skipUnless((INSTALLED / ".git").exists(), "cinecode is not installed here")
+    @unittest.skipUnless(exists(INSTALLED / ".git"), "cinecode is not installed here")
     def test_installed_template_matches_fixture_when_on_the_pin(self):
         head = subprocess.run(["git", "-C", str(INSTALLED), "rev-parse", "HEAD"], capture_output=True, text=True)
         if head.stdout.strip() != PIN:

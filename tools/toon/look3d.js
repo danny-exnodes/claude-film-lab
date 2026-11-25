@@ -294,8 +294,20 @@
         // clay boils once per held drawing (12 per second)
         poseChar(THREE, S.chars[i], c.J, lp ? null : fs.seed * 31 + Math.floor(fs.tp * 12));
       });
+      // creatures (creature.js): the same meshes as the ink look, in this look's clay or faceted material
+      S.beasts = S.beasts || [];
+      (fs.beasts || []).forEach((b, i) => {
+        if (!S.beasts[i]) {
+          const pal = b.cr.palette;
+          const M = (color, extra) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: lp ? 0.85 : 0.92, flatShading: lp }, extra || {}));
+          S.beasts[i] = T.creature3d.build(THREE, b.J, { body: M(pal.body), limb: M(pal.body), wing: M(pal.body, { side: THREE.DoubleSide }),
+                                                          eye: M(pal.eye || pal.ink, { roughness: 0.4 }) });
+          S.scene.add(S.beasts[i].group);
+        }
+        T.creature3d.update(THREE, S.beasts[i], b.J);
+      });
       for (const m of S.props.moving) m.position.x = m.userData.x0 + fs.t * m.userData.drift;
-      const follow = fs.chars[0] ? fs.chars[0].J.rootPos : [0, 0, 0];
+      const follow = fs.chars[0] ? fs.chars[0].J.rootPos : fs.beasts && fs.beasts[0] ? fs.beasts[0].J.rootPos : [0, 0, 0];
       S.key3.position.set(follow[0] - 4, 7, follow[2] + 5); S.key3.target.position.set(follow[0], 0, follow[2]);
       r.render(S.scene, camera3(THREE, fs));
       g.drawImage(r.domElement, 0, 0, fs.W, fs.H);
@@ -734,4 +746,6 @@
   };
 
   L3.cache = cache;
+  // shared with ink3d.js
+  L3.buildChar = buildChar; L3.poseChar = poseChar; L3.camera3 = camera3; L3.renderer = renderer;
 })(typeof window !== 'undefined' ? window : globalThis);

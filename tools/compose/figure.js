@@ -140,6 +140,14 @@
         for (let i = 1; i < keys.length; i++) if (t < keys[i].t) return C.lerp(cum[i - 1], cum[i], (t - keys[i - 1].t) / Math.max(EPS, keys[i].t - keys[i - 1].t));
         return S;
       },
+      // The first time (path time) the walked distance reaches arc: where a foot planted at that distance landed.
+      tOf(arc) {
+        if (arc <= 0) return keys[0].t;
+        for (let i = 1; i < keys.length; i++) {
+          if (cum[i] >= arc - EPS && cum[i] - cum[i - 1] > EPS) return C.lerp(keys[i - 1].t, keys[i].t, C.clamp((arc - cum[i - 1]) / (cum[i] - cum[i - 1])));
+        }
+        return keys[keys.length - 1].t;
+      },
       at(arc) {
         if (keys.length < 2 || S <= EPS) return { x: keys[0].x, y: keys[0].y, h: keys[0].h };
         const a = C.clamp(arc, 0, S), i = seg(a), d = cum[i + 1] - cum[i], u = d > EPS ? (a - cum[i]) / d : 0, p = keys[i], q = keys[i + 1];
@@ -203,11 +211,18 @@
     if (path) {
       // the stride from the path's speed: natural cadence when the legs allow it. Every stretch between two pauses
       // is a whole number of steps, so the figure starts and stops with its feet together.
-      const natural = C.clamp(path.moving > EPS ? path.S / path.moving / STEP.natural : 0, STEP.lo * h0 * path.fore, STEP.hi * h0 * path.fore);
+      // The step count of a stretch is the nearest to the natural stride that keeps every step inside 10-38 % of the
+      // height (a short stretch between two pauses would otherwise be one long step); a stretch shorter than one
+      // shortest step is a single small step, with a warning.
+      const lo = STEP.lo * h0 * path.fore, hi = STEP.hi * h0 * path.fore;
+      const natural = C.clamp(path.moving > EPS ? path.S / path.moving / STEP.natural : 0, lo, hi);
       const aq = path.s(tq - start), legs = [];
       for (let i = 1, base = 0; i < path.stops.length; i++) {
-        const a0 = path.stops[i - 1], n = Math.max(1, Math.round((path.stops[i] - a0) / natural));
-        legs.push({ a0, a1: path.stops[i], n, len: (path.stops[i] - a0) / n, base });
+        const a0 = path.stops[i - 1], d = path.stops[i] - a0;
+        const nmin = Math.max(1, Math.ceil(d / hi - EPS)), nmax = Math.max(nmin, Math.floor(d / lo + EPS));
+        const n = C.clamp(Math.round(d / natural), nmin, nmax);
+        if (d < lo - EPS) warn(`a stretch of ${Math.round(d)} px between two pauses is shorter than one step (${Math.round(lo)} px): one small step`, 'short-step');
+        legs.push({ a0, a1: path.stops[i], n, len: d / n, base });
         base += n + 1;
       }
       const leg = legs.find((l) => aq <= l.a1 + EPS) || legs[legs.length - 1], count = legs.reduce((n, l) => n + l.n, 0), len = leg ? leg.len : 1;
@@ -232,7 +247,13 @@
         const ahead = path.at(aq + 1), behind = path.at(aq - 1), d = Math.hypot(ahead.x - behind.x, ahead.y - behind.y) || 1;
         heading = [(ahead.x - behind.x) / d, (ahead.y - behind.y) / d];
         steps.feet.forEach((f, i) => {
-          const arc = leg.a0 + f.arc, p = path.at(arc), at = yawAt(arc) ?? yaw, off = ground(foot[i][0], 0, pose.fixed ? yaw : at);
+          // a planted foot keeps the yaw it landed with: a timeline turn while walking must not swing it sideways
+          let fy = yaw;
+          if (pose.fixed && f.planted && f.plant != null) {
+            const land = Math.min(tq - start, path.tOf(Math.max(leg.a0, leg.a0 + (f.plant - 0.6) * len)));   // not later than now
+            fy = poseAt(Math.ceil((land + start) * FPS - EPS) / FPS - start, o, () => {}).yaw;   // its first planted frame
+          }
+          const arc = leg.a0 + f.arc, p = path.at(arc), at = yawAt(arc) ?? yaw, off = ground(foot[i][0], 0, pose.fixed ? fy : at);
           const sc = (p.h != null ? sized(p.h) : h0) / 100;
           feet[i] = { x: p.x + off[0] * sc, y: p.y + off[1] * sc, lift: f.lift, planted: f.planted, plant: f.plant == null ? null : leg.base + f.plant };
         });

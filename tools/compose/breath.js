@@ -8,7 +8,9 @@
   C.breath = {
     // 1 .. 1 + amp, a slow sine whose depth drifts a little with seeded noise (never a metronome).
     scale(t, o = {}, seed = C.seed) {
-      const amp = o.amp ?? 0.008, period = o.period ?? 3.6, salt = o.salt ?? 5;
+      // a period of 0 (or a value that is not a number) would scale the plate by NaN: it would vanish from the frame
+      const fin = (v, d) => (v != null && Number.isFinite(+v) ? +v : d);
+      const amp = fin(o.amp, 0.008), period = Math.max(0.2, fin(o.period, 3.6)), salt = fin(o.salt, 5);
       const phase = C.hash(seed, 11, salt) * C.TAU;
       const depth = 0.85 + 0.3 * C.noise(seed, t / (period * 2.5), salt);
       return 1 + amp * depth * (0.5 - 0.5 * Math.cos(C.TAU * t / period + phase));

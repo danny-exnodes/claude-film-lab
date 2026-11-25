@@ -5,6 +5,7 @@
   python3 tools/compose/inline.py <film>/film.html [--anchors ...]      # refresh the kit / anchors after a change
   python3 tools/compose/inline.py --lint                                # check the kit itself (no film)
   python3 tools/compose/inline.py <film>/film.html --init --toon         # method: code (characters drawn in code)
+  python3 tools/compose/inline.py <film>/film.html --preflight          # dry run before a render (node), writes nothing
 
 --toon (method: code, .claude/skills/film-compose-shot/references/code-method.md): the TOON kit (tools/toon/*.js, in
 TOON_ORDER) is inlined after the COMPOSE kit, with TOON.THREE_URL = file://$FILM_THREE (default
@@ -17,30 +18,45 @@ What it does (idempotent; run it again after any change to tools/compose/ or anc
      anchors.json embedded as COMPOSE.ANCHORS. film.html stays one self-contained file (cinecode Quick mode).
      Files are inlined in ORDER; an OPTIONAL one (cloth.js, pose.js) that is not there yet is skipped, any other
      missing file is `FAILED`. --lint prints how many files were inlined.
-  2. Sets the page's default size to 1920x1080 (the template's default is 1080x1920); --size WxH for another.
+  2. Sets the page's default size to 1920x1080 (the template's default is 1080x1920); --size WxH for another. A film
+     whose size line is not cinecode's prints a WARNING (the page keeps its own default).
   3. Chains the plates into READY: loadType(TYPE).then(loadFormulas).then(loadPlates), so every plate is decoded and
      every texture prebuilt before READY resolves (else capture reports `deterministic: NO`).
   4. --init only, on a fresh film.html (cinecode's example scenes still present): replaces the FILM section from
      "Cues are shared" to the HELPERS line with .claude/skills/film-compose-shot/templates/plates-film-section.js, adds
-     the 'plates' look and fills STATE.md's Format line (when it is still the placeholder).
+     the 'plates' look and fills STATE.md's Format line (when it is still the placeholder) with the length, the aspect
+     of --size (16:9, 9:16, 1:1, 2.39:1 ...), the size and 24 fps.
   5. Refuses a kit or FILM section that uses Math.random, Date or performance.now (frames must be pure functions of
      time and SEED).
   6. Rewrites `qc: qc.warnings` in READY's return to `qc: COMPOSE.report().concat(qc.warnings)`: a headless capture
      never shows console.warn, so the kit's warnings travel in READY's qc list, which make.py prints (`compose: ...`
      lines first). Prints a WARNING line when that text is not found (a cinecode template change).
 
-Anchors: the begin marker records where they came from (`anchors=<path as given> sha=<8 hex>`). A refresh without
---anchors reads that file again when it exists (`anchors: refreshed from <path>`), else keeps what is embedded
-(`anchors: kept from the earlier embed`; also for films inlined before the source was recorded).
+Anchors: the begin marker records where they came from (`anchors=<path> sha=<8 hex>`), the path relative to the
+folder of film.html (absolute when that is not possible), so a refresh finds it from any working directory. A refresh
+without --anchors reads that file again when it exists (`anchors: refreshed from <path>`), else keeps what is embedded
+(`anchors: kept from the earlier embed`; also for films inlined before the source was recorded). A path recorded by an
+older inline.py (relative to the directory it ran in) is still found from that directory, and recorded anew.
 Every argument is checked and every edit is made in memory first: an error is `FAILED: <reason>`, exit 1, and neither
-film.html nor STATE.md is changed. STATE.md is written after film.html.
+film.html nor STATE.md is changed. STATE.md is written after film.html. Both are written atomically (a temporary file
+in the same folder, then a rename) and keep their line endings (a CRLF file stays CRLF).
+
+--preflight (tools/compose/preflight.cjs under node, a fake canvas; free, writes nothing): loads the kit embedded in
+film.html, its anchors, the plate files' sizes and the FILM section, then draws every SCENES shot at 12 frames a second
+of film time. ERROR lines (exit 1): unknown keys in PLATES, missing anchors, plate or seq frame files, a cover plate
+whose edge shows under the camera move, a figure over 25 % of the frame, a shot that throws, kit warnings that hold a
+rig still. WARN lines (exit 0): parameters outside the documented ranges, unknown keys in a call's options.
 """
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -49,7 +65,7 @@ TEMPLATE = REPO / ".claude" / "skills" / "film-compose-shot" / "templates" / "pl
 TOON_TEMPLATE = TEMPLATE.parent / "toon-film-section.js"
 TOON_DIR = HERE.parent / "toon"
 # tools/toon/*.js for method: code, inlined after ORDER with --toon (tests/js/toon.test.cjs loads the same list)
-TOON_ORDER = ["rig.js", "motion.js", "project.js", "look2d.js", "look3d.js", "post.js", "toon.js"]
+TOON_ORDER = ["rig.js", "motion.js", "creature.js", "project.js", "look2d.js", "look3d.js", "ink3d.js", "post.js", "toon.js"]
 TOON_MARK = "// ---- tools/toon/"
 THREE_DEFAULT = "/opt/film-lab/vendor/three/build/three.module.js"
 # cloth.js cuts its region out of the plate at load, so it comes after strip-warp.js and eyelid.js, which sample the
@@ -135,6 +151,79 @@ def fail(msg):
     sys.exit("FAILED: " + msg)
 
 
+def read_text(path):
+    """-> (text with '\n' line ends, True when the file used CRLF): the edits are made on '\n' text."""
+    raw = Path(path).read_bytes().decode("utf-8")
+    crlf = "\r\n" in raw and raw.count("\r\n") * 2 > raw.count("\n")
+    return raw.replace("\r\n", "\n"), crlf
+
+
+def write_atomic(path, text, crlf=False):
+    """Write through a temporary file in the same folder and a rename: a crash, a full disk or a second run at the
+    same moment never leaves half a file. A CRLF file gets CRLF back."""
+    path = Path(path)
+    data = (text.replace("\n", "\r\n") if crlf else text).encode("utf-8")
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        try:
+            shutil.copymode(path, tmp)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def aspect(w, h):
+    """'16:9' for 1920x1080, '9:16', '1:1', '4:3'; a ratio with large terms as '2.39:1' (or '1:2.39')."""
+    w, h = int(w), int(h)
+    g = math.gcd(w, h)
+    a, b = w // g, h // g
+    if max(a, b) <= 32:
+        return f"{a}:{b}"
+    return f"{w / h:.2f}:1" if w >= h else f"1:{h / w:.2f}"
+
+
+def anchors_record(path, film):
+    """The anchors path as the marker records it: relative to the folder of film.html (posix), else absolute."""
+    full = Path(path).resolve()
+    try:
+        return Path(os.path.relpath(full, film.parent)).as_posix()
+    except ValueError:                           # another drive (Windows): only an absolute path can find it again
+        return full.as_posix()
+
+
+def anchors_find(recorded, film):
+    """A recorded anchors path -> the file, or None: relative to film.html first, then (an older inline.py recorded
+    the path as given) relative to the working directory."""
+    p = Path(recorded)
+    if p.is_absolute():
+        return p if p.is_file() else None
+    for base in (film.parent, Path.cwd()):
+        if (base / p).is_file():
+            return (base / p).resolve()
+    return None
+
+
+def preflight(film):
+    """--preflight: node runs tools/compose/preflight.cjs on the film; its exit code is ours."""
+    node = shutil.which("node")
+    if not node:
+        fail("--preflight needs node (22 or later) on PATH")
+    if not Path(film).is_file():
+        fail(f"{film}: not found")
+    r = subprocess.run([node, str(HERE / "preflight.cjs"), str(Path(film).resolve())])
+    sys.exit(r.returncode)
+
+
 def read_anchors(path):
     """anchors.json -> (the `COMPOSE.ANCHORS = ...;` line, number of plates, first 8 hex of the file's sha256)."""
     try:
@@ -163,7 +252,15 @@ def main():
     ap.add_argument("--size", default="1920x1080", help="the page's default WxH (default 1920x1080)")
     ap.add_argument("--lint", action="store_true", help="only check the kit")
     ap.add_argument("--toon", action="store_true", help="method: code: inline the TOON kit (tools/toon/) too")
+    ap.add_argument("--preflight", action="store_true",
+                    help="dry run of the film's shots under node (errors, warnings); writes nothing")
     a = ap.parse_args()
+    if a.preflight:
+        if not a.film:
+            ap.error("--preflight needs film.html")
+        if a.init or a.anchors or a.lint or a.toon:
+            ap.error("--preflight runs alone (it checks a film, it changes nothing)")
+        preflight(a.film)
 
     kit, errors, used, skipped = kit_source(toon=a.toon)
     toon_used = []
@@ -193,7 +290,7 @@ def main():
         given = read_anchors(a.anchors)
     film = Path(a.film).resolve()
     try:
-        html = film.read_text(encoding="utf-8")
+        html, film_crlf = read_text(film)
     except (OSError, UnicodeDecodeError) as e:
         fail(f"{a.film}: cannot be read ({getattr(e, 'strerror', None) or e})")
     notes, warnings, state_edit = [], [], None
@@ -221,14 +318,14 @@ def main():
         state = film.parent / "STATE.md"
         if state.exists():
             try:
-                s = state.read_text(encoding="utf-8")
+                s, state_crlf = read_text(state)
             except (OSError, UnicodeDecodeError) as e:
                 fail(f"{state}: cannot be read ({getattr(e, 'strerror', None) or e})")
             if "<length, aspect, size, fps>" in s:
                 m = re.search(r"const DURATION = ([\d.]+)", html)
                 state_edit = (state, s.replace("<length, aspect, size, fps>",
-                                               f"{m[1] if m else '?'} s, 16:9, {w}x{h}, 24 fps"))
-                notes.append(f"STATE.md Format: 16:9, {w}x{h}")
+                                               f"{m[1] if m else '?'} s, {aspect(w, h)}, {w}x{h}, 24 fps"), state_crlf)
+                notes.append(f"STATE.md Format: {aspect(w, h)}, {w}x{h}")
 
     # 1. the kit block (and the anchors) before the film's own script
     b = e = -1
@@ -244,13 +341,17 @@ def main():
         found = EMBED.search(html[b:e])
         old_embed = found[0] if found else ""
     anchors = ""
+    found_src = anchors_find(source, film) if source else None
     if given:
-        (anchors, n, sha), source = given, a.anchors
+        (anchors, n, sha), source = given, anchors_record(a.anchors, film)
         notes.append(f"anchors: {a.anchors} ({n} plate(s))")
-    elif source and Path(source).is_file():     # the file may have changed since: never keep a stale embed silently
-        anchors, n, sha = read_anchors(source)
-        notes.append(f"anchors: refreshed from {source} ({n} plate(s), "
+    elif found_src:                             # the file may have changed since: never keep a stale embed silently
+        anchors, n, sha = read_anchors(found_src)
+        notes.append(f"anchors: refreshed from {found_src} ({n} plate(s), "
                      f"{'unchanged' if anchors == old_embed else 'changed'})")
+        if source != anchors_record(found_src, film):
+            notes.append(f"anchors path recorded relative to film.html: {anchors_record(found_src, film)}")
+        source = anchors_record(found_src, film)
     elif old_embed:
         anchors = old_embed
         notes.append("anchors: kept from the earlier embed"
@@ -278,6 +379,9 @@ def main():
     if m and (m[1], m[2]) != (w, h):
         html = size_re.sub(f"const W = +q.get('w') || {w}, H = +q.get('h') || {h}", html, count=1)
         notes.append(f"default size {m[1]}x{m[2]} -> {w}x{h}")
+    elif not m:
+        warnings.append(f"WARNING: the default size line (`const W = +q.get('w') || ..., H = ...`) was not found: the "
+                        f"page keeps its own default size; render with ?w={w}&h={h} or set it by hand")
 
     # 3. READY waits for the plates (or, with the TOON kit, for loadToon: three.js before the first frame)
     loader = "loadToon" if toon else "loadPlates"
@@ -320,9 +424,12 @@ def main():
     except UnicodeEncodeError as e:
         fail(f"film.html would not be valid UTF-8 ({e.reason}: {e.object[max(0, e.start - 30):e.start + 1]!a}); "
              "a lone surrogate in an anchors.json key or in the --anchors path? Nothing was written")
-    film.write_text(html, encoding="utf-8")
-    if state_edit:                              # after film.html: a failed run must not leave STATE.md ahead of it
-        state_edit[0].write_text(state_edit[1], encoding="utf-8")
+    try:
+        write_atomic(film, html, film_crlf)
+        if state_edit:                          # after film.html: a failed run must not leave STATE.md ahead of it
+            write_atomic(*state_edit)
+    except OSError as e:
+        fail(f"cannot write {e.filename or film} ({e.strerror or e}); the file is as it was")
     print(f"{film}: " + " · ".join(notes))
     for line in warnings:
         print(line)

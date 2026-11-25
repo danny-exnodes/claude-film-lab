@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0a0e16">
+<meta name="referrer" content="no-referrer">
+<title>Film Lab Review</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+<script type="importmap">{"imports":{"three":"./vendor/three/build/three.module.js","three/addons/":"./vendor/three/examples/jsm/"}}</script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/"><span class="logo" aria-hidden="true"></span><span>Film Lab <b>Review</b></span></a>
+  <nav class="tabs" aria-label="Chính">
+    <a href="#/" data-route="">Bảng theo dõi</a>
+    <a href="#/timeline" data-route="timeline">Dòng thời gian</a>
+  </nav>
+  <span class="live" id="live" title="Kết nối trực tiếp"><i></i><span>…</span></span>
+</header>
+<main id="view" tabindex="-1"></main>
+<noscript><p class="empty">Trang này cần JavaScript.</p></noscript>
+</body>
+</html>

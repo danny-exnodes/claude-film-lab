@@ -108,7 +108,7 @@ if [ $rc != 0 ]; then warn tts "$(echo "$v" | tail -1 | cut -c1-60): narration n
 elif [ "${v%% (imported)}" = "vieneu $tts_pin" ]; then ok tts "$v, $model"
 else warn tts "$v, pinned $tts_pin in requirements-tts.txt; $model"; fi
 v=$(pymods resemble-perth,torch perth torch); rc=$?
-read -r ep_g3 ep_lines <<< "${EP_INFO:-- 0}"
+read -r ep_g3 ep_lines <<< "$(echo "${EP_INFO:-- 0}" | tail -1)"
 if [ $rc = 0 ]; then ok tts-watermark "$v"
 elif [ "$ep_g3" != "-" ] && [ "${ep_lines:-0}" -gt 0 ]; then
   bad tts-watermark "$(echo "$v" | tail -1 | cut -c1-50); $EPISODE passed G3 ($ep_g3) with narration: final takes need it; $tts_hint"

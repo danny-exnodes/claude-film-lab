@@ -255,18 +255,28 @@ ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có:
 `ledger.csv` (đặt ở `out/<project>/<id>/ledger.csv`; bản gốc trên Drive `04_SanXuat/<thư mục tập>/ledger.csv`, kéo về đầu
 phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
 `ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note`
-- `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
+- `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, abandoned, failed-unsent, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
 - Ngân sách không phải tuỳ chọn: `ark.py image|video` từ chối (thoát mã 2, không gọi API, không ghi ledger) nếu thiếu
   budget **hoặc** ledger (cờ `--budget/--ledger` hoặc env `FILM_BUDGET/FILM_LEDGER`); `--budget` không có ledger là lỗi.
-  Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính, agent không dùng.
+  Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính. Có biến
+  `FILM_AGENT` (agent) thì `--no-budget` và `--force` bị từ chối, mã 2, không gửi gì.
 - Mỗi request ghi dòng bằng khoá file (`fcntl.flock`, agent chạy song song):
   - trước lệnh POST tạo ảnh/video: một dòng `pending`, `note` = `req=<uuid4 hex>`;
   - video: có task id là ghi ngay dòng `pending` thứ hai có `task_id` (cùng `req=`) và in task id ra – còn lại cả khi bị SIGKILL;
-  - khi xong: một dòng cuối `ok`, `failed` hoặc `cut-502` cùng `req=` (`note` = `req=<id>; <chi tiết>`).
+  - khi xong: một dòng cuối `ok`, `failed` hoặc `cut-502` cùng `req=` (`note` = `req=<id>; <chi tiết>`). Phản hồi không
+    có dữ liệu ảnh → `failed` (`no image in the response`). Phản hồi nhiều ảnh: ảnh thứ n lưu `<stem>-<n><ext>`, file
+    đó đã có (hoặc là `out` của dòng khác trong lô) thì `<stem>-<n>-<8 ký tự đầu của req><ext>`: không ghi đè file nào.
   SIGTERM/SIGINT → dòng `failed` (`interrupted by SIGTERM`, video có `task_id`); SIGKILL → chỉ còn `pending`, vẫn tính là đã tính phí.
 - Cách đếm: gom các dòng theo `req=` (dòng không có `req=` nhưng có `task_id` thì gom theo `task_id`); mỗi request tính
   **một lần** theo dòng cuối (`ok/failed/cut-502`) mới nhất, chưa có dòng cuối thì theo dòng `pending` (coi như đã tính phí).
   Dòng không có cả `req=` lẫn `task_id` (ledger cũ) mỗi dòng tính một lần như trước. `refused-budget` không tính.
+  `abandoned` (dòng cuối do `ledger-close` ghi) vẫn tính; `failed-unsent` (job Lambda chưa gửi gì) đóng request và
+  **không** tính. `req=` chỉ nhận cả cụm chữ hex thường, sau đó là `;`, khoảng trắng hoặc hết `note`.
+- Request mồ côi (dòng `pending` không bao giờ có dòng cuối: agent bị giết khi đang gọi API ảnh, job Lambda đã
+  `prepare` mà không Invoke): `ark.py ledger-close --req <id> --ledger L --status abandoned [--note …]` ghi dòng
+  `abandoned` (vẫn tính vào trần, `tools/status.py` không còn báo OPEN). Từ chối (mã 2, không ghi) khi request
+  không có dòng `pending` hoặc đã có dòng cuối. Video còn `task_id` thì thử `video --resume-task` trước;
+  `ark.py video --resume-pending --ledger L` chạy `--resume-task` cho mọi task video đang mở của ledger, lần lượt.
 - Trước khi gọi API: tổng đã dùng + yêu cầu hiện tại; vượt bất kỳ trần nào → từ chối, ghi `refused-budget` (không có `pending`), thoát mã 3.
 - Kiểm và giữ chỗ là **một bước nguyên tử**: một khoá `LOCK_EX` trên `ledger.csv` bao quanh việc đọc ledger, cộng tổng
   và ghi dòng `pending` (hoặc `refused-budget`), rồi mới mở khoá. Việc chậm (nén ảnh `--ref`, đọc khung đầu, tạo thư mục,
@@ -292,7 +302,10 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
 - **Ảnh qua Lambda** (pro, 4K; `lambda/README.md`) dùng cùng ledger và cùng cách đếm:
   `ark.py lambda-job prepare` làm đúng bước nguyên tử ở trên (dòng `pending`, `note` = `req=<id>; lambda`, vượt trần →
   `refused-budget`, mã 3) và in payload có `job_id` = `<id>`; `ark.py lambda-job finish` đọc `jobs/<id>.json` của worker
-  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`). Không gọi
+  và ghi dòng cuối `ok`/`failed` cùng `req=` (`usage` của job, `note` = `req=<id>; lambda; seconds=<s>`); job `failed`
+  có `sent: false` → `failed-unsent` (không tính); job còn `running` quá `deadline` + 60 s → báo worker đã chết, mã 1,
+  `--give-up` ghi `failed` (vẫn tính); status không phải object JSON hay `--image` không phải ảnh (trang lỗi S3) → mã 2,
+  không ghi gì; `worker_sha256` khác `lambda/ark_image_worker.py` của repo → WARN. Không gọi
   Lambda bằng payload tự viết: request không có dòng `pending` là request đi vòng qua ngân sách.
 - **Tạo ảnh theo lô** (`ark.py image-batch JOBS.csv --budget B --ledger L [--parallel N] [--dry-run] [--only ID …] [--fast]`):
   mỗi dòng CSV (`id,prompt,out,size,model,ref,seed,negative`; `prompt` dạng `@file` đọc từ file cạnh CSV, `ref` cách nhau
@@ -305,8 +318,12 @@ phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), 
   (mã 130/143) thì thôi không bắt đầu dòng mới, dòng đang chạy vẫn ghi dòng cuối. Mã 1 = có request đã rời máy và lỗi.
   `--dry-run` chỉ kiểm và in kế hoạch, không ghi ledger. Chi tiết: `ark.py image-batch --help`.
 - **Gộp ledger** (`ark.py ledger-merge A.csv B.csv … -o OUT.csv`): hợp các dòng của nhiều bản ledger, khử trùng theo
-  `(req, status, task_id)` (dòng cũ không có `req=`: chỉ khử dòng giống hệt), sắp theo `ts`, `pending` trước dòng cuối
-  của cùng thời điểm; ghi `OUT` dưới `LOCK_EX`. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
+  `(req, status, task_id)` (hai bản khác nhau ở cột khác: giữ dòng tính nhiều hơn; kết quả không phụ thuộc thứ tự
+  đầu vào); dòng cũ không có `req=` gộp theo bội: mỗi dòng giống hệt giữ số lần nhiều nhất trong một bản (hai dòng
+  giống hệt trong một bản là hai request); sắp theo `ts`, `pending` trước dòng cuối của cùng thời điểm; ghi `OUT`
+  dưới `LOCK_EX`. Mọi dòng của mọi bản (kể cả `OUT`) được kiểm trước: header, số ô, `ts`, `kind`, `status`, `count`,
+  `seconds`, `req=`; lỗi in `<file>:<dòng>: <lý do>`, mã 2, không ghi gì. Bản gộp phải tính mỗi request ít nhất bằng
+  từng bản (trừ request đã đóng `failed-unsent`), không thì mã 2 `the copies disagree`: sửa tay rồi gộp lại. Các dòng đang có trong `OUT` **luôn được giữ**, dù `OUT` có nằm trong danh sách đầu vào hay
   không (gộp không bao giờ làm mất dòng đã tính phí). Dùng mỗi khi có hai bản ledger
   của một tập (hai phiên, hai file trên Drive, bản Drive + bản trong container): **không bao giờ** "lấy bản mới nhất"
   cho ledger, vì bản kia chứa các request đã tính phí (§11.6).

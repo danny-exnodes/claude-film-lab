@@ -14,7 +14,8 @@ Tạo clip có tiếng bằng model **MiniMax H3** chạy trong **ComfyUI trên 
 ## Cài đặt trên máy chủ dự án
 
 - ComfyUI có sẵn: **Comfy Desktop** (ComfyUI v0.43.1, Python 3.13, torch cu130) ở
-  `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI` (`standalone-env\python.exe` + `ComfyUI\main.py`). Đây là
+  `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI` (`ComfyUI\.venv\Scripts\python.exe` + `ComfyUI\main.py`; `standalone-env` chỉ là trình
+  thông dịch gốc, không có torch). Đây là
   `FILM_COMFY_HOME` mặc định trên Windows. Bản portable (`python_embeded\python.exe` + `ComfyUI\main.py`) cũng dùng được
   khi trỏ `FILM_COMFY_HOME` vào nó.
 - Model dùng chung của Desktop: `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\models` (= `FILM_COMFY_MODELS` mặc định).

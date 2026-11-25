@@ -42,7 +42,7 @@ Output: <out> (mp4 with audio, written atomically) + <out>.json sidecar (workflo
 prompt, sizes, frames, model files, ComfyUI/torch versions, GPU seconds).
 
 Env: FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_HOME (Windows default
-%LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI: Desktop layout standalone-env\\python.exe + ComfyUI\\main.py;
+%LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI: Desktop layout ComfyUI\\.venv\\Scripts\\python.exe + ComfyUI\\main.py;
 the portable layout python_embeded\\python.exe + ComfyUI\\main.py works too), FILM_COMFY_MODELS (Windows default
 %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\models, else <ComfyUI>/models), FILM_COMFY_PYTHON (python for `start`),
 FILM_COMFY_MODEL_PATHS (extra_model_paths yaml for `start`; default: the Desktop's instance yaml), FILM_LEDGER,
@@ -132,7 +132,9 @@ def layout(home):
         root = home
     else:
         return None
-    kinds = (("desktop", ("standalone-env", "python.exe")), ("desktop", ("standalone-env", "bin", "python3")),
+    # Comfy Desktop keeps its packages (torch...) in ComfyUI/.venv; standalone-env is only the base interpreter
+    kinds = (("desktop", ("ComfyUI", ".venv", "Scripts", "python.exe")), ("desktop", ("ComfyUI", ".venv", "bin", "python3")),
+             ("desktop", ("standalone-env", "python.exe")), ("desktop", ("standalone-env", "bin", "python3")),
              ("portable", ("python_embeded", "python.exe")), ("source", (".venv", "Scripts", "python.exe")),
              ("source", (".venv", "bin", "python3")))
     py, kind = None, "source"

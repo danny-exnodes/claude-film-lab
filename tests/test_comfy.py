@@ -633,7 +633,9 @@ class TestOtherCommands(ComfyCase):
         (home / "ComfyUI" / "comfyui_version.py").write_text('__version__ = "0.43.1"\n')
         (home / "ComfyUI" / "comfy" / "cli_args.py").write_text('parser.add_argument("--offline")\n')
         (home / "standalone-env").mkdir()
-        (home / "standalone-env" / "python.exe").write_text("")
+        (home / "standalone-env" / "python.exe").write_text("")      # base interpreter, no torch: not chosen
+        (home / "ComfyUI" / ".venv" / "Scripts").mkdir(parents=True)
+        (home / "ComfyUI" / ".venv" / "Scripts" / "python.exe").write_text("")
         os.environ["FILM_COMFY_HOME"] = str(home)
         if models:
             for m in LOCK["models"]:
@@ -774,7 +776,7 @@ class TestOtherCommands(ComfyCase):
         os.environ["FILM_COMFY_MODEL_PATHS"] = str(yml)
         code, out, _ = self.run_comfy("start", "--dry-run")
         self.assertEqual(code, 0, out)
-        self.assertIn(str(home / "standalone-env" / "python.exe"), out)
+        self.assertIn(str(home / "ComfyUI" / ".venv" / "Scripts" / "python.exe"), out)
         for part in ("--listen 127.0.0.1 --port 9", "--disable-auto-launch", "--offline",
                      f"--extra-model-paths-config {yml}", f"--input-directory {self.tmp / 'input'}",
                      f"--output-directory {self.tmp / 'output'}"):

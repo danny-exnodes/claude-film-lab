@@ -1111,14 +1111,18 @@ def shot3d_errors(mod, path, data):
         fn = getattr(mod, name, None)
         if not callable(fn):
             continue
+        kw = {}
         try:
-            params = [p for p in inspect.signature(fn).parameters.values()
+            sig = inspect.signature(fn).parameters
+            params = [p for p in sig.values()
                       if p.default is p.empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+            if "base_dir" in sig and len(params) < 2:   # spec.validate(data, base_dir=None): also checks .glb files
+                kw["base_dir"] = os.path.dirname(path)
         except (TypeError, ValueError):
             params = [None]
         args = [arg, os.path.dirname(path)][:max(1, len(params))]
         try:
-            out = fn(*args)
+            out = fn(*args, **kw)
         except Exception as e:                   # spec.py raises its own error type with 'path: reason' lines
             return [l for l in str(e).splitlines() if l.strip()] or [type(e).__name__]
         if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], (list, tuple)):

@@ -251,6 +251,8 @@ class Shot3dAdapter(unittest.TestCase):
         seen = []
         ce.shot3d_errors(fake_spec(validate=lambda d, base: seen.append(base) or []), p, data)
         self.assertEqual(seen, ["/x/shots3d"])
+        ce.shot3d_errors(fake_spec(validate=lambda d, base_dir=None: seen.append(base_dir) or []), p, data)
+        self.assertEqual(seen, ["/x/shots3d", "/x/shots3d"], "spec.validate(data, base_dir=None): the folder is passed")
         self.assertIsNone(ce.shot3d_errors(fake_spec(other=lambda d: []), p, data))
 
     @unittest.skipUnless((REPO / "tools" / "blender" / "spec.py").is_file(), "tools/blender/spec.py not merged yet")

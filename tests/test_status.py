@@ -850,5 +850,28 @@ class DegradeTest(StatusCase):
         self.assertEqual(tree(self.tmp), before)
 
 
+class LedgerCloseTest(StatusCase):
+    """ark.py ledger-close: an abandoned request is closed (no OPEN line, no MISSING file) but still counted."""
+
+    def test_open_request_prints_the_close_command(self):
+        self.mixed_ledger()
+        code, out = self.run_status()
+        self.assertIn(f"never finishing: python3 tools/ark.py ledger-close --req cc01 --ledger {self.ledger} "
+                      "--status abandoned", out)
+        code, d = self.data()
+        self.assertTrue(all(o["close"].startswith("python3 tools/ark.py ledger-close --req ")
+                            for o in d["attention"]["open"]))
+
+    def test_abandoned_is_closed_and_billed(self):
+        self.rows([self.img("ep01_s02_L4_bac-thi_v02.png", "pending", "cc01", model=PRO, note="lambda"),
+                   self.img("ep01_s02_L4_bac-thi_v02.png", "abandoned", "cc01", model=PRO,
+                            note="closed by ledger-close")])
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertNotRegex(out, r"(?m)^\s+(OPEN|MISSING)\s")
+        self.assertIn("images 1/40 (39 left) · ok 0 · cut-502 0 · abandoned 1 · pending 0\n", out)
+        self.assertIn(f"models.{PRO} 1/6 (5 left)\n", out)
+
+
 if __name__ == "__main__":
     unittest.main()

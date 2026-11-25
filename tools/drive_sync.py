@@ -57,7 +57,7 @@ SNAPSHOT, PULLED_AT, PUSHED_LOG = ".pulled.sha256", ".pulled.at", ".pushed.log"
 LOCK = ".drive_sync.lock"
 TEMP_PATTERNS = ("*.b64", "*.orig", "*.bak", "*.tmp", "*.part", "*~", "*.lock", "*.swp")     # pull / editor / bundle leftovers
 LEDGER, LEDGER_COPIES = "ledger.csv", "ledger.drive-*.csv"                # copies: downloaded for ledger-merge
-RE_SHOT_TAG = re.compile(r"_s\d{2}_")                                     # as tools/bundle.py picks shot media
+RE_SHOT_TAG = re.compile(r"_s\d{2,3}_")                                     # as tools/bundle.py picks shot media
 SNIPPETS_OFF = "  excludeContentSnippets=true"       # search_files returns long content snippets by default
 NOTE_MEDIA = "media: push only after the user approved it (§9)"
 NOTE_LEDGER = "ledger: push after every stage that generated; no approval gate"

@@ -349,8 +349,8 @@ class BudgetTest(StatusCase):
         code, out = self.run_status()
         jcode, d = self.data()
         self.assertEqual(code, jcode)
-        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "forecast", "gate", "gates", "media", "method",
-                                     "next", "notes", "shots", "stage"])
+        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "forecast", "gate", "gates", "local", "media",
+                                     "method", "next", "notes", "shots", "stage", "video_engine"])
         for c in d["budget"]["caps"]:
             self.assertIn(f"{c['name']} {c['used']:g}/{c['cap']:g} ({c['left']:g} left)", out)
         self.assertEqual(len(d["attention"]["open"]), len(re.findall(r"^\s*OPEN\b", out, re.M)))
@@ -374,7 +374,7 @@ class BudgetTest(StatusCase):
         self.assertIn("images 4 (no cap) · ok 2 · cut-502 1 · pending 1\n", out)
         self.assertNotIn("models.", out)
         code, d = self.data("--ledger", str(self.ledger), ep=False)
-        self.assertEqual(sorted(d), ["attention", "budget", "notes"])
+        self.assertEqual(sorted(d), ["attention", "budget", "local", "notes"])
 
     def test_ledger_only_clean_ledger_exits_0(self):
         self.put("plates", "ep01_s01_L1_nui_v01.png")
@@ -752,7 +752,7 @@ class ForecastTest(ForecastCase):
         code, d = self.data()
         self.assertEqual(set(d["method"]), {"name", "source", "raw"})
         f = d["forecast"]
-        self.assertEqual(set(f), {"method", "images", "video_seconds", "conflicts", "skipped", "fits"})
+        self.assertEqual(set(f), {"method", "images", "video_seconds", "conflicts", "skipped", "fits", "local"})
         self.assertEqual(set(f["images"]), {"layers", "approved", "made", "lost", "to_make", "left", "verdict",
                                             "over"})
         self.assertEqual(set(f["video_seconds"]), {"planned", "clips", "left", "verdict", "over"})

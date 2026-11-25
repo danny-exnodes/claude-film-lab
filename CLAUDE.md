@@ -31,7 +31,11 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Mỗi tập một phương pháp dựng, ghi trong `EPISODE.md`: `method: layers` (chỉ ảnh + chuyển động bằng code, tạo theo lô bằng
   `ark.py image-batch`, không Seedance: `ai_motion` trống, `video_seconds: 0`, bỏ khâu 6) hoặc `method: seedance` (clip cho
   cử động lớn) hoặc `method: code` (nhân vật và cảnh vẽ hoàn toàn bằng code với bộ `tools/toon/`, style `engine: code`,
-  `images: 0`, `video_seconds: 0`, bỏ khâu 5–6; `.claude/skills/film-compose-shot/references/code-method.md`). Thiếu khóa = `seedance` (WARN).
+  `images: 0`, `video_seconds: 0`, bỏ khâu 5–6; `.claude/skills/film-compose-shot/references/code-method.md`) hoặc `method: blender` (model 3D render bằng Blender trên máy
+  chủ lab, style `engine: blender`, `images: 0`, `shots3d/s<NN>.json` mỗi shot, khâu 3–5 do `film-3d-artist`;
+  `.claude/skills/film-compose-shot/references/blender-method.md`). Thiếu khóa = `seedance` (WARN).
+  Khâu 6 của `seedance`/`blender` có thể dùng `video_engine: comfy` (clip MiniMax H3 local, miễn phí;
+  `.claude/skills/film-compose-shot/references/local-video.md`); tập `blender` có `ai_motion` phải ghi `video_engine`.
   Người dùng chọn ở khâu 0 (với `code`: cho xem `python3 tools/toon/toon.py lookbook`); không trộn trong một tập, sau G1 không tự đổi.
   Quy tắc dàn cảnh của `layers` (không trượt, không xoay thân, không bộ phận rời):
   `.claude/skills/film-compose-shot/references/layers-method.md` và `layers-character.md`. Người nhỏ trong cảnh rộng
@@ -43,6 +47,16 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe`
   từ G3) không còn ERROR, và `python3 tools/status.py <thư mục tập> --gate <G>` in `READY`. `budget.yaml` thiếu hoặc sai
   khóa, và `stage` vượt cổng chưa có ngày, đều là ERROR.
+
+## Engine local (Blender, ComfyUI)
+- Chỉ chạy trong **phiên local trên máy của chủ lab** (Windows, RTX). Phiên cloud không có GPU: không render Blender
+  (`blender.py render|still|turntable|keyframes|lookbook`), không `comfy.py start|run`; tập `blender`/`comfy` ở cloud chỉ làm phần chữ và
+  kiểm tra. `tools/doctor.sh` dòng `blender`/`comfy` = `n/a` ở cloud.
+- ComfyUI chỉ chạy offline: `comfy.py start` (Python của Comfy Desktop, không giao diện, `127.0.0.1:8188`, `--offline`)
+  hoặc server của ứng dụng Comfy Desktop qua `FILM_COMFY_URL` (localhost). **Không bao giờ dùng node API trả tiền** (bản
+  cài có node MiniMax trả tiền trong `comfy_api_nodes/`); `comfy.py run` từ chối workflow có node ngoài danh sách cho phép.
+- Lần chạy local vẫn ghi ledger của tập (`--ledger`, `FILM_AGENT` trong agent); dòng `comfy:*`/`blender:*` không tính trần.
+- Một việc GPU một lúc (16 GB VRAM). Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:.
 
 ## Khởi động phiên
 Hook `.claude/hooks/session-start.sh` tự chạy: cài font CJK + `rembg`, trỏ `/opt/byteplus/ark.py` vào
@@ -71,6 +85,10 @@ python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc]   # method: code, miễn phí: xem style vẽ bằng code, linh vật giot, dị thú 3D
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
+python tools/blender/blender.py find | check <shot3d.json> | render <shot3d.json> --out <dir> [--preview]   # method: blender, chỉ máy chủ lab
+python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> | keyframes <shot3d.json> --out <dir>
+python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
+python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL
 bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python ≥ 3.10, bash -n, lint compose, unit test); --install cài requirements-ci.txt

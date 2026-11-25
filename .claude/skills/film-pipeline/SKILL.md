@@ -105,7 +105,9 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    trong container (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu
    là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
 4. Báo người dùng các dòng `STAGE` / `METHOD` / `BUDGET` / `FORECAST` / `NEXT` (3–6 dòng). Rồi làm `## Việc tiếp theo`.
-   `METHOD` = phương pháp dựng của tập (`method:` trong EPISODE.md: `layers` | `seedance`; thiếu khóa = `seedance`).
+   `METHOD` = phương pháp dựng của tập (`method:` trong EPISODE.md: `layers` | `seedance` | `code` | `blender`; thiếu
+   khóa = `seedance`), kèm `video_engine` khi tập ghi khóa đó (`comfy` = clip H3 local). Dòng `LOCAL` trong `BUDGET` =
+   lần chạy Blender/ComfyUI (miễn phí, không tính trần); `local GPU` trong `FORECAST` = phút GPU còn phải chạy (ước lượng).
    `FORECAST` = dự báo phần còn phải trả, tính từ `shots.csv` + `prompts.csv`, không gọi mạng: số ảnh còn phải tạo
    (lớp chưa có ảnh hoặc bị từ chối) và số giây Seedance dự kiến (shot có `ai_motion` chưa có clip, làm tròn lên, tối
    thiểu 4 s mỗi clip), so với phần còn lại của `budget.yaml`: `fits` hoặc `OVER by N`. `OVER` → báo người dùng trước
@@ -151,10 +153,11 @@ Quy tắc cổng:
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.
 
-### 2.1 Ba phương pháp dựng (`method`)
+### 2.1 Bốn phương pháp dựng (`method`)
 
-Mỗi tập theo đúng **một** phương pháp, ghi ở front matter của `EPISODE.md`: `method: layers | seedance | code`.
-`code` (nhân vật và cảnh vẽ hoàn toàn bằng code, chi phí 0) có quy trình riêng ở cuối mục này. Không có khóa
+Mỗi tập theo đúng **một** phương pháp, ghi ở front matter của `EPISODE.md`: `method: layers | seedance | code | blender`.
+`code` (nhân vật và cảnh vẽ hoàn toàn bằng code, chi phí 0) và `blender` (model 3D render bằng Blender trên máy chủ lab,
+chi phí 0) có quy trình riêng ở cuối mục này. Không có khóa
 = `seedance` (tập cũ giữ nguyên nghĩa); tập mới từ mẫu là `layers`. Không trộn hai cách trong một tập; đổi sau G1 phải
 hỏi người dùng (kịch bản và shot list viết theo nhánh).
 
@@ -170,7 +173,8 @@ Việc của đạo diễn theo khâu:
 - **Khâu 0:** hỏi phương pháp **cùng lượt** với độ dài, style và trần chi phí (một câu hỏi, nêu hai lựa chọn và khác biệt
   chi phí: `layers` chỉ tốn ảnh, `seedance` tốn thêm giây video); ghi câu trả lời nguyên văn và điền `method:` vào
   `EPISODE.md`. `layers` → `budget.yaml` có `video_seconds: 0`.
-- **Mọi hợp đồng giao việc** ghi thêm một dòng `Phương pháp: layers | seedance | code` (agent không thấy lịch sử chat).
+- **Mọi hợp đồng giao việc** ghi thêm một dòng `Phương pháp: layers | seedance | code | blender` (và `video_engine: comfy`
+  khi tập có khóa đó; agent không thấy lịch sử chat).
 - **Khâu 3 (`layers`):** `film-art-director` thiết kế bộ tư thế và viết `prompts/jobs-<nhóm>.csv` cho từng nhóm shot.
 - **Trước G2:** chạy `python3 tools/status.py <thư mục tập>` và đưa người dùng nguyên văn mục `FORECAST` (ảnh còn phải
   tạo, giây video dự kiến, so với trần); `OVER` hoặc dòng xung đột `method layers but sNN has ai_motion` → sửa
@@ -198,10 +202,30 @@ Việc của đạo diễn theo khâu:
 - **Khâu 5–6:** bỏ qua (Nhật ký: `khâu 5–6 bỏ qua (method code)`); không giao `film-plate-maker`, `film-animator`.
 - **Khâu 7–10:** `film-compositor` dựng bằng `inline.py film.html --init --toon` (mẫu `templates/toon-film-section.js`).
 
+**`method: blender`** (đọc `.claude/skills/film-compose-shot/references/blender-method.md`). **Khâu 4–6 chỉ chạy trong
+phiên local trên máy chủ lab** (Blender, GPU); phiên cloud chỉ làm phần chữ (kịch bản, `shots3d/*.json`, `ASSETS.md`) và
+kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quick` dòng `blender` phải `OK` trước khâu 4.
+- **Khâu 0:** nêu lựa chọn thứ tư cùng lượt: "model 3D render bằng Blender trên máy của anh/chị, 0 đồng, máy quay 3D
+  thật và bố cục nhất quán; cần phiên local". Style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`; xem thử bằng
+  `blender.py lookbook` ở phiên local). `budget.yaml`: `images: 0`, `video_seconds: 0` (trừ khi chọn clip Seedance).
+- **Khâu 3:** `film-3d-artist` (miễn phí): model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json`.
+- **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm
+  turntable, shot mẫu, không vượt trần.
+- **Khâu 5:** `film-3d-artist` render mọi shot không dùng lại (`renders3d/s<NN>/`). Không giao `film-plate-maker`.
+- **Khâu 6:** chỉ khi có `ai_motion` (theo `video_engine` dưới đây); không có thì Nhật ký `khâu 6 bỏ qua (method blender)`.
+- **Khâu 7–10:** `film-compositor` dùng render như clip (chuỗi PNG hoặc `beauty.mp4`).
+
+**`video_engine: comfy`** (chỉ với `seedance` hoặc `blender`; `.claude/skills/film-compose-shot/references/local-video.md`):
+- **Khâu 0:** khi tập cần cử động khó mà người dùng muốn 0 đồng, nêu lựa chọn "clip AI chạy local (MiniMax H3) thay
+  Seedance: miễn phí, ~2 phút GPU mỗi 5 s, chỉ trên máy chủ lab, clip 1344×768 có âm thanh tự sinh". Ghi
+  `video_engine: comfy`; `video_seconds` để 0 được. Tập `blender` có `ai_motion` bắt buộc chọn `comfy` hoặc `seedance`.
+- **Khâu 6:** chỉ ở phiên local, sau `comfy.py ping` thành công: `film-animator` chạy `comfy.py run h3-i2v` (tập `blender`:
+  hai khung của `blender.py keyframes`), vẫn với `--ledger`. ComfyUI luôn offline; không bao giờ node API trả tiền.
+
 ## 3. Mở tập (khâu 0)
 
 1. Tạo `projects/<project>/ep<NN>-<slug>/` (chia quyển: `q<NN>-t<NN>-<slug>/`), chép `templates/episode/EPISODE.md` và
-   `budget.yaml` (không có mẫu thì theo CONVENTIONS §5 và §7). Điền `series, episode, slug, style` (lấy từ `SERIES.md`),
+   `budget.yaml` (không có mẫu thì theo CONVENTIONS §5 và §7; tập `blender` thêm `templates/episode/ASSETS.md`). Điền `series, episode, slug, style` (lấy từ `SERIES.md`),
    `book` (chỉ khi chia quyển; không thì xoá dòng), `length_s`, `media` (`out/<project>/ep<NN>` hoặc `out/<project>/q<NN>t<NN>`),
    `drive` (`ClaudeFilmLab/<ProjectName>/03_KichBan/<thư mục tập>`).
 2. Hỏi người dùng một lần: độ dài, style (mặc định của series), trần ảnh và giây video. Ghi câu trả lời nguyên văn vào
@@ -242,6 +266,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 - Ảnh pro/4K (Lambda đã triển khai 2026-11-10): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
   (`lambda/README.md`); không Invoke bằng payload tự viết.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
+  Engine local (Blender, ComfyUI) dùng chung một GPU: một `film-3d-artist` hoặc một clip H3 tại một thời điểm.
   Mỗi agent song song nhận `FILM_AGENT` riêng (vd. `film-plate-maker-s01-s04`) và hợp đồng ghi rõ: dùng thư mục scratch
   riêng đặt theo `FILM_AGENT`, không dùng chung script phụ (script chung bị ghi đè làm ledger ghi sai agent).
   Chỉ **một** `film-compositor` mỗi tập.

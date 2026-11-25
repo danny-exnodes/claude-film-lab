@@ -38,3 +38,33 @@ Kiểm tra ngày 2026-11-10 trên tài khoản Ark của Film Lab. Model trong C
 ## Kiểm tra miễn phí
 - Video: gửi tham số sai (vd. `resolution: "9999p"`) → `InvalidParameter` = đã kích hoạt, `ModelNotOpen` = chưa.
 - Ảnh: **không kiểm miễn phí được** – API ảnh kiểm tham số trước khi kiểm kích hoạt; muốn chắc phải gen 1 ảnh nhỏ.
+
+## Model local (máy chủ lab, ComfyUI) – miễn phí, chỉ phiên local
+
+Chạy bằng `tools/comfy/comfy.py` trên Comfy Desktop của chủ lab (RTX 5070 Ti 16 GB); model đã có sẵn trên máy, **không tải
+thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Cách dùng:
+`.claude/skills/film-compose-shot/references/local-video.md`.
+
+| Model | File (bản đóng gói Comfy-Org/MiniMax-H3) | Workflow | Dùng cho | Đo được |
+|---|---|---|---|---|
+| MiniMax H3 – image/first-last-frame to video | `minimax_h3_fl2va_pruned_int8_convrot` | `h3-i2v` | clip từ khung đầu, tuỳ chọn khung cuối (nối hai khung Blender) | ~9–10 s mỗi bước, 20 bước: ≈ 3,5 phút cho 10 s ở 1344×768 |
+| MiniMax H3 – reference to video | `minimax_h3_ref2va_pruned_int8_convrot` | `h3-r2v` | tối đa 9 ảnh tham chiếu + mốc "Add Guide" | chưa đo |
+| Bộ mã hoá chữ | `qwen3vl_32b_minimax_h3_nvfp4_awq` | cả hai | | |
+| VAE hình / âm thanh | `minimax_h3_video_vae_int8_convrot`, `minimax_h3_audio_vae_fp32` | cả hai | clip có âm thanh tự sinh | |
+| LoRA Turbo | `minimax_h3_fl2v_turbo_8step_v1.0`, `minimax_h3_ref2v_turbo_4step_v0.1` | nháp | **chỉ bản nháp**, không cho bản dùng hay mặt nhân vật | |
+
+- H3: 24 hình/s, số khung theo lưới `17k + 5`, bản dùng 1344×768 (7:4), nháp 864×480 (≈ 1 phút cho 5 s, ước lượng);
+  không negative prompt (cfg 1); prompt tiếng Anh theo trường.
+- **Giấy phép:** open weights; điều khoản chưa được xác minh trong repo → **đọc model card trước khi dùng thương mại**
+  (kênh có kiếm tiền) và ghi kết quả vào đây.
+- Bản cài ComfyUI có node API **trả tiền** của MiniMax (`comfy_api_nodes/`): không dùng; `comfy.py` chỉ cho node trong
+  danh sách cho phép, server chạy `--offline`.
+- Có trên máy, **chưa nối** vào lab (không workflow, không công cụ): LTX-2.3 22B dev fp8 (+ spatial upscaler x2, distilled
+  LoRA, bộ mã hoá gemma 3 12B fp4), SeedVR2 3B (phóng video), Qwen-Image 2512 fp8 và Z-Image Turbo (model ảnh local),
+  Wan Animate 2. Wan 2.2 và LTX-2.5 không dùng.
+
+## Blender (render 3D local)
+
+Blender 5.3 trên máy chủ lab (`tools/blender/blender.py find`), EEVEE (`BLENDER_EEVEE`, cần phiên Windows có GPU) hoặc
+Cycles (OptiX/CUDA). Không model AI, không giấy phép model; model GLB ghi nguồn và giấy phép trong `ASSETS.md` của tập.
+Dòng ledger `blender:*` không tính trần. Thời gian một shot (ước lượng, `tools/status.py`): `--preview` ~1 phút, bản dùng ~5 phút.

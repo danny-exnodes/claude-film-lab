@@ -22,9 +22,12 @@ ngoại lệ duy nhất: người nhỏ ≤ 25 % khung trong cảnh rộng bằn
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.
 
-**Ba phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.** `method: code` (nhân vật
+**Bốn phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.** `method: code` (nhân vật
 và cảnh vẽ hoàn toàn bằng code, không lớp tranh): đọc `references/code-method.md` thay cho mọi mục về plates của file này;
-khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`.
+khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`. `method: blender` (model 3D render bằng
+Blender, không lớp tranh): đọc `references/blender-method.md`; render `renders3d/s<NN>/beauty/` (chuỗi PNG) hoặc
+`beauty.mp4` dùng như một clip cả khung, compose kit chỉ phủ sương, nắng, chữ. Clip H3 local (`video_engine: comfy`):
+`references/local-video.md` (âm thanh tự sinh của clip mặc định tắt dưới lời bình).
 
 | `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |
 |---|---|---|---|

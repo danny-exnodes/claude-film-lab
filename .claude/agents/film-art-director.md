@@ -35,6 +35,8 @@ Phương pháp dựng (đọc `method` trong `EPISODE.md` trước; skill mục 
   `CHARACTER.md` (tỉ lệ, số chi, bảng màu, seed, lý do); bối cảnh `E-<slug>` = khối `env` + màu của style. Kiểm hình
   bằng `python3 tools/toon/toon.py turntable --character <file> --style <id> --out <tập>/review/turntable-<slug>.png`
   (miễn phí). `.claude/skills/film-compose-shot/references/code-method.md`.
+- `method: blender`: không prompt, không ảnh. Model 3D, `ASSETS.md` và `shots3d/*.json` do `film-3d-artist` làm; bạn chỉ
+  viết `CHARACTER.md`/`LOCATION.md` (nguồn, giải phẫu, tỉ lệ, bảng màu) khi đạo diễn giao, làm đầu vào cho model.
 
 Giới hạn: không có Bash, không tạo ảnh/video; không nêu tên họa sĩ còn sống hay phim thương mại; không hỏi người dùng,
 không tự qua cổng, không in hay tìm API key. Xong việc: ghi bài học prompt mới (lỗi lặp lại, cụm hiệu quả theo style) vào

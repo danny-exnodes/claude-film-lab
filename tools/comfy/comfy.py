@@ -14,7 +14,7 @@
   python tools/comfy/comfy.py run <workflow> (--prompt TEXT | --prompt-file F.json|.yaml) --out <clips>/<name>_v<NN>.mp4
                      [--image START.png [--last END.png]] [--ref IMG ...] [--guide SECONDS=IMG ...] [--ref-size match|max]
                      [--seconds 5] [--res 480p|768p] [--seed N] [--steps N] [--turbo] [--timeout 2400] [--keep-frames]
-                     (--ledger L.csv | --no-ledger) [--dry-run]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
 
 Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.json):
@@ -46,7 +46,9 @@ Env: FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_HOME (Windows de
 the portable layout python_embeded\\python.exe + ComfyUI\\main.py works too), FILM_COMFY_MODELS (Windows default
 %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\models, else <ComfyUI>/models), FILM_COMFY_PYTHON (python for `start`), FILM_COMFY_WORK (start: input/output/temp/user + log, default <lab>/out/_comfy),
 FILM_COMFY_MODEL_PATHS (extra_model_paths yaml for `start`; default: the Desktop's instance yaml), FILM_LEDGER,
-FILM_AGENT. No key is needed or read; nothing but FILM_COMFY_URL is contacted (except `install --portable`).
+FILM_AGENT, FILM_REVIEW_BUILD (= --review BUILD: publish the job's start, progress at most every 2 s, end and the clip
+to the review server, tools/review/; offline-safe, never changes the run). No key is needed or read; nothing but
+FILM_COMFY_URL (and the local review ingest port when --review is on) is contacted (except `install --portable`).
 """
 import argparse, glob, hashlib, http.client, io, json, os, re, secrets, shutil, signal, struct, subprocess, sys
 import tempfile, time, urllib.error, urllib.parse, urllib.request, uuid
@@ -56,6 +58,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import ark  # noqa: E402  (tools/ark.py: the one ledger writer, lock and request ids)
 
 LOCK_FILE = os.path.join(HERE, "comfy.lock.json")
+REVIEW_CLIENT = os.path.join(os.path.dirname(HERE), "review", "client.py")
 WORKFLOWS = os.path.join(HERE, "workflows")
 DEFAULT_URL = "http://127.0.0.1:8188"
 MODEL_PREFIX = "comfy:"
@@ -760,6 +763,22 @@ def download_view(item, out):
     os.replace(part, out)
 
 
+def review_hook(a):
+    """A tools/review JobHook for --review BUILD / $FILM_REVIEW_BUILD (not on --dry-run), else None. Never raises."""
+    bid = (getattr(a, "review", None) or os.environ.get("FILM_REVIEW_BUILD") or "").strip()
+    if not bid or getattr(a, "dry_run", False):
+        return None
+    try:
+        import importlib.util
+        sp = importlib.util.spec_from_file_location("film_review_client", REVIEW_CLIENT)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        return mod.job_hook(bid, "comfy", "clip")
+    except Exception as e:
+        warn(f"review publishing off ({type(e).__name__}: {e})")
+        return None
+
+
 def write_json_atomic(path, obj):
     tmp = path + ".part"
     with open(tmp, "w", encoding="utf-8", newline="\n") as f:
@@ -869,11 +888,16 @@ def run(a):
     ark.reserve(a, req, rid, tag=seed_note)
     t0 = time.monotonic()
     state = {"logged": False}
+    hook = review_hook(a)
+    if hook:
+        hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
 
     def final(status, note="", usage=""):
         if not state["logged"]:
             ark.log_row(a, req, rid, status, "; ".join(x for x in (seed_note, note) if x), usage=usage)
             state["logged"] = True
+            if hook and status != "ok":
+                hook.failed(f"{status}: {note}" if note else status)
 
     try:
         try:
@@ -915,6 +939,8 @@ def run(a):
                 print(f"timeout after {a.timeout:g}s: prompt {pid} stopped ({note})", file=sys.stderr)
                 return FAILED
             s = queue_state(pid)
+            if hook:
+                hook.update(min(0.99, el / est) if est else 0.0, f"{s} · {int(el)} s / ~{int(est)} s")
             if s != last_state or el - last_print >= PROGRESS_SECONDS:
                 print(f"step {s} elapsed {int(el)}s", flush=True)
                 last_state, last_print = s, el
@@ -967,6 +993,10 @@ def run(a):
         }
         write_json_atomic(a.out + ".json", sidecar)
         final("ok", "", usage)
+        if hook:
+            hook.finish([{"label": os.path.splitext(os.path.basename(a.out))[0], "video": a.out,
+                          "frames": plan["frames"], "fps": plan["fps"], "duration": plan["clip_seconds"],
+                          "engine": model}], gpu_s=gpu, message=f"{gpu:g} GPU s")
         print(f"saved {a.out} ({plan['clip_seconds']:g} s, {gpu:g} GPU s) + {os.path.basename(a.out)}.json")
         if a.keep_frames:
             os.makedirs(plan["frames_dir"], exist_ok=True)
@@ -1368,6 +1398,8 @@ r.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FIL
 r.add_argument("--no-ledger", action="store_true", help="ad-hoc test without a ledger (main session only)")
 r.add_argument("--dry-run", action="store_true", help="validate and print the filled graph summary; send nothing")
 r.add_argument("--timeout", type=positive_float, default=2400, help="seconds before the job is interrupted (2400)")
+r.add_argument("--review", default=None, metavar="BUILD",
+               help="publish progress + the clip to the review server (env FILM_REVIEW_BUILD; tools/review/)")
 r.add_argument("--keep-frames", action="store_true", help="also extract the raw PNG frames to <clips>/<clip stem>/raw/000001.png (ffmpeg; the folder tools/layers/matte_seq.py keys from)")
 t = sp.add_parser("interrupt", help="stop our own job: --prompt-id, or every open comfy job of --ledger")
 t.add_argument("--prompt-id", default=None)

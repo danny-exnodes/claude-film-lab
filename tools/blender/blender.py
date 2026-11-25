@@ -11,6 +11,8 @@
   python tools/blender/blender.py lookbook --out <dir> [--spec S] [--frame N] [--size 960x540]
 
 Every render command also takes --engine, --dry-run (print the Blender command, render nothing) and --timeout S.
+render, turntable and keyframes take --review BUILD (or env FILM_REVIEW_BUILD): publish the job's start, progress
+(at most every 2 s) and end, with the mp4/keyframes as renders, to the review server (tools/review/; offline-safe).
 --out must not exist or be an empty folder (still: the png must not exist): nothing is ever overwritten.
 --preview = 960 wide (the spec's aspect), 12 fps, low samples. --size WxH renders another frame size with the same
 vertical field of view (the camera's sensor fit, not a crop): keyframes default to 1344x768 (the local video model's
@@ -45,6 +47,8 @@ DEMO = os.path.join(HERE, "demo")
 LOOKBOOK_SPEC = os.path.join(DEMO, "lookbook.json")
 KEYFRAME_SIZE = "1344x768"
 BROKEN = 3          # `find`: a Blender exists but `--version` fails (tools/doctor.sh WARNs; 1 = none found)
+REVIEW_CLIENT = os.path.join(os.path.dirname(HERE), "review", "client.py")
+FRAME_LINE = re.compile(r"^frame (\d+) \((\d+)/(\d+)\)")
 
 
 def _load_spec():
@@ -174,8 +178,9 @@ def command(blender, spec_path, out, extra):
             "--spec", os.path.abspath(spec_path), "--out", os.path.abspath(out)] + extra
 
 
-def run_blender(cmd, timeout=None):
-    """Run Blender, echo its film-blender: lines. -> (returncode, scene built?, tail of the output)."""
+def run_blender(cmd, timeout=None, hook=None):
+    """Run Blender, echo its film-blender: lines. -> (returncode, scene built?, tail of the output).
+    hook: a review JobHook told about each `frame F (i/n)` line (it throttles itself)."""
     tail, built = [], False
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -190,6 +195,10 @@ def run_blender(cmd, timeout=None):
                 msg = line[len("film-blender: "):]
                 built = built or msg.startswith("scene built")
                 print(f"blender: {msg}", flush=True)
+                m = FRAME_LINE.match(msg) if hook else None
+                if m:
+                    i, n = int(m.group(2)), int(m.group(3))
+                    hook.update(i / n if n else 0.0, f"frame {m.group(1)} · {i}/{n}")
         rc = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         proc.kill()
@@ -203,7 +212,7 @@ def _clear(path):
         shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
 
 
-def render_into(spec_path, out, extra, engine, a, keep=()):
+def render_into(spec_path, out, extra, engine, a, keep=(), hook=None):
     """Render into an (empty) folder with the EEVEE -> Cycles fallback. -> render.json dict."""
     blender = blender_or_fail(a.dry_run)
     cmd = command(blender, spec_path, out, extra + ["--engine", engine])
@@ -211,18 +220,20 @@ def render_into(spec_path, out, extra, engine, a, keep=()):
         print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
         return None
     os.makedirs(out, exist_ok=True)
-    rc, built, tail = run_blender(cmd, a.timeout)
+    rc, built, tail = run_blender(cmd, a.timeout, hook)
     fallback = None
     if rc != 0 and engine == "eevee" and built and not glob.glob(os.path.join(out, "beauty", "*.png")):
         last = next((l for l in reversed(tail) if l.strip()), "")
         fallback = f"EEVEE failed ({last.strip()[:200]}); rendered with Cycles"
         print(f"blender: {fallback}", flush=True)
+        if hook:
+            hook.update(0.0, "EEVEE failed: rendering with Cycles", force=True)
         for name in os.listdir(out):
             if name not in keep:
                 p = os.path.join(out, name)
                 shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
         cmd = command(blender, spec_path, out, extra + ["--engine", "cycles"])
-        rc, built, tail = run_blender(cmd, a.timeout)
+        rc, built, tail = run_blender(cmd, a.timeout, hook)
     if rc != 0:
         raise Failed(f"Blender exited with {rc}:\n" + "\n".join(tail[-15:]))
     info_path = os.path.join(out, "render.json")
@@ -261,6 +272,51 @@ def encode_ffmpeg(ff, frames_dir, first, fps, out_mp4):
 
 def _contiguous(frames):
     return frames == list(range(frames[0], frames[-1] + 1))
+
+
+# ------------------------------------------------------------------ review hook (tools/review/client.py)
+def review_hook(a):
+    """A JobHook when --review BUILD or $FILM_REVIEW_BUILD is set (never on --dry-run), else None. Never raises."""
+    bid = (getattr(a, "review", None) or os.environ.get("FILM_REVIEW_BUILD") or "").strip()
+    if not bid or getattr(a, "dry_run", False):
+        return None
+    try:
+        sp = importlib.util.spec_from_file_location("film_review_client", REVIEW_CLIENT)
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        return mod.job_hook(bid, "blender", "render")
+    except Exception as e:
+        print(f"blender: review publishing off ({type(e).__name__}: {e})", file=sys.stderr)
+        return None
+
+
+def render_entry(out, info, label):
+    """A review render for a finished render folder: beauty.mp4 (if any) + the first beauty frame."""
+    frames = info.get("frames") or []
+    first = os.path.join(out, "beauty", f"{frames[0]:04d}.png") if frames else None
+    mp4 = os.path.join(out, "beauty.mp4")
+    fps = info.get("fps") or None
+    return {"label": label, "video": mp4 if os.path.isfile(mp4) else None,
+            "image": first if first and os.path.isfile(first) else None, "frames": len(frames) or None, "fps": fps,
+            "duration": round(len(frames) / fps, 3) if fps and frames else None,
+            "engine": f"blender {info.get('engine', '')}".strip(),
+            "seconds_per_frame": info.get("mean_seconds_per_frame")}
+
+
+def with_review(hook, start_msg, work):
+    """Run work() -> (result, renders) with the hook's start / failed / finish around it. -> result."""
+    if hook:
+        hook.start(start_msg)
+    try:
+        result, renders = work()
+    except BaseException as e:
+        if hook:
+            text = str(e).strip()
+            hook.failed(text.splitlines()[0][:300] if text else type(e).__name__)
+        raise
+    if hook and result is not None:
+        hook.finish([r for r in renders if r.get("video") or r.get("image")])
+    return result
 
 
 # ------------------------------------------------------------------ commands
@@ -316,14 +372,22 @@ def cmd_render(a):
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
     if not a.no_mp4 and not ff and _contiguous(frames) and len(frames) > 1:
         extra += ["--mp4", mp4]                              # Blender's own encoder
-    info = render_into(a.spec, a.out, extra, engine, a)
+    hook = review_hook(a)
+
+    def work():
+        info = render_into(a.spec, a.out, extra, engine, a, hook=hook)
+        if info is None:
+            return None, []
+        if ff and _contiguous(frames) and len(frames) > 1:
+            encode_ffmpeg(ff, os.path.join(a.out, "beauty"), frames[0], info["fps"], mp4)
+            info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
+            write_json(os.path.join(a.out, "render.json"), info)
+        return info, [render_entry(a.out, info, os.path.splitext(os.path.basename(a.spec))[0])]
+
+    info = with_review(hook, f"render {os.path.basename(a.spec)} · {len(frames)} frames", work)
     if info is None:
         return 0
-    if ff and _contiguous(frames) and len(frames) > 1:
-        encode_ffmpeg(ff, os.path.join(a.out, "beauty"), frames[0], info["fps"], mp4)
-        info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
-        write_json(os.path.join(a.out, "render.json"), info)
-    elif not info.get("mp4"):
+    if not info.get("mp4"):
         why = "--no-mp4" if a.no_mp4 else ("one frame" if len(frames) == 1 else "frames are not contiguous")
         print(f"blender: no beauty.mp4 ({why})")
     print(f"rendered {len(frames)} frames {info['size'][0]}x{info['size'][1]} {info['engine']} on {info['device']} · "
@@ -370,14 +434,25 @@ def cmd_keyframes(a):
     if not a.dry_run:
         os.makedirs(a.out, exist_ok=True)
     work = os.path.join(a.out, ".work")
-    try:
-        info = render_into(a.spec, work, extra, a.engine or shot["engine"], a)
-        if info is None:
-            return 0
-        shutil.move(os.path.join(work, "beauty", f"{frames[0]:04d}.png"), os.path.join(a.out, "first.png"))
-        shutil.move(os.path.join(work, "beauty", f"{frames[-1]:04d}.png"), os.path.join(a.out, "last.png"))
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
+    hook = review_hook(a)
+
+    def render_keyframes():
+        try:
+            info = render_into(a.spec, work, extra, a.engine or shot["engine"], a, hook=hook)
+            if info is None:
+                return None, []
+            shutil.move(os.path.join(work, "beauty", f"{frames[0]:04d}.png"), os.path.join(a.out, "first.png"))
+            shutil.move(os.path.join(work, "beauty", f"{frames[-1]:04d}.png"), os.path.join(a.out, "last.png"))
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
+        stem = os.path.splitext(os.path.basename(a.spec))[0]
+        eng = f"blender {info.get('engine', '')}".strip()
+        return info, [{"label": f"{stem} {name}", "image": os.path.join(a.out, f"{name}.png"), "engine": eng}
+                      for name in ("first", "last")]
+
+    info = with_review(hook, f"keyframes {os.path.basename(a.spec)} · {size[0]}x{size[1]}", render_keyframes)
+    if info is None:
+        return 0
     kf = {"tool": "tools/blender/blender.py keyframes", "spec": os.path.abspath(a.spec), "spec_sha256": sha256(a.spec),
           "size": list(size), "spec_size": shot["size"], "fps": fps, "frames": frames,
           "times": [round(spec.frame_time(f, fps), 4) for f in frames], "seconds": shot["seconds"],
@@ -429,13 +504,22 @@ def cmd_turntable(a):
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
     if not ff:
         extra += ["--mp4", mp4]
-    info = render_into(path, a.out, extra, a.engine or "eevee", a, keep=("turntable.json",))
+    hook = review_hook(a)
+
+    def work():
+        info = render_into(path, a.out, extra, a.engine or "eevee", a, keep=("turntable.json",), hook=hook)
+        if info is None:
+            return None, []
+        if ff:
+            encode_ffmpeg(ff, os.path.join(a.out, "beauty"), 1, info["fps"], mp4)
+            info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
+            write_json(os.path.join(a.out, "render.json"), info)
+        stem = os.path.splitext(os.path.basename(a.asset.replace("preset:", "")))[0]
+        return info, [render_entry(a.out, info, f"turntable {stem} ({look})")]
+
+    info = with_review(hook, f"turntable {a.asset} ({look})", work)
     if info is None:
         return 0
-    if ff:
-        encode_ffmpeg(ff, os.path.join(a.out, "beauty"), 1, info["fps"], mp4)
-        info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
-        write_json(os.path.join(a.out, "render.json"), info)
     print(f"turntable {a.asset} ({look}) {info['frame_count']} frames · {info['mean_seconds_per_frame']} s/frame -> {a.out}")
     return 0
 
@@ -484,6 +568,10 @@ def main(argv=None):
         if preview:
             q.add_argument("--preview", action="store_true", help="960 wide, 12 fps, low samples")
 
+    def review_arg(q):
+        q.add_argument("--review", default=None, metavar="BUILD",
+                       help="publish progress + output to the review server (env FILM_REVIEW_BUILD; tools/review/)")
+
     sp.add_parser("find", help="where Blender is and its version")
     q = sp.add_parser("check", help="validate a shot3d.json (no Blender)")
     q.add_argument("spec")
@@ -496,6 +584,7 @@ def main(argv=None):
     q.add_argument("--samples", type=int, default=None)
     q.add_argument("--no-mp4", action="store_true")
     common(q)
+    review_arg(q)
     q = sp.add_parser("still", help="one beauty frame as a png")
     q.add_argument("spec")
     q.add_argument("--frame", type=int, required=True)
@@ -509,12 +598,14 @@ def main(argv=None):
     q.add_argument("--seconds", type=float, default=4.0)
     q.add_argument("--size", default=None)
     common(q)
+    review_arg(q)
     q = sp.add_parser("keyframes", help="first.png + last.png + keyframes.json (for the local video model)")
     q.add_argument("spec")
     q.add_argument("--out", required=True)
     q.add_argument("--size", default=KEYFRAME_SIZE, help=f"WxH (default {KEYFRAME_SIZE}; draft 864x480)")
     q.add_argument("--samples", type=int, default=None)
     common(q, preview=False)
+    review_arg(q)
     q = sp.add_parser("lookbook", help="one still per look of tools/blender/looks.json")
     q.add_argument("--out", required=True)
     q.add_argument("--spec", default=None, help="default tools/blender/demo/lookbook.json")

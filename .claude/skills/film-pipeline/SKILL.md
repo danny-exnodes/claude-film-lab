@@ -241,8 +241,8 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   Chỉ **một** `film-compositor` mỗi tập.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.
-- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-<v>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
-  bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-<v>.txt` (`--probe`:
+- `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-v<N>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
+  bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-v<N>.txt` (`--probe`:
   ffprobe mọi clip/bản dựng, LUFS của bản `_final_`; reviewer không có Bash nên không tự đo được).
   Reviewer tự ghi `review/qc-<v>.md` và MEMORY.md của nó (có Write/Edit trong `tools`; `memory: project` không tự cấp).
 - Request bị proxy cắt (502 sau ~30 s) có thể đã tính phí: không ai thử lại; ghi Nhật ký, đổi cách làm (giảm size,

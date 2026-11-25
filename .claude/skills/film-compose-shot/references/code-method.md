@@ -55,10 +55,15 @@ Hậu kỳ ghép được với mọi look (vd. `lowpoly-90s` + `riso`): style m
 
 ## 4. `shots.csv` của tập `code`
 
-- `layers`: `C-<nhân vật>`, `E-<bối cảnh>`, `FX` hoặc `FX-<hiệu ứng>`, `T` (chữ trên hình). Không `L1–L4`/`P`.
+- `layers`: `C-<nhân vật>` hoặc `M-<model>` (model 3D, đạo cụ), `E-<bối cảnh>`, `FX` hoặc `FX-<hiệu ứng>`, `T` (chữ
+  trên hình). Không `L1–L4`/`P`.
 - `code_motion`: id hành động trong `tools/compose/motions.json` có `engine: toon` (`walk-cycle`, `run-cycle`, `jump`,
-  `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`, `breath`) và id máy quay (`orbit`, `dolly`, `crane`).
-- `camera`: thêm `orbit`, `dolly`, `crane`, `track` (máy quay 3D thật).
+  `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`; thở là tự động, `breath` là rig lớp tranh) và id máy
+  quay (`orbit`, `dolly`, `crane`).
+  `check_episode.py` đọc thẳng `motions.json`: id mới đăng ký ở đó là hợp lệ ngay; id rig lớp tranh (`cloth`,
+  `strip-warp`…) là WARN.
+- `camera`: thêm `orbit`, `dolly`, `crane`, `track` (máy quay 3D thật) và id `engine: toon` của `toon/project.js`.
+- Tập trên 99 shot: id `s001`… cho cả tập (CONVENTIONS §6).
 - `ai_motion` trống (ERROR nếu có).
 
 ## 5. Dàn cảnh và luật

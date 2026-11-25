@@ -64,25 +64,30 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Bản làm việc dự án | `projects/<project>/` (git bỏ qua) | `projects/son-hai-kinh/` |
 | Thư mục tập (chữ) | `projects/<project>/ep<NN>-<slug>/` · `projects/<project>/q<NN>-t<NN>-<slug>/` | `projects/son-hai-kinh/ep01-bac-thi/` · `projects/son-hai-kinh/q01-t01-nam-son-kinh/` |
 | Thư mục tập (media) | `out/<project>/<id>/` | `out/son-hai-kinh/ep01/` · `out/son-hai-kinh/q01t01/` |
-| Shot id | `s<NN>` (2 chữ số, tăng dần) | `s03` |
+| Shot id | `s<NN>` (2 chữ số) hoặc `s<NNN>` (3 chữ số, tập trên 99 shot), tăng dần; một tập một độ dài | `s03` · `s103` |
 | Lớp tranh | `<id>_s<NN>_<lớp>_<chủ-thể>_v<NN>.<png\|jpg>` | `ep01_s03_L4_bac-thi_v02.png` · `q01t01_s03_L4_bac-di_v02.png` |
-| Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` |
+| Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `L4b`…`L4z` tư thế · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` · `L4b` |
 | Clip AI | `<id>_s<NN>_<model-ngắn>_v<NN>.mp4` | `ep01_s03_seedance25_v01.mp4` · `q01t01_s03_seedance25_v01.mp4` |
 | Bản dựng | `<id>_<draft\|final>_v<NN>.mp4` | `ep01_draft_v03.mp4` · `q01t01_draft_v01.mp4` |
 
-Regex chuẩn (dùng trong `tools/check_episode.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`):
+Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho `check_episode.py`, `status.py`, `bundle.py`,
+`drive_sync.py`, `layers/anchors.py`, `layers/matte.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`, `<S>` = `s(?:\d{2}|\d{3})`,
+`<L>` = `(?:L[1-4]|L4[b-z]|P\d+-[a-z0-9-]+|FX)`):
 - mã tập: `^(?:ep\d{2}|q\d{2}t\d{2})$`; thư mục tập: `^(?:ep\d{2}|q\d{2}-t\d{2})-[a-z0-9]+(?:-[a-z0-9]+)*$`
-- lớp: `^<ID>_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$`
-- clip: `^<ID>_s\d{2}_[a-z0-9]+_v\d{2}\.mp4$`
+- shot: `^s(\d{2}|\d{3})$`; một tập dùng một độ dài (cả `s<NN>` hoặc cả `s<NNN>`), trộn hai độ dài là ERROR
+- lớp: `^<ID>_<S>_<L>_[a-z0-9-]+_v\d{2}\.(png|jpg)$`
+- clip: `^<ID>_<S>_[a-z0-9]+_v\d{2}\.mp4$`
 - bản dựng: `^<ID>_(draft|final)_v\d{2}\.mp4$`
-- khung đầu Seedance (trong `clips/`): `^<ID>_s\d{2}_start_v\d{2}\.png$`
+- khung đầu Seedance (trong `clips/`): `^<ID>_<S>_start_v\d{2}\.png$`
 - khung của clip: thư mục `clips/<tên clip không đuôi>/` (tên khớp regex clip, bỏ `.mp4`) chỉ chứa `^\d{6}\.png$`
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 
 Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
-`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4`
-(`matte.py --layer L4`). Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+`<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4` (`matte.py`
+tự dùng `matte.per_layer.L4` cho `L4b`…, trừ khi style có khóa `L4b` riêng; `anchors.py` nhận file `L4b`). Tập
+`seedance` có `L4b` trong `layers` → WARN. Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
+Khóa `L4b:` trong `PLATES` mà `matte_seq.py` in ra cho clip Seedance là tên lớp trong film.html, không phải mã lớp.
 
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/<id>/{plates,clips,renders}/`.
 Stem âm thanh của `tools/audio/score.py`: `out/<project>/<id>/audio/` (`music.wav`, `foley.wav`, `ambience.wav`,
@@ -180,7 +185,7 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
 | `score.json` | film-compositor | (tuỳ chọn) nhạc code và foley theo sự kiện cho `tools/audio/score.py`: `length_s`, `seed`, `scale`, `music`, `foley`, `silence` (`tools/audio/README.md`; mẫu `templates/episode/score.json`). Dữ liệu dự án: không commit, đẩy lên Drive như file chữ khác. Phần `music` chỉ khi người dùng đã chọn nhạc code |
-| `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-<v>.txt` |
+| `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-v<N>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
 
@@ -212,9 +217,11 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 gọi model nào. Không phân biệt hoa thường; giá trị khác → ERROR `method must be layers, seedance or code`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
 mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
 hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7). Với `code`: ERROR khi `images`, `video_seconds` hoặc
-bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
+bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`M-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
 style của tập không phải `engine: code` (và ngược lại: style `engine: code` chỉ cho tập `code`); không cần `prompts.csv`
 (có thì WARN). Nhân vật khóa ở G2 là `characters/<slug>/character.json` + `review/turntable-<slug>.png`.
+Một khóa ghi hai lần trong khối YAML (vd. `method: layers` rồi `method: seedance`) là ERROR: YAML lặng lẽ giữ giá trị sau
+(cũng vậy với `budget.yaml`).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
@@ -222,17 +229,22 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 
 `shots.csv`:
 `shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of`
-- `shot` = `s<NN>`; `from_s`/`to_s` số giây (thập phân được), liên tục: `from_s` = `to_s` shot trước; shot đầu từ 0; shot cuối kết thúc = `length_s`.
+- `shot` = `s<NN>` (`s01`…`s99`) hoặc `s<NNN>` (`s001`…`s999`, tập trên 99 shot); cả tập một độ dài, trộn là ERROR. `from_s`/`to_s` số giây (thập phân được), liên tục: `from_s` = `to_s` shot trước; shot đầu từ 0; shot cuối kết thúc = `length_s`.
 - Thời lượng mỗi shot 3–13 s. `shot_size` ∈ `extreme-wide, wide, medium, close, extreme-close, insert`.
 - `camera` = một chuyển động (`static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down, drift, handheld`).
   Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
   Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
-  Tập `method: code`: `layers` = `C-<nhân vật>`, `E-<bối cảnh>`, `FX` hoặc `FX-<hiệu ứng>`, `T` (chữ trên hình);
-  `camera` nhận thêm `orbit, dolly, crane, track`; `code_motion` dùng id `engine: toon` của `motions.json` (`walk-cycle`,
-  `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`); `ai_motion` trống.
+  Tập `method: code`: `layers` = `C-<nhân vật>` hoặc `M-<model>` (model 3D, đạo cụ), `E-<bối cảnh>`, `FX` hoặc
+  `FX-<hiệu ứng>`, `T` (chữ trên hình); `camera` nhận thêm `orbit, dolly, crane, track` và mọi id `engine: toon` có
+  `module` `toon/project.js` trong `motions.json`; `code_motion` dùng id `engine: toon` của `motions.json` (`walk-cycle`,
+  `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`…; checker đọc thẳng sổ đăng ký, id
+  mới thêm vào đó là hợp lệ ngay); id compose rig lớp tranh (`PLATES.<id>.rig…`: `cloth`, `strip-warp`…) là WARN;
+  `ai_motion` trống. Ngược lại, id `engine: toon` ở tập `layers`/`seedance` là WARN.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
+- Từ khâu 8 (G3), tập `seedance`: shot có `ai_motion` phải có clip `<id>_<shot>_<model>_v<NN>.mp4` trong `clips/` (shot có
+  `reuse_of` dùng clip của shot gốc; clip `approved=no` không tính), thiếu là ERROR.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp
   tranh); id lạ là WARN.
@@ -241,6 +253,9 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 `file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link`
 - `file` theo quy ước tên §2; `prompt_file` đường dẫn tương đối tới file prompt đã dùng (lưu trong thư mục tập, `prompts/`).
 - `refs` cách nhau bởi `;`; `usage` = JSON usage Ark nguyên văn; `approved` ∈ `yes, no, ''`.
+- Mỗi cặp (shot, lớp) chỉ một ảnh `approved=yes` và một clip `approved=yes` (dòng clip ghi lớp nó thay, nên L4 duyệt +
+  clip duyệt là hợp lệ); hai bản duyệt là ERROR. File trong `plates/` (không tính `plates/matte/`) không có dòng nào
+  trong `prompts.csv` → một WARN liệt kê (ảnh trả tiền chưa ghi prompt, hoặc file thử để nhầm chỗ).
 
 ## 7. Ngân sách và ledger (`tools/ark.py --budget/--ledger`)
 
@@ -338,7 +353,7 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 | Ngân sách ghi bằng prompt | `ark.py --budget/--ledger` chặn trong công cụ |
 | `cost_note` | `usage` JSON nguyên văn (API không trả tiền) |
 | Lưu Drive từng file | Media: gói zip theo shot (`tools/bundle.py`); ảnh pro/4K từ Lambda tải từ S3 về `out/` rồi vào gói như mọi ảnh. File chữ của dự án: từng file, bản mới thay bản cũ theo §11.6 |
-| Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-<v>.txt` |
+| Reviewer có Bash giới hạn | Reviewer không có Bash; số đo do `tools/check_episode.py` ghi ra `review/check-v<N>.txt` |
 | Song song plate-maker | Tối đa 3 agent song song; ledger dùng khoá file |
 | Kiểm tra kịch bản bằng mắt | `tools/check_episode.py` kiểm schema, thời lượng, nhịp, tên file |
 | Ảnh `--ref` nặng | `ark.py` nén ref thành JPEG q90, cạnh ≤ 2048 trước khi gửi |

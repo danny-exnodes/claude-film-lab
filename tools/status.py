@@ -495,9 +495,25 @@ def run_check(ep_dir, media):
     return p.returncode, lines[-1] if lines else f"no Summary line (exit {p.returncode})"
 
 
-def narration_watermark(media):
+def script_vo_ids(ep_dir):
+    """Ids VO1..VOn of the narration lines of script.md, numbered as tools/tts/vieneu_tts.py parse_script does
+    (None when script.md is missing or unreadable)."""
+    try:
+        text = check_episode.read_text(os.path.join(ep_dir, "script.md"))
+    except (OSError, check_episode.CheckError):
+        return None
+    n = 0
+    for _, line in check_episode.narration_lines(text):
+        m = check_episode.RE_MARK.match(line)
+        if m and m.group(3).strip():
+            n += 1
+    return {f"VO{i}" for i in range(1, n + 1)}
+
+
+def narration_watermark(media, ids=None):
     """G4: (ok, text) for <media>/vo/tts-log.json of tools/tts/vieneu_tts.py: every take rendered with the audio
-    watermark on. No log = no narration rendered by the lab's TTS = n/a."""
+    watermark on. No log = no narration rendered by the lab's TTS = n/a. With `ids` (the current script's VO ids),
+    takes of lines cut from the script are ignored, as `vieneu_tts.py --check` does (the log keeps them)."""
     path = os.path.join(media, "vo", "tts-log.json") if media else None
     if not path or not os.path.isfile(path):
         return True, "narration watermark: n/a (no vo/tts-log.json)"
@@ -508,6 +524,10 @@ def narration_watermark(media):
         return False, f"narration watermark: vo/tts-log.json unreadable ({e})"
     if not isinstance(log, list) or not log or not all(isinstance(e, dict) for e in log):
         return False, "narration watermark: vo/tts-log.json is not a non-empty list of takes"
+    if ids is not None:
+        log = [e for e in log if str(e.get("id")) in ids]
+        if not log:
+            return False, "narration watermark: vo/tts-log.json has no take of the current script.md"
     off = [str(e.get("id", "?")) for e in log if e.get("watermark") is not True]
     if off:
         return False, (f"narration watermark on for every take (off: {', '.join(off[:6])}"
@@ -581,7 +601,7 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     else:
         need(d["media"]["final"], f"final render ({d['media']['final'] or 'none'})")
         need(not n_open, f"no open paid request ({n_open} open)")
-        need(*narration_watermark(media))
+        need(*narration_watermark(media, script_vo_ids(ep_dir)))
     missing = sum(1 for r in req if not r["ok"])
     return {"gate": gate, "ready": missing == 0, "missing": missing, "requirements": req}
 

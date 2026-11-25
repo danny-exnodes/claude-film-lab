@@ -348,6 +348,8 @@ class TestDoctor(unittest.TestCase):
 
     def test_setup_script_stamp(self):
         self.assertRegex(self.line("closed_quick", "setup-script"), r"WARN .*no stamp .*older than v%s" % SETUP_VERSION)
+        self.assertNotRegex(self.r["closed_quick"][1] + self.r["closed_quick"][2], r"line \d+: .*No such file",
+                            "a missing stamp is a WARN line, not a shell error")
         self.assertRegex(self.line("low_disk", "setup-script"),
                          r"WARN .*ran setup script v1, the repo has v%s" % SETUP_VERSION)
         self.assertRegex(self.line("big_disk", "setup-script"), r"OK +setup-script +v%s" % SETUP_VERSION)

@@ -910,6 +910,14 @@ class NarrationWatermarkTest(StatusCase):
         code, out = self.run_status("--gate", "G4")
         self.assertIn("narration watermark", out)
 
+    def test_takes_cut_from_the_script_are_ignored(self):
+        """vieneu_tts.py keeps log entries of lines the script no longer has; --check ignores them, so G4 does too."""
+        self.vo_log([{"id": f"VO{i}", "watermark": True} for i in range(1, 6)]
+                    + [{"id": "VO6", "watermark": False}, {"id": "VO7"}])
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["ready"]), (0, True), self.missing(g))
+        self.assertIn("(5)", self.requirement(g)[0]["text"])
+
     def test_unreadable_log_blocks_g4(self):
         for raw in ("{broken", "{}", "[]"):
             with self.subTest(raw=raw):

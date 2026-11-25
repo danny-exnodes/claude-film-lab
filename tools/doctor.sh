@@ -184,7 +184,7 @@ case "$kb" in
 esac
 want=$(sed -n -E 's/^SETUP_VERSION=([0-9]+).*/\1/p' "$LAB/docs/setup-script.sh" 2>/dev/null | head -1)
 stamp="${FILM_SETUP_STAMP:-/opt/film-lab/setup-script.version}"
-have=$(tr -d '[:space:]' < "$stamp" 2>/dev/null)
+have=$( { tr -d '[:space:]' < "$stamp"; } 2>/dev/null )
 if [ -z "$want" ]; then warn setup-script "docs/setup-script.sh has no SETUP_VERSION line"
 elif [ -z "$have" ]; then warn setup-script "no stamp $stamp: the environment ran a setup script older than v$want (paste docs/setup-script.sh into the environment)"
 elif [ "$have" != "$want" ]; then warn setup-script "the environment ran setup script v$have, the repo has v$want: paste docs/setup-script.sh into the environment"

@@ -3,7 +3,8 @@
 # Paste into the environment's Setup script (claude.ai: cloud environment menu -> Edit).
 # The repo danny-exnodes/claude-film-lab does the rest at session start (.claude/hooks/session-start.sh):
 # links /opt/byteplus/ark.py to the repo's tools/ark.py, exports FILM_LAB, CINECODE_FORMATS, CHROME_PATH,
-# re-checks fonts/pip and prints the doctor report. Keep the pip pins below equal to requirements.txt.
+# re-checks fonts/pip and prints the doctor report. Keep the pip pins below equal to requirements.txt and
+# requirements-tts.txt (tests/test_repo_hygiene.py, tests/test_env_scripts.py).
 log() { echo "[setup $(date +%T)] $*"; }
 export DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore
 # A slow mirror should fail fast and retry instead of stalling a whole step
@@ -59,6 +60,33 @@ else
   ( cd /tmp && timeout 240 python3 -c "from rembg import new_session; new_session('u2net')" >/tmp/setup-u2net.log 2>&1 ) \
     && log "u2net: ok" || log "u2net: FAILED (downloads on first use)"
 fi
+
+# 3b. Narration (tools/tts/vieneu_tts.py): vieneu and its audio watermark (resemble-perth on CPU torch), pins =
+#     requirements-tts.txt of the repo. torch comes from the CPU wheel index first, so resemble-perth never pulls the
+#     CUDA build. Every failure is a WARN: the session works without narration, and doctor.sh reports tts and
+#     tts-watermark. FILM_TTS=0 skips the step; FILM_TTS_PREFETCH=1 also downloads the v3 Turbo model (~300 MB).
+# --- tts: begin
+TORCH_CPU_INDEX="https://download.pytorch.org/whl/cpu"
+TTS_LOG="${TTS_LOG:-/tmp/setup-tts.log}"
+PIPQ=(python3 -m pip install -q --break-system-packages)
+if [ "${FILM_TTS:-1}" = 0 ]; then
+  log "tts: skipped (FILM_TTS=0)"
+else
+  timeout 300 "${PIPQ[@]}" "vieneu==3.8.3" >"$TTS_LOG" 2>&1 \
+    && log "tts: ok (vieneu 3.8.3)" || log "tts: WARN install failed (see $TTS_LOG; narration unavailable)"
+  if timeout 600 "${PIPQ[@]}" --index-url "$TORCH_CPU_INDEX" "torch==2.15.0" torchaudio >>"$TTS_LOG" 2>&1; then
+    timeout 180 "${PIPQ[@]}" "resemble-perth==1.0.1" >>"$TTS_LOG" 2>&1 \
+      && log "tts-watermark: ok (resemble-perth 1.0.1, CPU torch)" \
+      || log "tts-watermark: WARN resemble-perth failed (see $TTS_LOG; takes are read without watermark)"
+  else
+    log "tts-watermark: WARN CPU torch failed (see $TTS_LOG; resemble-perth not tried)"
+  fi
+  if [ "${FILM_TTS_PREFETCH:-0}" = 1 ]; then
+    ( cd /tmp && HF_HUB_DISABLE_SYMLINKS=1 timeout 600 python3 -c "from vieneu import Vieneu; Vieneu(mode='v3turbo')" \
+      >>"$TTS_LOG" 2>&1 ) && log "tts model: ok (v3 Turbo cached)" || log "tts model: WARN prefetch failed (downloads on first use)"
+  fi
+fi
+# --- tts: end
 
 # 4. The cinecode skill, pinned to the commit the repo's tools/compose/inline.py is tested against
 #    (tools/compose/cinecode.ref holds the same id; tests/test_compose.py fails when the two differ).

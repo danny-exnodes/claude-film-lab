@@ -2,6 +2,7 @@
 # AI Film Lab environment check. No image or video is generated.
 #   tools/doctor.sh           full check
 #   tools/doctor.sh --quick   local checks + Ark ping (used by the SessionStart hook)
+#   tools/doctor.sh [--quick] --episode DIR   also judge the narration watermark for that episode (FAIL past G3)
 #   tools/doctor.sh -h        this text
 # Quick mode only reads: local tools, the ark.py link, GET /models.
 # Full mode adds a real import of rembg, the agent proxy status and ONE request to the video endpoint:
@@ -13,14 +14,35 @@ set -u
 LAB="$(cd "$(dirname "$0")/.." && pwd)"
 ARK_DIR="${ARK_DIR:-/opt/byteplus}"
 usage() { sed -n '2,/^set -u$/p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//'; }
-QUICK=0
-[ $# -le 1 ] || { usage >&2; exit 2; }
-case "${1:-}" in
-  "") ;;
-  --quick) QUICK=1 ;;
-  -h|--help) usage; exit 0 ;;
-  *) usage >&2; exit 2 ;;
-esac
+QUICK=0 EPISODE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --quick) QUICK=1 ;;
+    --episode) [ $# -ge 2 ] && [ -n "$2" ] || { usage >&2; exit 2; }; EPISODE=$2; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
+# --episode DIR: "<G3 date or -> <narration lines>" of that episode (tools/status.py reads EPISODE.md), before any check
+EP_INFO=""
+if [ -n "$EPISODE" ]; then
+  EP_INFO=$(python3 - "$LAB/tools" "$EPISODE" 2>&1 <<'PY'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import check_episode, status
+try:
+    meta, _ = status.load_episode(sys.argv[2])
+except status.Usage as e:
+    sys.exit(str(e))
+try:
+    n = sum(1 for _ in check_episode.narration_lines(check_episode.read_text(os.path.join(sys.argv[2], "script.md"))))
+except (OSError, ValueError, check_episode.CheckError):
+    n = 0
+print(status.gate_dates(meta, [])["G3"] or "-", n)
+PY
+  ) || { echo "doctor: --episode: $(echo "$EP_INFO" | tail -1 | cut -c1-160)" >&2; exit 2; }
+fi
 fails=0
 ok()   { printf '  OK    %-22s %s\n' "$1" "$2"; }
 bad()  { printf '  FAIL  %-22s %s\n' "$1" "$2"; fails=$((fails+1)); }
@@ -50,6 +72,47 @@ print(m.version('rembg'), '+ onnxruntime', onnxruntime.__version__, '(imported)'
 fi
 v=$(python3 -c "import yaml; print(yaml.__version__)" 2>/dev/null) && ok pyyaml "$v" || bad pyyaml "missing: python3 -m pip install -r requirements.txt"
 { [ -f /root/.rembg/models/u2net/u2net.onnx ] || [ -f ~/.u2net/u2net.onnx ]; } && ok rembg-model "u2net cached" || warn rembg-model "u2net not cached (downloads on first use)"
+# Narration (tools/tts/vieneu_tts.py): vieneu and its audio watermark (resemble-perth on CPU torch), pinned in
+# requirements-tts.txt and installed by docs/setup-script.sh. Quick mode looks the modules up, full mode imports them.
+# Missing = WARN (only narration needs them); the watermark is a FAIL with --episode DIR once G3 is dated and the
+# episode has narration: a final take without it must be read again (#37).
+tts_hint="pip install --break-system-packages -r requirements-tts.txt, CPU torch first (tools/tts/README.md)"
+pymods() {  # <distributions a,b> <modules...>: "a X + b Y" or exit 1 with why (quick: looked up, full: imported)
+  python3 - "$QUICK" "$@" 2>&1 <<'PY'
+import importlib.metadata as m, importlib.util as u, sys
+quick, mods = sys.argv[1] == "1", sys.argv[3:]
+if quick:
+    miss = [n for n in mods if u.find_spec(n) is None]
+    if miss:
+        sys.exit("missing module(s) " + ", ".join(miss))
+else:
+    try:
+        for n in mods:
+            __import__(n)
+    except Exception as e:
+        sys.exit(f"import fails ({type(e).__name__}: {(str(e).splitlines() or [''])[0]})")
+def ver(d):
+    try:
+        return m.version(d)
+    except m.PackageNotFoundError:
+        return "?"
+print(" + ".join(f"{d} {ver(d)}" for d in sys.argv[2].split(",")) + ("" if quick else " (imported)"))
+PY
+}
+v=$(pymods vieneu vieneu); rc=$?
+tts_pin=$(sed -n -E 's/^vieneu==([^[:space:]#]+).*/\1/p' "$LAB/requirements-tts.txt" 2>/dev/null)
+hub="${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}"
+if ls -d "$hub"/models--pnnbao-ump--VieNeu-TTS-v3-Turbo/snapshots/*/ >/dev/null 2>&1; then model="v3 Turbo model cached"
+else model="v3 Turbo model not cached (~300 MB on first use; FILM_TTS_PREFETCH=1 in docs/setup-script.sh)"; fi
+if [ $rc != 0 ]; then warn tts "$(echo "$v" | tail -1 | cut -c1-60): narration needs it; $tts_hint"
+elif [ "${v%% (imported)}" = "vieneu $tts_pin" ]; then ok tts "$v, $model"
+else warn tts "$v, pinned $tts_pin in requirements-tts.txt; $model"; fi
+v=$(pymods resemble-perth,torch perth torch); rc=$?
+read -r ep_g3 ep_lines <<< "${EP_INFO:-- 0}"
+if [ $rc = 0 ]; then ok tts-watermark "$v"
+elif [ "$ep_g3" != "-" ] && [ "${ep_lines:-0}" -gt 0 ]; then
+  bad tts-watermark "$(echo "$v" | tail -1 | cut -c1-50); $EPISODE passed G3 ($ep_g3) with narration: final takes need it; $tts_hint"
+else warn tts-watermark "$(echo "$v" | tail -1 | cut -c1-50): narration drafts read without it; $tts_hint"; fi
 # cinecode is pinned (tools/compose/cinecode.ref = CINECODE_REF in docs/setup-script.sh). A different HEAD is only a
 # warning; what decides is the compose-kit check below, which runs inline.py on the template that is installed.
 CINE=/root/.claude/skills/cinecode

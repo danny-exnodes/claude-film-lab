@@ -37,9 +37,11 @@
     // 0 open .. 1 closed at time t.
     amount(t, cfg = {}) {
       let v = cfg.keys ? C.clamp(C.track(cfg.keys, t)) : 0;
-      for (const b of cfg.blinks || []) {
-        const u = (t - b.at) / (b.dur ?? 0.28);
-        if (u <= 0 || u >= 1) continue;
+      if (!Number.isFinite(v)) v = 0;
+      for (const b of Array.isArray(cfg.blinks) ? cfg.blinks : []) {
+        // a blink of 0 s (or a time that is not a number) would give 0 / 0 on its first frame: the lid as NaN
+        const dur = Math.max(0.04, Number.isFinite(+b?.dur) && b.dur != null ? +b.dur : 0.28), u = (t - b?.at) / dur;
+        if (!(u > 0 && u < 1)) continue;
         v = Math.max(v, u < 0.35 ? C.smooth(u / 0.35) : u < 0.5 ? 1 : 1 - C.smooth((u - 0.5) / 0.5));
       }
       return v;

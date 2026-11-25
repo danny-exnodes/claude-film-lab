@@ -5,18 +5,20 @@
 // Rig (PLATES.<id>.rig.sway): { <name>: { box: '<anchor box>' | [x0, y0, x1, y1] (default: the name),
 //   root: 'bottom' (default: the box's bottom edge is the root line; point <name>_root, when anchors.json has it,
 //         puts the root line at that point's height and leaves what is below it still) | 'top' (a hanging vine) |
-//         '<point>',
+//         'left' | 'right' (a branch growing sideways from a trunk: the sway goes up and down) | '<point>' | [x, y]
+//         (a point in plate px, like a named one),
 //   amp: 0.015   the largest offset of the far end, as a share of the height from the root line to that end
 //                (capped at MAX_AMP = 0.04: more than that reads as rubber),
 //   period: 5.5  seconds of one sway, gust: 0.6 (0-1: how much of the sway dies down between gusts),
 //   power: 1.6   how fast the offset grows away from the root, lag: 0.5 (s the far end trails the root), strip: 4,
-//   salt         default: derived from the plate and the box, so neighbouring trees never sway in lockstep } }
+//   salt         default: a hash of the plate id and the box, so neighbouring trees never sway in lockstep } }
 //
 // This is strip-warp with another offset law, not a second warp engine: at load the regions are handed to
 // strip-warp's own prepare (cut-out, strips, seamless joint) and join the plate's warp regions; strip-warp draws
 // them and asks COMPOSE.stripWarp.offset, which hands a sway region to COMPOSE.foliage.offset.
-// Per shot, therefore, as for strip-warp: st.plate('L2', { warp: { crown: false } }) holds one region still,
-// { warp: false } holds every region, { warp: { crown: { amp: 0.02, period: 4 } } } overrides.
+// Per shot: st.plate('L2', { sway: { crown: false } }) holds one tree still, { sway: false } holds every tree (a
+// strip-warp tail on the same plate keeps moving), { sway: { crown: { amp: 0.02, period: 4 } } } overrides. Without a
+// `sway` key the `warp` key reaches the trees too ({ warp: false } holds every region of the plate).
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
@@ -24,6 +26,15 @@
   const SIDES = ['left', 'right', 'top', 'bottom'];
   const fin = (v) => typeof v === 'number' && Number.isFinite(v);
   const or = (v, d) => (fin(v) ? v : d);
+
+  // The default salt: a hash of the plate id (every character, in order) and the box, 1..9973. Two boxes share it
+  // only by chance (about 1 in 10 000), never for a simple shift or for plate ids that are anagrams.
+  function saltOf(id, x0, y0, x1, y1) {
+    let h = 0x811c9dc5;
+    for (const ch of String(id)) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193);
+    for (const v of [x0, y0, x1, y1]) h = Math.imul(h ^ (v | 0), 0x01000193) ^ (h >>> 13);
+    return 1 + Math.floor(C.hash(h, 1, 29) * 9973);
+  }
 
   function prepare(p) {
     if (p.seq || !p.rig || !p.rig.sway) return;
@@ -43,11 +54,16 @@
       if (x1 - x0 < 8 || y1 - y0 < 8) { C.warn(`plate ${p.id}: sway ${name} box is too small: it stays still`); continue; }
       // the root line and the far end, as strip-warp's root / tip
       const rootName = cfg.root || (p.anchors.points[name + '_root'] ? name + '_root' : 'bottom');
+      const given = Array.isArray(rootName);
       let height;
       if (SIDES.includes(rootName)) height = rootName === 'left' || rootName === 'right' ? x1 - x0 : y1 - y0;
       else {
-        const pt = p.anchors.points[rootName];
-        if (!pt) { C.warn(`plate ${p.id}: sway ${name} has no anchor point "${rootName}": it stays still`); continue; }
+        const pt = given ? (rootName.length === 2 && rootName.every(fin) ? rootName : null) : p.anchors.points[rootName];
+        if (!pt) {
+          C.warn(given ? `plate ${p.id}: sway ${name} root [${rootName.join(', ')}] is not a point [x, y] in plate px: it stays still`
+            : `plate ${p.id}: sway ${name} has no anchor point "${rootName}": it stays still`);
+          continue;
+        }
         const ry = C.clamp(pt[1], y0, y1), end = ry - y0 >= y1 - ry ? y0 : y1;   // the far end: the longer side
         height = Math.abs(end - ry);
         cfg.root = [pt[0], ry]; cfg.tip = [pt[0], end];
@@ -66,10 +82,7 @@
           delete cfg[key];
         }
       }
-      let idSum = 0;
-      for (const ch of String(p.id)) idSum += ch.charCodeAt(0);
-      regions[name] = { ...cfg, box: [x0, y0, x1, y1], foliage: true, height,
-                        salt: cfg.salt ?? 1 + (x0 * 73 + y0 * 19 + (x1 - x0) * 7 + idSum * 131) % 9973 };
+      regions[name] = { ...cfg, box: [x0, y0, x1, y1], foliage: true, height, salt: cfg.salt ?? saltOf(p.id, x0, y0, x1, y1) };
     }
     if (!Object.keys(regions).length) return;
     // strip-warp cuts and strips the regions on a stand-in for the plate whose image is the body it already cut for
@@ -86,6 +99,7 @@
 
   C.foliage = {
     MAX_AMP: 0.04,
+    saltOf,
     // Sideways offset (plate px) at u (0 root line .. 1 far end) at time t. |offset| <= amp * height, always.
     offset(u, t, cfg, seed = C.seed) {
       // every value is made finite here too: a per-shot override ({ warp: { crown: {...} } }) comes straight to this

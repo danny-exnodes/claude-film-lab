@@ -96,24 +96,50 @@
     return st;
   };
 
-  // One plate through the camera at its depth, with its rig (breath, strip-warp, eyelids) at film time t.
-  //   o: { t, depth, alpha, blend, filter, dx, dy, breath: false | {...}, warp: false | { <name>: {...} },
-  //        eyes: { <name>: { blinks: [{ at, dur }], keys: [[t, lid], ...] } } }
+  // One plate through the camera at its depth, with its rigs at film time t, all in ONE st.layer pass:
+  //   body -> strip-warp / foliage strips -> cloth -> eyelids (an eyelid on a cloth box stays on top of the cloth).
+  //   o: { t, depth, alpha, blend, filter, dx, dy, breath: false | {...}, warp: false | { <name>: {...} | false },
+  //        sway: false | { <name>: {...} | false }, eyes: { <name>: { blinks, keys } | false },
+  //        cloth: false | { <name>: {...} | false }, wind: {...}, poses: false | {...} }
+  // A plate with a pose rig (pose.js) draws the pose plate(s) of the moment instead, each through this function.
+  // When the plate is drawn in more than one pass (a rig) AND with alpha < 1, a filter or a blend, the passes are first
+  // put together on a scratch canvas of the plate's size, which is then drawn once: the overlap at a rig's joint is
+  // not composited twice and a blur is applied to the whole plate, not to the body and the cloth apart.
+  const FLAT_BLENDS = new Set([undefined, null, '', 'source-over']);
   C.drawPlate = (st, id, o = {}) => {
-    const p = C.get(id), t = o.t ?? st.t, d = o.depth ?? p.depth;
-    const warp = !p.seq && C.stripWarp ? C.stripWarp.active(p, o.warp) : false;
+    const p = C.get(id);
+    if (C.pose && C.pose.route && C.pose.route(st, p, o)) return;
+    const t = o.t ?? st.t, d = o.depth ?? p.depth;
+    const warp = !p.seq && C.stripWarp ? C.stripWarp.active(p, o.warp, o.sway) : false;
+    const cloth = !p.seq && C.cloth && C.cloth.active ? C.cloth.active(p, o) : false;
     const img = p.seq ? C.frameOf(p, t) : warp ? p.body : p.canvas;
     if (!img) return;
+    const eyes = !!(C.eyelid && !p.seq && p.eyes && p.eyes.length);
+    const passes = (warp ? 1 : 0) + (cloth ? 1 : 0) + (eyes ? 1 : 0);
+    const alpha = o.alpha != null && Number.isFinite(+o.alpha) ? C.clamp(+o.alpha) : null;
+    const filter = o.filter && o.filter !== 'none' ? o.filter : null;
+    const flat = passes > 0 && ((alpha != null && alpha < 1) || filter || !FLAT_BLENDS.has(o.blend));
+    const paint = (g) => {
+      g.drawImage(img, 0, 0);
+      if (warp) C.stripWarp.draw(g, p, t, o.warp, o.sway);
+      if (cloth) C.cloth.draw(g, p, t, o.cloth, { ...(st.wind || {}), ...(o.wind || {}) });
+      if (eyes) C.eyelid.draw(g, p, t, o.eyes);
+    };
     st.layer(d, (g) => {
       g.translate(p.place.ox + (o.dx || 0), p.place.oy + (o.dy || 0));
       g.scale(p.place.s, p.place.s);
-      if (o.alpha != null) g.globalAlpha *= o.alpha;
+      if (alpha != null) g.globalAlpha *= alpha;
       if (o.blend) g.globalCompositeOperation = o.blend;
-      if (o.filter) g.filter = o.filter;
+      if (filter) g.filter = filter;
       if (C.breath && !p.seq) C.breath.apply(g, p, t, o.breath);
-      g.drawImage(img, 0, 0);
-      if (warp) C.stripWarp.draw(g, p, t, o.warp);
-      if (C.eyelid && !p.seq) C.eyelid.draw(g, p, t, o.eyes);
+      if (!flat) { paint(g); return; }
+      if (!p.flat || p.flat.width !== p.w || p.flat.height !== p.h) p.flat = C.canvas(p.w, p.h);
+      const f = p.flat.getContext('2d');
+      f.setTransform(1, 0, 0, 1, 0, 0);
+      f.globalAlpha = 1; f.globalCompositeOperation = 'source-over'; f.filter = 'none';
+      f.clearRect(0, 0, p.w, p.h);                // redrawn whole on every call: nothing is carried between frames
+      paint(f);
+      g.drawImage(p.flat, 0, 0);
     }, p.cover ? p : null);
   };
 })(typeof window !== 'undefined' ? window : globalThis);

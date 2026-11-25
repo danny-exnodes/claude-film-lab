@@ -538,3 +538,53 @@ test('figure: the docs and the registry name what the code has', () => {
   }
   assert.ok(third.includes('Copyright (c) 2026 LemoLab') && third.includes('Permission is hereby granted'));
 });
+
+test('figure: every step of a path stays inside 10-38 % of the height, even a short stretch between pauses', () => {
+  const h = 200;
+  const cases = [
+    // 1.4 strides of the longest step between two pauses: one step would have been 0.53 x the height
+    { height: h, salt: 1, path: [[0, 300, 800], [2, 300 + 1.4 * 0.38 * h, 800], [4, 300 + 1.4 * 0.38 * h, 800], [8, 900, 800]] },
+    { height: h, salt: 2, path: [[0, 100, 800], [1.2, 100 + 0.7 * h, 800]] },
+    { height: h, salt: 3, path: [[0, 100, 800], [40, 140, 800]] },
+  ];
+  for (const o of cases) {
+    const { C } = kit();
+    const lo = C.figure.STEP.lo * h, hi = C.figure.STEP.hi * h;
+    const last = [null, null];
+    for (let n = 0; n <= 12 * 8; n++) {
+      const s = C.figure.state({ t: n / 12 }, o);
+      assert.ok(s.path.stride <= hi + 1e-6, `stride ${s.path.stride} > ${hi}`);
+      assert.ok(s.path.stride >= lo - 1e-6, `stride ${s.path.stride} < ${lo}`);
+      s.feet.forEach((f, i) => {
+        if (!f.planted) return;
+        // one swing goes from plant k-1 to plant k+1: at most two strides
+        if (last[i] && last[i].plant !== f.plant) assert.ok(Math.hypot(f.x - last[i].x, f.y - last[i].y) <= 2 * hi + 1e-6);
+        last[i] = f;
+      });
+    }
+    assert.deepEqual(C.warnings, [], JSON.stringify(o.path));
+  }
+  // a stretch shorter than the shortest step is one small step, with a warning
+  const k = kit().C;
+  k.figure.state({ t: 1 }, { height: h, salt: 4, path: [[0, 100, 800], [1, 110, 800]] });
+  assert.ok(k.report().some((l) => /figure 4: a stretch of 10 px between two pauses is shorter than one step/.test(l)), JSON.stringify(k.report()));
+});
+
+test('figure: a timeline turn while walking a path with a fixed view does not move a planted foot', () => {
+  const { C } = kit();
+  const o = { height: 200, salt: 6, view: 'back', path: [[0, 200, 820], [8, 1200, 820]], timeline: [{ at: 3, pose: 'turn', view: 'side', dur: 1.2 }] };
+  const fine = Array.from({ length: 8 * 96 + 1 }, (_, i) => i / 96);
+  const plants = [new Map(), new Map()];
+  let turning = 0;
+  for (const t of fine) {
+    const s = C.figure.state({ t }, o);
+    if (t > 3 && t < 4.2 && Math.abs(Math.abs(s.yaw) - 90) > 1 && Math.abs(s.yaw - 180) > 1) turning++;
+    s.feet.forEach((f, i) => {
+      if (!f.planted || f.plant == null) return;
+      const at = plants[i].get(f.plant);
+      if (at) assert.deepEqual([f.x, f.y], at, `foot ${i}, plant ${f.plant}, t=${t}`); else plants[i].set(f.plant, [f.x, f.y]);
+    });
+  }
+  assert.ok(turning > 20, `the figure does turn while walking (${turning})`);
+  assert.deepEqual(C.warnings, []);
+});

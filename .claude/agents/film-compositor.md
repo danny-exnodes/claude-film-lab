@@ -32,6 +32,11 @@ Phương pháp dựng: đọc `method` trong `EPISODE.md` trước khi dựng sh
 - **`method: code`**: không plate, không clip. `python3 tools/compose/inline.py <film>/film.html --init --toon`, rồi điền
   `CHARS` (character.json đã khóa), `STYLE` (khối `render` của style pack), mỗi shot một hàng `SHOTS` (timeline +
   camera); `references/code-method.md`. Chân không trượt, đổi hướng bằng `turn`.
+- **`method: blender`**: không plate. Mỗi shot dùng render Blender `out/<project>/ep<NN>/renders3d/s<NN>/` (bản mới nhất
+  `_v<NN>`; chuỗi `beauty/` hoặc `beauty.mp4`) như một clip cả khung; sương, nắng, chữ bằng compose kit
+  (`references/blender-method.md`). Thiếu render: báo đạo diễn, không tự chạy Blender.
+- **Clip H3 local** (`video_engine: comfy`, `references/local-video.md`): clip 1344×768 có âm thanh tự sinh; quyết định
+  giữ hay tắt từng clip và ghi vào `review/sound-audit.md` (mặc định tắt dưới lời bình).
 
 Âm thanh bằng code: khi hợp đồng ghi người dùng đã chọn nhạc **code**, hoặc khi foley phải rơi đúng khung hình, viết
 `score.json` trong thư mục tập và dựng bằng `python3 tools/audio/score.py <tập>/score.json --dry-run` rồi

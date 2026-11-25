@@ -25,6 +25,9 @@ Kiểm: mỗi câu trích có trong nguồn nguyên văn; tên đọc đúng că
 Tập `method: code` (không `prompts.csv`, không plate): thêm nhân vật đúng `characters/<slug>/character.json` đã khóa ở G2
 (tỉ lệ, màu, số mắt, seed) và turntable trong `review/`, không chân trượt hay tay xuyên thân ở khung đạo diễn chỉ định,
 và mục 7 của `.claude/skills/film-compose-shot/references/code-method.md`.
+Tập `method: blender`: thêm model đúng `ASSETS.md` (nguồn, giấy phép) và turntable đã duyệt ở G2, không vật xuyên đất hay
+trượt, mọi shot cùng look/engine, và mục 6 của `.claude/skills/film-compose-shot/references/blender-method.md`. Clip H3
+local: âm thanh tự sinh đã được tắt hoặc ghi rõ là giữ trong `review/sound-audit.md`.
 
 Quyền ghi (Write/Edit) chỉ dùng cho đúng hai chỗ:
 1. `review/qc-*.md` trong thư mục tập đang kiểm (tạo mới bằng Write; không ghi đè `qc-*.md` của phiên bản khác);

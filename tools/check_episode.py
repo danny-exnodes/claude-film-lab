@@ -26,7 +26,9 @@ the gate dates, and with --probe only the newest draft and the newest final rend
 INFO line). A file that cannot be read gives an ERROR line; the report is written even then.
 
 Shot ids are s<NN> or s<NNN> (one width per episode); layer codes include pose plates L4b..L4z; method code
-layers are C-/M-<slug>, E-<slug>, FX[-<name>], T. code_motion ids come from tools/compose/motions.json (entries
+layers are C-/M-<slug>, E-<slug>, FX[-<name>], T; method blender layers are A-<asset>, E-<slug>, FX[-<name>], T, its
+cameras the shot3d moves (static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track), and <episode>/shots3d/s<NN>.json
+is validated with tools/blender/spec.py when that module exists (a WARN when it does not). code_motion ids come from tools/compose/motions.json (entries
 with engine: toon are method code actions; their project.js moves are camera values there too). Coverage:
 two approved images (or clips) of one shot layer = ERROR; files in plates/ without a prompts.csv row = WARN;
 from stage 8 (G3) a seedance shot with ai_motion and no clip in clips/ = ERROR. A key given twice in the
@@ -82,11 +84,20 @@ RE_RENDER_FILE = re.compile(rf"^{ID}_(draft|final)_v\d{{2}}\.mp4$")
 #   clips/<clip stem>/raw/000001.png ...        raw frames extracted with ffmpeg before keying
 RE_START_FRAME = re.compile(rf"^{ID}_{SHOT}_start_v\d{{2}}\.png$")
 RE_CLIP_STEM = re.compile(rf"^{ID}_{SHOT}_[a-z0-9]+_v\d{{2}}$")
+#   clips/<clip>.mp4.json or clips/<clip stem>.json  sidecar of a local clip (tools/comfy/comfy.py run: seed, workflow, models)
+RE_CLIP_SIDECAR = re.compile(rf"^{ID}_{SHOT}_[a-z0-9]+_v\d{{2}}(?:\.mp4)?\.json$")
 RE_FRAME = re.compile(r"^\d{6}\.png$")
 RE_LAYER_CODE = eid_mod.RE_LAYER
 # method: code (drawn in code, tools/toon/, code-method.md §4): C-<character> or M-<model>, E-<setting>,
 # FX or FX-<effect>, T (on-screen text)
 RE_CODE_LAYER = re.compile(r"^([CM]-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
+# method: blender (3D renders, blender-method.md): A-<asset> (3D model: GLB or preset), E-<setting>, FX[-<effect>], T
+RE_BLENDER_LAYER = re.compile(r"^(A-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
+# <episode>/shots3d/s<NN>.json: one shot3d.json per shot (tools/blender/README.md)
+RE_SHOT3D_FILE = re.compile(r"^(s(?:\d{2}|\d{3}))\.json$")
+# out/<project>/<id>/renders3d/: s<NN>/ (blender.py render), s<NN>_v<NN>/ (render again: --out never overwrites),
+# s<NN>_preview[_v<NN>]/ (--preview), s<NN>_keys[_v<NN>]/ (keyframes for wan22-flf2v), turntable-<asset>[_v<NN>]/
+RE_RENDER3D_DIR = re.compile(r"^(?:(s(?:\d{2}|\d{3}))(?:_(preview|keys))?|turntable-[a-z0-9-]+)(?:_v\d{2})?$")
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RE_EP_DIR = eid_mod.RE_DIR
 RE_SHOT = eid_mod.RE_SHOT
@@ -96,8 +107,13 @@ MEDIA_RULES = {"plates": RE_LAYER_FILE, "clips": RE_CLIP_FILE, "renders": RE_REN
 
 # --- §5 / §6 schema --------------------------------------------------------------
 EPISODE_KEYS = ["series", "episode", "slug", "style", "length_s", "stage", "gates", "media", "drive"]
-EPISODE_OPTIONAL = ["book", "method"]   # book set = project split into books: id q<book>t<episode>
-METHODS = ("layers", "seedance", "code")  # layers: image models + code motion; seedance: clips; code: no AI, all drawn in code
+EPISODE_OPTIONAL = ["book", "method", "video_engine"]   # book set = project split into books: id q<book>t<episode>
+# layers: image models + code motion; seedance: clips; code: no AI, all drawn in code; blender: 3D renders (local, free)
+METHODS = ("layers", "seedance", "code", "blender")
+# video_engine (stage 6, docs/WORKFLOW.md): seedance = paid Ark clips (tools/ark.py video, the default); comfy = local Wan
+# clips (tools/comfy/comfy.py run, free, owner's PC only). Allowed with method seedance and blender only.
+VIDEO_ENGINES = ("seedance", "comfy")
+VIDEO_ENGINE_METHODS = ("seedance", "blender")
 EPISODE_SECTIONS = ["## Ghi chú người dùng (nguyên văn)", "## Đã khóa (không làm lại)", "## Việc tiếp theo", "## Nhật ký"]
 GATES = ["G1", "G2", "G3", "G4"]
 SHOTS_HEADER = ["shot", "from_s", "to_s", "shot_size", "camera", "action", "layers", "code_motion", "ai_motion", "sound", "reuse_of"]
@@ -106,6 +122,8 @@ LEDGER_HEADER = ["ts", "kind", "model", "size", "seconds", "count", "status", "o
 SHOT_SIZES = {"extreme-wide", "wide", "medium", "close", "extreme-close", "insert"}
 CAMERAS = {"static", "push-in", "pull-out", "pan-left", "pan-right", "tilt-up", "tilt-down", "drift", "handheld"}
 CAMERAS_CODE = CAMERAS | {"orbit", "dolly", "crane", "track"}   # a 3D camera moves in method: code (tools/toon/project.js)
+# method: blender: exactly the camera.move names of shot3d.json (tools/blender/spec.py, same meanings as tools/toon/project.js)
+CAMERAS_BLENDER = {"static", "push-in", "pull-out", "pan", "tilt", "orbit", "dolly", "crane", "track"}
 SHOT_MIN_S, SHOT_MAX_S = 3, 13
 LINE_GAP_S = 3
 # --probe (docs/WORKFLOW.md stages 8-10): 16:9 frames, final master at -14 LUFS integrated.
@@ -127,7 +145,12 @@ STYLE_OPTIONAL = ["motion", "sound", "type"]   # may come from the cinecode reci
 # engine: code (a style drawn by tools/toon/, no image model): no prompt, matte, layers or models keys
 STYLE_REQUIRED_CODE = ["id", "name", "status", "base", "engine", "render", "palette"]
 STYLE_OPTIONAL_CODE = STYLE_OPTIONAL + ["name_en"]
-STYLE_ENGINES = {"image", "code"}
+# engine: blender (a style rendered by Blender, tools/blender/; method: blender): render = {look, palette, line, mist, engine}
+STYLE_REQUIRED_BLENDER = STYLE_REQUIRED_CODE
+STYLE_ENGINES = {"image", "code", "blender"}
+BLENDER_RENDER_KEYS = {"look", "palette", "line", "mist", "engine"}
+BLENDER_RENDER_ENGINES = {"eevee", "cycles"}
+BLENDER_LOOKS = ("grey-layout", "clay", "toon-ink", "ink-wash")   # spec §4.3; tools/blender/looks.json wins when present
 RENDER_ENGINES = {"canvas2d", "three"}
 RENDER_KEYS = {"engine", "look", "post", "hold", "palette", "opts", "camera", "env", "seed"}
 STYLE_STATUS = {"stable", "draft"}
@@ -268,6 +291,21 @@ def episode_method(front_matter):
     return (v if v in METHODS else None), True
 
 
+def video_engine(front_matter):
+    """(engine, explicit) from the EPISODE.md front matter: a missing key means ('seedance', False); a value that is
+    neither seedance nor comfy gives (None, True). Only meaningful for method seedance and blender."""
+    if not isinstance(front_matter, dict) or "video_engine" not in front_matter:
+        return "seedance", False
+    v = front_matter["video_engine"]
+    v = v.strip().lower() if isinstance(v, str) else None
+    return (v if v in VIDEO_ENGINES else None), True
+
+
+def remote_session():
+    """True in a Claude Code cloud session (the session hook's CLAUDE_CODE_REMOTE): no GPU, no Blender, no ComfyUI."""
+    return os.environ.get("CLAUDE_CODE_REMOTE", "").strip().lower() == "true"
+
+
 def check_front_matter(ep_dir, rep):
     import yaml
     path = os.path.join(ep_dir, "EPISODE.md")
@@ -304,9 +342,22 @@ def check_front_matter(ep_dir, rep):
             rep.warn(W, f"unknown front matter key '{k}'")
     method, explicit = episode_method(meta)
     if method is None:
-        rep.error(W, f"method must be layers, seedance or code (got {meta['method']!r})")
+        rep.error(W, f"method must be layers, seedance, code or blender (got {meta['method']!r})")
     elif not explicit:
-        rep.warn(W, "EPISODE.md has no method: (treated as seedance); add method: layers, seedance or code")
+        rep.warn(W, "EPISODE.md has no method: (treated as seedance); add method: layers, seedance, code or blender")
+    engine, engine_set = video_engine(meta)
+    if engine is None:
+        rep.error(W, f"video_engine must be seedance or comfy (got {meta['video_engine']!r})")
+    elif engine_set and method in ("layers", "code"):
+        rep.error(W, f"video_engine is for method seedance or blender; a method {method} episode makes no clip "
+                     f"(remove video_engine: {meta['video_engine']})")
+    if remote_session() and method is not None:
+        if method == "blender":
+            rep.warn(W, "method blender renders with Blender on the owner's PC: this cloud session cannot run stages "
+                        "4-6 (tools/blender/blender.py), only text work and checks")
+        if engine == "comfy" and method in VIDEO_ENGINE_METHODS:
+            rep.warn(W, "video_engine comfy makes clips with ComfyUI on the owner's PC: this cloud session cannot run "
+                        "stage 6 (tools/comfy/comfy.py)")
 
     ep_abs = os.path.abspath(ep_dir)   # abspath first: `episode .` must see the real folder name, not '.'
     folder = os.path.basename(ep_abs)
@@ -358,8 +409,13 @@ def check_front_matter(ep_dir, rep):
             eng = style_engine(os.path.join(LAB, "styles", st))
             if method == "code" and eng not in (None, "code"):
                 rep.error(W, f"method code needs an engine: code style pack; styles/{st} is engine: {eng}")
+            elif method == "blender" and eng not in (None, "blender"):
+                rep.error(W, f"method blender needs an engine: blender style pack; styles/{st} is engine: {eng}")
             elif method != "code" and eng == "code":
                 rep.error(W, f"styles/{st} is engine: code (drawn by tools/toon/); set method: code or pick an image style")
+            elif method != "blender" and eng == "blender":
+                rep.error(W, f"styles/{st} is engine: blender (rendered by tools/blender/); set method: blender or pick "
+                             f"an image style")
     length = meta.get("length_s")
     if "length_s" in meta and (isinstance(length, bool) or not isinstance(length, (int, float)) or length <= 0):
         rep.error(W, f"length_s {length!r} must be a positive number of seconds")
@@ -511,6 +567,29 @@ def check_budget(ep_dir, meta, rep):
         for name, cap in caps:
             if is_cap(cap) and cap > 0:
                 rep.error(W, f"method code: {name} = {cap!r} must be 0 (no image or video model is called)")
+    elif method == "blender":   # Blender renders are free; only paid Seedance clips (video_engine seedance) need a cap
+        engine, engine_set = video_engine(meta)
+        paid_clips = engine == "seedance" and engine_set and bool(shots_with_ai_motion(ep_dir))
+        caps = [("images", b.get("images"))]
+        if isinstance(models, dict):
+            caps += [(f"models.{mid}", cap) for mid, cap in models.items() if "seedance" not in str(mid).lower()]
+        for name, cap in caps:
+            if is_cap(cap) and cap > 0:
+                rep.error(W, f"method blender: {name} = {cap!r} must be 0 (no image model: Blender renders the frames)")
+        if not paid_clips:
+            caps = [("video_seconds", b.get("video_seconds"))]
+            if isinstance(models, dict):
+                caps += [(f"models.{mid}", cap) for mid, cap in models.items() if "seedance" in str(mid).lower()]
+            why = ("video_engine comfy makes free local clips" if engine == "comfy" else
+                   "no shot has ai_motion" if engine_set else "no video_engine: seedance with ai_motion shots")
+            for name, cap in caps:
+                if is_cap(cap) and cap > 0:
+                    rep.error(W, f"method blender: {name} = {cap!r} must be 0 ({why})")
+    if method == "seedance" and video_engine(meta)[0] == "comfy":
+        vs = b.get("video_seconds")
+        if is_cap(vs) and vs > 0:
+            rep.warn(W, f"video_engine comfy: clips are local and free, Seedance is not called; video_seconds = {vs!r} "
+                        f"is not used (set 0)")
     required = b.get("ledger_required")
     if "ledger_required" in b and not isinstance(required, bool):
         rep.error(W, f"ledger_required = {required!r} must be true or false")
@@ -519,6 +598,15 @@ def check_budget(ep_dir, meta, rep):
         if isinstance(stage, int) and stage >= LEDGER_REQUIRED_FROM_STAGE:
             rep.warn(W, f"ledger_required is not true at stage {stage} (set it from stage {LEDGER_REQUIRED_FROM_STAGE}: "
                         f"ark.py then refuses to generate before the ledger was pulled from Drive)")
+
+
+def shots_with_ai_motion(ep_dir):
+    """Shot ids with a non-empty ai_motion in shots.csv, read leniently (check_shots reports what is wrong)."""
+    try:
+        with open(os.path.join(ep_dir, "shots.csv"), encoding="utf-8-sig", newline="") as f:
+            return [r.get("shot") for r in csv.DictReader(f) if (r.get("ai_motion") or "").strip()]
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return []
 
 
 def missing_file(rep, meta, name):
@@ -548,8 +636,10 @@ def check_shots(ep_dir, meta, rep):
     method = episode_method(meta)[0]
     layers_only = method == "layers"
     code = method == "code"
+    blender = method == "blender"
+    engine_set = video_engine(meta)[1]
     registry = motion_registry()
-    cameras = CAMERAS_CODE if code else CAMERAS
+    cameras = CAMERAS_CODE if code else CAMERAS_BLENDER if blender else CAMERAS
     if code and registry:                        # toon camera moves of motions.json are camera values too
         cameras = cameras | {k for k, v in registry.items() if is_toon_camera(v)}
     width = None                                 # digits of the first valid shot id: 2 (s01) or 3 (s001)
@@ -604,6 +694,10 @@ def check_shots(ep_dir, meta, rep):
                 if not RE_CODE_LAYER.match(c):
                     rep.error(W, f"method code: layer code '{c}' invalid "
                                  f"(C-<character> or M-<model>, E-<setting>, FX[-<effect>], T)")
+            elif blender:
+                if not RE_BLENDER_LAYER.match(c):
+                    rep.error(W, f"method blender: layer code '{c}' invalid "
+                                 f"(A-<asset>, E-<setting>, FX[-<effect>], T)")
             elif not RE_LAYER_CODE.match(c):
                 rep.error(W, f"layer code '{c}' invalid (L1-L4, pose plates L4b-L4z, P<n>-<part>, FX)")
             elif eid_mod.RE_POSE.match(c) and method == "seedance":
@@ -620,13 +714,16 @@ def check_shots(ep_dir, meta, rep):
                 elif is_toon_motion(registry[m]) and not code:
                     rep.warn(W, f"{sid} code_motion '{m}' is a method code (TOON) action; a {method or 'seedance'} "
                                 f"episode has no TOON character")
-                elif code and not is_toon_motion(registry[m]) and needs_plate(registry[m]):
+                elif method in ("code", "blender") and not is_toon_motion(registry[m]) and needs_plate(registry[m]):
                     rep.warn(W, f"{sid} code_motion '{m}' rigs a painted plate ({registry[m].get('call')}); "
-                                f"a method code episode has none")
+                                f"a method {method} episode has none")
         if layers_only and r["ai_motion"].strip():
             rep.error(W, f"method layers: shot {sid} has ai_motion; use code_motion or pose-cycle, or set method: seedance")
         if code and r["ai_motion"].strip():
             rep.error(W, f"method code: shot {sid} has ai_motion; every motion is a TOON action (code_motion)")
+        if blender and r["ai_motion"].strip() and not engine_set:
+            rep.error(W, f"method blender: shot {sid} has ai_motion but EPISODE.md has no video_engine: set comfy "
+                         f"(local Wan clip from Blender keyframes, free) or seedance (paid clip), or empty ai_motion")
         r["_codes"] = codes
         r["_line"] = n
         shots[sid] = r
@@ -751,9 +848,12 @@ def check_script(ep_dir, meta, rep):
 
 def check_prompts(ep_dir, meta, shots, rep):
     path = os.path.join(ep_dir, "prompts.csv")
-    if episode_method(meta)[0] == "code":       # nothing is generated: no prompts.csv needed
+    method = episode_method(meta)[0]
+    if method in ("code", "blender"):           # no image model: no prompts.csv needed
         if os.path.isfile(path):
-            rep.warn("prompts.csv", "method code generates no image or clip; prompts.csv is not used")
+            rep.warn("prompts.csv", "method code generates no image or clip; prompts.csv is not used" if method == "code"
+                     else "method blender generates no image (clips are recorded in the ledger and the clip's "
+                          "prompts/<clip>.txt or .json sidecar); prompts.csv is not used")
         return None
     if not os.path.isfile(path):
         missing_file(rep, meta, "prompts.csv")
@@ -839,10 +939,10 @@ def check_media_name(rel, name, sub, rx, eid, rep):
                              f"(clips/{stem}/000001.png, clips/{stem}/raw/000001.png)")
             return
         check_ep = stem
-    elif sub == "clips" and RE_START_FRAME.match(name):
+    elif sub == "clips" and (RE_START_FRAME.match(name) or RE_CLIP_SIDECAR.match(name)):
         pass
     elif not rx.match(name):
-        extra = f" or {RE_START_FRAME.pattern}" if sub == "clips" else ""
+        extra = f" or {RE_START_FRAME.pattern} or {RE_CLIP_SIDECAR.pattern}" if sub == "clips" else ""
         rep.error(where, f"name does not match the {sub} convention ({rx.pattern}{extra})")
         return
     if eid and not check_ep.startswith(f"{eid}_"):
@@ -868,6 +968,7 @@ def check_media(media, meta, prompt_rows, rep, shots=None):
     check_listed_files(media, meta, prompt_rows, rep)
     check_orphan_plates(media, prompt_rows, rep)
     check_clips(media, meta, shots, prompt_rows, rep)
+    check_renders3d(media, meta, shots, rep)
     led = os.path.join(media, "ledger.csv")
     if os.path.isfile(led):
         head = ledger_head(led, rep)
@@ -894,10 +995,11 @@ def check_orphan_plates(media, prompt_rows, rep):
 
 
 def check_clips(media, meta, shots, prompt_rows, rep):
-    """From G3 (stage 8, the whole-episode draft) every seedance shot with ai_motion has its clip in clips/ (the
-    shot named in reuse_of for a reused shot). A clip rejected in prompts.csv (approved=no) does not count."""
+    """From G3 (stage 8, the whole-episode draft) every seedance or blender shot with ai_motion has its clip in clips/
+    (the shot named in reuse_of for a reused shot; a Seedance or a local ComfyUI clip). A clip rejected in prompts.csv
+    (approved=no) does not count."""
     stage = meta.get("stage") if meta else None
-    if not shots or episode_method(meta)[0] != "seedance" or not isinstance(stage, int) or stage < GATE_STAGE["G3"]:
+    if not shots or episode_method(meta)[0] not in VIDEO_ENGINE_METHODS or not isinstance(stage, int)             or stage < GATE_STAGE["G3"]:
         return
     rejected = {r["file"] for r in prompt_rows or [] if r["approved"] == "no"}
     d = os.path.join(media, "clips")
@@ -915,6 +1017,208 @@ def check_clips(media, meta, shots, prompt_rows, rep):
             rep.error(f"shots.csv:{r['_line']}", f"{sid} has ai_motion '{r['ai_motion']}' but no clip "
                       f"<id>_{owner}_<model>_v<NN>.mp4 in {d} at stage {stage} (G3 needs every clip; "
                       f"pull the shot bundle from Drive, or empty ai_motion and move it with code_motion)")
+
+
+def render3d_done(path):
+    """True when a renders3d/<name>/ folder holds a render: render.json, beauty.mp4 or a frame in beauty/."""
+    if os.path.isfile(os.path.join(path, "render.json")) or os.path.isfile(os.path.join(path, "beauty.mp4")):
+        return True
+    try:
+        return any(n.lower().endswith(".png") for n in os.listdir(os.path.join(path, "beauty")))
+    except OSError:
+        return False
+
+
+def renders3d_index(media):
+    """{shot id: {"final": bool, "preview": bool}} and the turntable folder names under <media>/renders3d/ (only
+    folders that hold a render count; tools/blender/blender.py writes them, docs/CONVENTIONS.md §2)."""
+    shots, turn = {}, []
+    d = os.path.join(media, "renders3d") if media else ""
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return shots, turn
+    for n in names:
+        m = RE_RENDER3D_DIR.match(n)
+        p = os.path.join(d, n)
+        if not m or not os.path.isdir(p) or not render3d_done(p):
+            continue
+        if m.group(1) is None:
+            turn.append(n)
+        elif m.group(2) != "keys":
+            st = shots.setdefault(m.group(1), {"final": False, "preview": False})
+            st["preview" if m.group(2) == "preview" else "final"] = True
+    return shots, turn
+
+
+def check_renders3d(media, meta, shots, rep):
+    """Names under <media>/renders3d/ and, for method blender from stage 7 (compositing), a final render of every
+    non-reuse shot (renders3d/s<NN>/ or s<NN>_v<NN>/)."""
+    d = os.path.join(media, "renders3d")
+    blender = episode_method(meta)[0] == "blender"
+    if os.path.isdir(d):
+        for n in sorted(os.listdir(d)):
+            where = f"media/renders3d/{n}"
+            m = RE_RENDER3D_DIR.match(n)
+            if not os.path.isdir(os.path.join(d, n)):
+                rep.warn(where, "renders3d/ holds one folder per render (blender.py --out), not files")
+            elif not m:
+                rep.warn(where, "folder name is not s<NN>[_preview|_keys][_v<NN>] or turntable-<asset>[_v<NN>]")
+            elif m.group(1) and shots and m.group(1) not in shots:
+                rep.warn(where, f"{m.group(1)} is not a shot of shots.csv")
+        if not blender:
+            rep.warn("media/renders3d", "Blender renders in a method "
+                     f"{episode_method(meta)[0] or 'seedance'} episode: renders3d/ is used by method blender")
+    if not blender or not shots:
+        return
+    stage = meta.get("stage") if meta else None
+    done, _ = renders3d_index(media)
+    todo = [sid for sid, r in shots.items() if not r["reuse_of"] and not done.get(sid, {}).get("final")]
+    if not todo:
+        return
+    if isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
+        rep.error("media/renders3d", f"no final Blender render for {', '.join(todo)} at stage {stage} (compositing "
+                                     f"needs renders3d/<shot>/: tools/blender/blender.py render, or pull the bundles)")
+    else:
+        rep.info(f"renders3d: {len(todo)} shot(s) not rendered yet (required from stage {FILES_REQUIRED_FROM_STAGE}): "
+                 f"{', '.join(todo)}")
+
+
+SHOT3D_STAGE = 5          # method blender: every non-reuse shot has shots3d/s<NN>.json from stage 5 (renders)
+ASSETS_STAGE = 4          # method blender: ASSETS.md (licence and source of every 3D model) from stage 4 (G2)
+
+
+def blender_spec_module():
+    """tools/blender/spec.py (package P2) imported by path, or None when it is not in this checkout."""
+    import importlib.util
+    path = os.path.join(LAB, "tools", "blender", "spec.py")
+    if not os.path.isfile(path):
+        return None
+    spec = importlib.util.spec_from_file_location("film_blender_spec", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def shot3d_errors(mod, path, data):
+    """Problems of one shot3d.json as 'path: reason' strings, through tools/blender/spec.py: the first of
+    validate_file / check_file / load_file (given the path) or validate / check / errors (given the parsed JSON)
+    that the module has. It may return a list of problems, a (value, problems) pair, or raise. None = no such
+    function in the module."""
+    import inspect
+    for name, arg in (("validate_file", path), ("check_file", path), ("load_file", path),
+                      ("validate", data), ("check", data), ("errors", data)):
+        fn = getattr(mod, name, None)
+        if not callable(fn):
+            continue
+        kw = {}
+        try:
+            sig = inspect.signature(fn).parameters
+            params = [p for p in sig.values()
+                      if p.default is p.empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+            if "base_dir" in sig and len(params) < 2:   # spec.validate(data, base_dir=None): also checks .glb files
+                kw["base_dir"] = os.path.dirname(path)
+        except (TypeError, ValueError):
+            params = [None]
+        args = [arg, os.path.dirname(path)][:max(1, len(params))]
+        try:
+            out = fn(*args, **kw)
+        except Exception as e:                   # spec.py raises its own error type with 'path: reason' lines
+            return [l for l in str(e).splitlines() if l.strip()] or [type(e).__name__]
+        if isinstance(out, tuple) and len(out) == 2 and isinstance(out[1], (list, tuple)):
+            out = out[1]
+        if isinstance(out, (list, tuple)):
+            return [str(x) for x in out]
+        return []
+    return None
+
+
+def check_shots3d(ep_dir, meta, shots, rep):
+    """<episode>/shots3d/s<NN>.json (method blender): names, one per non-reuse shot from stage 5, camera.move and
+    seconds against shots.csv, and the schema through tools/blender/spec.py when that module exists."""
+    method = episode_method(meta)[0]
+    d = os.path.join(ep_dir, "shots3d")
+    names = sorted(n for n in os.listdir(d) if not n.startswith(".")) if os.path.isdir(d) else []
+    if names and method != "blender":
+        rep.warn("shots3d", f"shot3d.json files in a method {method or 'seedance'} episode: only method blender "
+                            f"renders them")
+    have = set()
+    mod, mod_err, warned = None, None, False
+    for n in names:
+        where = f"shots3d/{n}"
+        m = RE_SHOT3D_FILE.match(n)
+        if not m:
+            rep.error(where, "name must be s<NN>.json (one shot3d.json per shot of shots.csv)")
+            continue
+        sid = m.group(1)
+        have.add(sid)
+        if shots is not None and sid not in shots:
+            rep.error(where, f"{sid} is not a shot of shots.csv")
+        path = os.path.join(d, n)
+        try:
+            data = json.loads(read_text(path))
+        except CheckError as e:
+            rep.error(where, e.msg)
+            continue
+        except ValueError as e:
+            rep.error(where, f"not valid JSON: {e}")
+            continue
+        if not isinstance(data, dict):
+            rep.error(where, "must be a JSON object (shot3d.json, tools/blender/README.md)")
+            continue
+        row = (shots or {}).get(sid)
+        cam = data.get("camera") if isinstance(data.get("camera"), dict) else {}
+        if row and cam.get("move") and cam.get("move") != row["camera"]:
+            rep.warn(where, f"camera.move '{cam.get('move')}' differs from shots.csv camera '{row['camera']}' of {sid}")
+        a, b = (to_float(row["from_s"]), to_float(row["to_s"])) if row else (None, None)
+        sec = data.get("seconds")
+        if a is not None and b is not None and is_cap(sec) and abs(sec - (b - a)) > 0.05:
+            rep.warn(where, f"seconds {fmt_s(sec)} differs from the shot length {fmt_s(b - a)} s in shots.csv")
+        if mod is None and mod_err is None:
+            try:
+                mod = blender_spec_module()
+                mod_err = "missing" if mod is None else None
+            except Exception as e:
+                mod_err = f"cannot be imported ({type(e).__name__}: {e})"
+        if mod is None:
+            if not warned:
+                rep.warn("shots3d", ("tools/blender/spec.py not in this checkout" if mod_err == "missing" else
+                                     f"tools/blender/spec.py {mod_err}") + ": shot3d.json schema not checked")
+                warned = True
+            continue
+        errs = shot3d_errors(mod, path, data)
+        if errs is None:
+            if not warned:
+                rep.warn("shots3d", "tools/blender/spec.py has no validate/check function this checker knows: "
+                                    "shot3d.json schema not checked")
+                warned = True
+            continue
+        for e in errs:
+            rep.error(where, e)
+    if method != "blender" or not shots:
+        return
+    stage = meta.get("stage") if meta else None
+    todo = [sid for sid, r in shots.items() if not r["reuse_of"] and sid not in have]
+    if todo and isinstance(stage, int) and stage >= SHOT3D_STAGE:
+        rep.error("shots3d", f"no shot3d.json for {', '.join(todo)} (required from stage {SHOT3D_STAGE}; "
+                             f"episode is at stage {stage})")
+    elif todo and isinstance(stage, int) and stage >= 3:
+        rep.info(f"shots3d: {len(todo)} shot(s) without shots3d/<shot>.json yet (required from stage {SHOT3D_STAGE}): "
+                 f"{', '.join(todo)}")
+
+
+def check_assets(ep_dir, meta, rep):
+    """method blender: ASSETS.md (source and licence of every 3D model) in the episode or the project folder."""
+    if episode_method(meta)[0] != "blender":
+        return
+    stage = meta.get("stage") if meta else None
+    here = [p for p in (os.path.join(ep_dir, "ASSETS.md"),
+                        os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "ASSETS.md")) if os.path.isfile(p)]
+    if here or not isinstance(stage, int) or stage < 3:
+        return
+    msg = ("missing: source and licence of every 3D model (GLB or preset), written at stage 3 "
+           "(.claude/skills/film-compose-shot/references/blender-method.md)")
+    (rep.error if stage >= ASSETS_STAGE else rep.warn)("ASSETS.md", msg)
 
 
 def ledger_head(path, rep):
@@ -971,6 +1275,10 @@ def check_media_missing(media, meta, prompt_rows, rep):
     """The media folder is absent (check_media said so): from compositing on that is not a detail."""
     stage = meta.get("stage") if meta else None
     n = len(required_rows(prompt_rows, stage))
+    if episode_method(meta)[0] == "blender" and isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
+        rep.error("media", f"media folder missing at stage {stage}: the Blender renders (renders3d/) are needed for "
+                           f"compositing; pull the shot bundles from Drive")
+        return
     if n and isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
         rep.error("media", f"media folder missing but {n} approved/generated file(s) are required: "
                            f"pull the shot bundles from Drive (drive_link)")
@@ -1140,6 +1448,8 @@ def cmd_episode(a, rep=None):
     check_stage_gates(meta, rep)
     check_budget(ep_dir, meta, rep)
     shots = check_shots(ep_dir, meta, rep)
+    check_shots3d(ep_dir, meta, shots, rep)
+    check_assets(ep_dir, meta, rep)
     check_script(ep_dir, meta, rep)
     files = check_prompts(ep_dir, meta, shots, rep)
     media = a.media
@@ -1185,10 +1495,11 @@ def check_style(style_dir, rep):
     W = "style.yaml"
     engine = y.get("engine", "image")
     if engine not in STYLE_ENGINES:
-        rep.error(W, f"engine {engine!r} must be image or code")
+        rep.error(W, f"engine {engine!r} must be image, code or blender")
         engine = "image"
-    required = STYLE_REQUIRED_CODE if engine == "code" else STYLE_REQUIRED
-    optional = STYLE_OPTIONAL_CODE if engine == "code" else STYLE_OPTIONAL + ["engine"]
+    no_model = engine in ("code", "blender")     # no image model: no prompt, matte, layers or models keys
+    required = STYLE_REQUIRED_BLENDER if engine == "blender" else STYLE_REQUIRED_CODE if no_model else STYLE_REQUIRED
+    optional = STYLE_OPTIONAL_CODE if no_model else STYLE_OPTIONAL + ["engine"]
     for k in required:
         if k not in y:
             rep.error(W, f"required key '{k}' missing")
@@ -1197,7 +1508,7 @@ def check_style(style_dir, rep):
             rep.warn(W, f"optional key '{k}' missing (inherited from base recipe?)")
     for k in y:
         if k not in required and k not in optional:
-            rep.warn(W, f"unknown key '{k}'" + (" (not used by an engine: code style)" if engine == "code" else ""))
+            rep.warn(W, f"unknown key '{k}'" + (f" (not used by an engine: {engine} style)" if no_model else ""))
     if "id" in y:
         if y["id"] != sid:
             rep.error(W, f"id '{y['id']}' != folder name '{sid}'")
@@ -1217,6 +1528,8 @@ def check_style(style_dir, rep):
         rep.error(W, "negative must be a list of strings")
     if engine == "code" and "render" in y:
         check_render(y["render"], rep)
+    elif engine == "blender" and "render" in y:
+        check_render_blender(y["render"], rep)
     if "palette" in y:
         pal = y["palette"]
         if not isinstance(pal, dict) or not pal:
@@ -1251,7 +1564,7 @@ def check_style(style_dir, rep):
                 rep.error(W, f"motion entry {m!r} must be a module id string")
             elif m not in known_motions():
                 rep.warn(W, f"motion id '{m}' is not in tools/compose/motions.json")
-    if engine != "code":
+    if not no_model:
         check_style_prompts(style_dir, rep)
     if not os.path.isfile(os.path.join(style_dir, "STYLE.md")):
         rep.warn("STYLE.md", "missing")
@@ -1321,6 +1634,54 @@ def check_render(r, rep):
     for k in ("opts", "camera", "env"):
         if k in r and not isinstance(r[k], dict):
             rep.error(W, f"render.{k} must be a mapping")
+
+
+def blender_looks():
+    """Look ids of tools/blender/looks.json (package P2) when it is readable, else the four looks of the design
+    (BLENDER_LOOKS). The registry may map id -> spec, hold a "looks" mapping or list, or be a list of ids/objects."""
+    try:
+        with open(os.path.join(LAB, "tools", "blender", "looks.json"), encoding="utf-8") as f:
+            reg = json.load(f)
+    except (OSError, ValueError):
+        return set(BLENDER_LOOKS)
+    if isinstance(reg, dict) and "looks" in reg:
+        reg = reg["looks"]
+    if isinstance(reg, dict):
+        return set(reg)
+    if isinstance(reg, list):
+        return {x.get("id") if isinstance(x, dict) else x for x in reg} - {None}
+    return set(BLENDER_LOOKS)
+
+
+def check_render_blender(r, rep):
+    """The render block of an engine: blender style pack (docs/CONVENTIONS.md §3): look, palette, line, mist, engine."""
+    W = "style.yaml"
+    if not isinstance(r, dict):
+        rep.error(W, "render must be a mapping {look, palette, line, mist, engine}")
+        return
+    for k in r:
+        if k not in BLENDER_RENDER_KEYS:
+            rep.warn(W, f"render: unknown key '{k}' (engine: blender takes {', '.join(sorted(BLENDER_RENDER_KEYS))})")
+    looks = blender_looks()
+    if r.get("look") not in looks:
+        rep.error(W, f"render.look {r.get('look')!r} is not a Blender look ({', '.join(sorted(looks))})")
+    eng = r.get("engine", "eevee")
+    if eng not in BLENDER_RENDER_ENGINES:
+        rep.error(W, f"render.engine {eng!r} must be eevee or cycles")
+    line = r.get("line")
+    if line is not None and (isinstance(line, bool) or not is_cap(line)):
+        rep.error(W, f"render.line {line!r} must be a line width >= 0 (0 = no line art)")
+    mist = r.get("mist")
+    if mist is not None and (isinstance(mist, bool) or not is_cap(mist) or mist > 1):
+        rep.error(W, f"render.mist {mist!r} must be a number 0-1")
+    pal = r.get("palette")
+    if pal is not None:
+        if not isinstance(pal, dict):
+            rep.error(W, "render.palette must be a mapping name -> \"#RRGGBB\"")
+        else:
+            for name, c in pal.items():
+                if not isinstance(c, str) or not RE_HEX.match(c):
+                    rep.error(W, f"render.palette.{name} = {c!r} is not #RRGGBB")
 
 
 def check_matte(matte, rep):

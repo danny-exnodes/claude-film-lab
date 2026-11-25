@@ -14,6 +14,11 @@ method: layers               # cách dựng: layers = chỉ model ảnh + chuy�
                              # sau G1 không tự đổi, phải hỏi người dùng. Thiếu dòng này = seedance (tập cũ).
                              # code = nhân vật và cảnh vẽ hoàn toàn bằng code (tools/toon/), không model nào, style engine: code,
                              # budget images: 0 và video_seconds: 0 (.claude/skills/film-compose-shot/references/code-method.md).
+                             # blender = model 3D render bằng Blender trên máy của chủ lab (phiên local), style engine: blender,
+                             # images: 0, shots3d/s<NN>.json mỗi shot (.claude/skills/film-compose-shot/references/blender-method.md).
+# video_engine: comfy        # (tuỳ chọn, chỉ với method seedance hoặc blender) clip khâu 6: seedance (mặc định, trả tiền) hoặc
+                             # comfy = clip MiniMax H3 chạy local bằng ComfyUI, miễn phí, chỉ trên máy của chủ lab
+                             # (.claude/skills/film-compose-shot/references/local-video.md). Tập blender có ai_motion phải ghi khóa này.
 stage: 0                     # khâu hiện tại 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày người dùng duyệt YYYY-MM-DD, hoặc null
 media: out/<project>/q01t01  # thư mục media (git bỏ qua): out/<project>/<mã tập> (ep01 nếu không chia quyển)

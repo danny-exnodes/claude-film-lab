@@ -556,7 +556,7 @@ class TestEpisodeBudget(EpisodeCase):
 
 class TestEpisodeMethod(EpisodeCase):
     """EPISODE.md `method: layers | seedance` (docs/CONVENTIONS.md §5): layers never uses Seedance."""
-    WARN = "WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers, seedance or code"
+    WARN = "WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers, seedance, code or blender"
 
     def method(self, value):
         s = (self.ep / "EPISODE.md").read_text(encoding="utf-8")
@@ -633,7 +633,7 @@ class TestEpisodeMethod(EpisodeCase):
         for bad in ("layer", "both", "", "[layers]"):
             with self.subTest(value=bad):
                 self.method(bad)
-                out = self.assert_error(r"EPISODE\.md: method must be layers, seedance or code")
+                out = self.assert_error(r"EPISODE\.md: method must be layers, seedance, code or blender")
                 self.assertNotIn("method layers", out)      # no layers rule is applied on an invalid value
                 self.assertNotIn("has no method", out)
 

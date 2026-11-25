@@ -594,6 +594,15 @@ class TestCli(FakeBlenderCase):
         self.assertEqual(code, 0, err)
         self.assertIn("(5.3.0) via FILM_BLENDER", so)
 
+    def test_find_broken_blender_is_exit_3_not_1(self):
+        broken = make_exe(self.bin, "blender-broken", "import sys\nprint('Segmentation fault')\nsys.exit(139)\n")
+        with mock.patch.dict(os.environ, {"FILM_BLENDER": str(broken)}):
+            code, so, err = self.run_cli("find")
+        self.assertEqual(code, bl.BROKEN)
+        self.assertEqual(code, 3)
+        self.assertIn("but `--version` failed", err)
+        self.assertEqual(so, "")
+
     def test_still(self):
         png = self.tmp / "stills" / "s01_v01.png"
         code, so, err = self.run_cli("still", self.spec_path, "--frame", "2", "--out", png, "--size", "128x72")

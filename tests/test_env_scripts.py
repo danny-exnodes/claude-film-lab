@@ -110,7 +110,8 @@ if __name__ == "__main__":
 
 
 # Stand-ins for the local engines' CLIs (packages P1/P2: tools/blender/blender.py find, tools/comfy/comfy.py ping).
-# FAKE_BLENDER = ok | missing (exit 1, as `find` does when no Blender is found) | crash; FAKE_COMFY = ok | down.
+# FAKE_BLENDER = ok | missing (exit 1, as `find` does when no Blender is found) | broken (exit 3: found, but
+# `--version` fails) | crash (any other code); FAKE_COMFY = ok | down.
 # comfy.py appends "<argv> <FILM_COMFY_URL>" to $COMFY_LOG, so a test can prove it was (not) called.
 FAKE_BLENDER = """import os, sys
 kind = os.environ.get("FAKE_BLENDER", "missing")
@@ -120,8 +121,10 @@ if kind == "ok":
     print("blender 5.3.0 /fake/blender")
 elif kind == "missing":
     print("blender: not found (FILM_BLENDER, PATH, install folders)", file=sys.stderr); sys.exit(1)
+elif kind == "broken":
+    print("blender: found /fake/blender via PATH, but `--version` failed", file=sys.stderr); sys.exit(3)
 else:
-    print("Traceback: fake crash", file=sys.stderr); sys.exit(3)
+    print("Traceback: fake crash", file=sys.stderr); sys.exit(4)
 """
 FAKE_COMFY = """import os, sys
 with open(os.environ["COMFY_LOG"], "a") as f:
@@ -152,6 +155,7 @@ def local_engine_jobs(td):
         "loc_broken": ([None, "--quick"], dict(base, FILM_BLENDER="/nowhere/blender.exe", FAKE_COMFY="down",
                                                FILM_COMFY_HOME="/nowhere/ComfyUI", COMFY_LOG=log("broken"))),
         "loc_crash": ([None, "--quick"], dict(base, FAKE_BLENDER="crash", COMFY_LOG=log("crash"))),
+        "loc_found_broken": ([None, "--quick"], dict(base, FAKE_BLENDER="broken", COMFY_LOG=log("found_broken"))),
         "loc_far": ([None, "--quick"], dict(base, FILM_COMFY_URL="http://192.0.2.7:8188", FAKE_COMFY="ok",
                                             COMFY_LOG=log("far"))),
         "loc_bare": ([None, "--quick"], dict(base, DOCTOR="bare", FILM_COMFY_URL="http://127.0.0.1:8188",
@@ -479,8 +483,11 @@ class TestDoctor(unittest.TestCase):
         self.assertRegex(self.line("loc_broken", "comfy"),
                          r"WARN .*http://127\.0\.0\.1:8188: comfy: no ComfyUI .*comfy\.py start")
         self.assertEqual(self.comfy_calls("broken"), ["ping http://127.0.0.1:8188"], "FILM_COMFY_HOME alone: default URL")
-        self.assertRegex(self.line("loc_crash", "blender"), r"WARN .*blender.py find failed \(rc 3\): Traceback")
-        for name in ("loc_broken", "loc_crash"):
+        self.assertRegex(self.line("loc_crash", "blender"), r"WARN .*blender.py find failed \(rc 4\): Traceback")
+        # exit 3 = a Blender was found but `--version` fails: WARN even without FILM_BLENDER (never n/a)
+        self.assertRegex(self.line("loc_found_broken", "blender"),
+                         r"WARN .*Blender found but broken: blender: found /fake/blender via PATH")
+        for name in ("loc_broken", "loc_crash", "loc_found_broken"):
             self.assert_no_local_fail(name)
 
     def test_comfy_url_off_this_machine_is_never_contacted(self):

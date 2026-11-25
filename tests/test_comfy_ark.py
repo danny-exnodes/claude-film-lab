@@ -70,6 +70,24 @@ class TestLocalRowsAreFree(ArkCase):
         self.assertEqual(code, 2)
         self.assertIn("already has a final row (interrupted)", err)
 
+    def test_close_a_local_row_says_it_costs_nothing(self):
+        ark.ledger_append(self.ledger, row("ab12", "pending", "comfy:h3-i2v", task_id="p-1"))
+        code, out, err = self.run_ark("ledger-close", "--req", "ab12", "--status", "abandoned", "--ledger", self.ledger)
+        self.assertEqual(code, 0, err)
+        self.assertIn("costs nothing (local engine", out)
+        self.assertNotIn("still counts against the caps", out)
+        self.assertIn("comfy.py interrupt --prompt-id p-1", err)
+        self.assertNotIn("--resume-task", err)                # an Ark task id, not a ComfyUI prompt id
+        ark.ledger_append(self.ledger, row("cd34", "pending", "blender:render", kind="image", seconds="", count=1))
+        code, out, err = self.run_ark("ledger-close", "--req", "cd34", "--status", "abandoned", "--ledger", self.ledger)
+        self.assertEqual(code, 0, err)
+        self.assertIn("costs nothing (local engine", out)
+        ark.ledger_append(self.ledger, row("ef56", "pending", SEEDANCE, task_id="cgt-9"))
+        code, out, err = self.run_ark("ledger-close", "--req", "ef56", "--status", "abandoned", "--ledger", self.ledger)
+        self.assertEqual(code, 0, err)
+        self.assertIn("still counts against the caps", out)    # paid rows unchanged
+        self.assertIn("--resume-task cgt-9", err)
+
     def ledger_path(self, name, rows):
         path = str(self.tmp / name)
         for r in rows:

@@ -1663,6 +1663,13 @@ def ledger_close(a):
         finally:
             unlock_file(f)
     what = "second(s) of video" if last.get("kind") == "video" else "image(s)"
+    if is_local(last):
+        print(f"req={rid} closed as {a.status} in {a.ledger}: it costs nothing (local engine, counts against no cap; "
+              f"{units(last):g} {what}, {last.get('model')})")
+        if task and str(last.get("model")).startswith("comfy:"):
+            print(f"note: ComfyUI job {task} may still be queued or running on this PC; stop it with "
+                  f"python3 tools/comfy/comfy.py interrupt --prompt-id {task}", file=sys.stderr)
+        return
     print(f"req={rid} closed as {a.status} in {a.ledger}: it still counts against the caps "
           f"({units(last):g} {what}, {last.get('model')})")
     if task:

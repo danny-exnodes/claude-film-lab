@@ -146,7 +146,9 @@ class CheckBlender(BlenderEpisode):
 
     def test_ai_motion_needs_an_explicit_video_engine(self):
         self.shots("A-giot;FX-bui;T,,,", "A-giot;FX-bui;T,,the creature turns its head,")
-        self.assert_error("method blender: shot s03 has ai_motion but EPISODE.md has no video_engine")
+        out = self.assert_error("method blender: shot s03 has ai_motion but EPISODE.md has no video_engine")
+        self.assertIn("local MiniMax H3 clip (tools/comfy/comfy.py) from Blender keyframes", out)
+        self.assertNotIn("Wan", out)
         self.front(engine="comfy")
         self.assert_clean()
 
@@ -157,6 +159,22 @@ class CheckBlender(BlenderEpisode):
         self.shots("s02,8,15,medium,push-in", "s02,8,15,medium,pan-left")
         self.assert_error("camera 'pan-left' is not one move from crane, dolly, orbit, pan, pull-out, push-in, static, "
                           "tilt, track")
+
+    def test_asset_ids_may_hold_an_underscore_like_spec_py(self):
+        self.shots("A-giot;FX-bui;T,,,", "A-old_giot;FX-bui;T,,,")
+        self.assert_clean()
+        self.render("turntable-old_giot")
+        self.render("turntable-old_giot_v02")
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("turntable-old_giot", out)
+        self.shots("A-giot;FX-bui;T,,,", "A-_giot;FX-bui;T,,,")      # spec.py: an id starts with [a-z0-9]
+        self.assert_error("layer code 'A-_giot' invalid")
+        spec = load("blender/spec.py", "film_blender_spec_ids")
+        for aid in ("giot", "old_man", "tree-2", "a_b-c_9"):
+            self.assertRegex(aid, spec.ID_RE)
+            self.assertRegex("A-" + aid, ce.RE_BLENDER_LAYER)
+            self.assertRegex("turntable-" + aid, ce.RE_RENDER3D_DIR)
 
     def test_style_engine_must_match_method(self):
         self.front(style="thuy-mac")
@@ -282,6 +300,7 @@ class CheckAssetsAndMedia(BlenderEpisode):
         self.render("s02_v02", kind="frames")
         self.render("s03_preview")
         out = self.assert_error("no final Blender render for s03 at stage 7")
+        self.assertIn("pull the shot bundles from Drive and unzip them in the media folder", out)
         self.render("s03")
         self.assert_clean()
 

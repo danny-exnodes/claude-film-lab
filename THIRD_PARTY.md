@@ -10,9 +10,12 @@ below if it is not there yet.
 | `tools/compose/figure.js` | lemomo-ai/lemo-opuscar, `styles/ink-wash/demo/hero.js` (joint dictionary on a 100-unit body; robe = one mass + loaded strokes) | MIT |
 | `tools/audio/pluck.py` | `core/audio/pluck.py` of [lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (string model, guqin/pipa/koto presets) | MIT, Copyright (c) 2026 LemoLab |
 | `tools/audio/sfx.py` | `core/audio/sfx.py` of [lemomo-ai/lemo-opuscar](https://github.com/lemomo-ai/lemo-opuscar) (filter, envelope, noise, compress, limit, add helpers; `thump`) | MIT, Copyright (c) 2026 LemoLab |
+| `tools/comfy/workflows/h3-i2v.json` | `video_minimax_h3_i2v.json` of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates) (subgraph "Image to Video (MiniMax H3)": node classes, input names, wiring; flattened to API format, our values). Source named in `h3-i2v.meta.json` (`source`): JSON holds no comment | MIT, Copyright (c) 2023-present Comfy Org |
+| `tools/comfy/workflows/h3-r2v.json` | `video_minimax_h3_r2v.json` and `video_minimax_h3_multiframe_reference.json` (MiniMaxH3AddGuide chain) of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates), API format, our values. Source named in `h3-r2v.meta.json` (`source`) | MIT, Copyright (c) 2023-present Comfy Org |
 
 Only code was adapted. The demo film of that project, its characters, compositions, story, score and assets
-(CC BY) are not used here.
+(CC BY) are not used here. From Comfy-Org/workflow_templates only the graph structure of the two MiniMax H3 templates
+was adapted; no model weights or template thumbnails are in this repo.
 
 ## Licences
 
@@ -41,3 +44,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### MIT: Comfy-Org/workflow_templates
+
+Licence file checked 2026-11-25 at https://github.com/Comfy-Org/workflow_templates (`LICENSE`): MIT License,
+"Copyright (c) 2023-present Comfy Org"; the permission and warranty text is the MIT text above, word for word.

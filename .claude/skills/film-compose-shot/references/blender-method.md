@@ -12,7 +12,7 @@ WARN khi tập `blender` mở trong phiên cloud). `tools/doctor.sh` dòng `blen
 ## 1. Công cụ (`tools/blender/`, chi tiết `tools/blender/README.md`)
 
 ```
-python tools/blender/blender.py find                                  # đường dẫn + phiên bản Blender (mã 1 = không thấy)
+python tools/blender/blender.py find                                  # đường dẫn + phiên bản (mã 1 = không thấy, 3 = thấy mà hỏng)
 python tools/blender/blender.py check <shot3d.json>                   # chỉ kiểm spec, không mở Blender
 python tools/blender/blender.py render <shot3d.json> --out <dir> [--preview] [--frames A:B] [--engine eevee|cycles]
 python tools/blender/blender.py still <shot3d.json> --frame N --out <png>
@@ -58,6 +58,15 @@ Trong mỗi thư mục: `beauty/0001.png…`, `depth/`, `normal/`, `line/`, `mas
 ERROR từ khâu 7 khi một shot không dùng lại (`reuse_of` trống) chưa có render bản dùng (`s<NN>/` hay `s<NN>_v<NN>/`).
 Lần chạy Blender ghi vào ledger như mọi lần tạo (model `blender:*`, không tính vào trần nào).
 
+**Lưu Drive (gói shot).** `python3 tools/bundle.py out/<project>/<id> --shot s<NN>` gói mọi thư mục
+`renders3d/s<NN>[_v<NN>|_preview|_keys]/` của shot, chỉ file cấp đầu: `beauty.mp4` (bản compositor dựng), `render.json`,
+và với `_keys`: `first.png`, `last.png`, `keyframes.json`. Thư mục khung PNG (`beauty/`, `depth/`, `normal/`, `line/`,
+`mask/`) không vào gói: ~3 MB mỗi khung 1080p, vài trăm MB mỗi shot, compositor chỉ cần `beauty.mp4`, và render lại từ
+`shots3d/s<NN>.json` cho cùng khung (cùng spec, cùng máy → cùng byte). Ngoại lệ: render `--no-mp4` thì `beauty/` vào gói
+(đó là hình duy nhất); cần đủ khung thì thêm `--with-frames`. Ở G2 thêm `--with-turntables` vào gói của shot mẫu để
+kèm `renders3d/turntable-<asset>/`. Khôi phục (container mới, `check_episode` báo thiếu render): kéo gói từ Drive, giải
+nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mục>/` và shot được tính là đã render.
+
 ## 4. Khâu theo phương pháp `blender`
 
 | Khâu | Việc |
@@ -65,8 +74,8 @@ Lần chạy Blender ghi vào ledger như mọi lần tạo (model `blender:*`, 
 | 0 | người dùng chọn `method: blender` và một style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`); có cử động khó thì chọn thêm `video_engine: comfy` (clip H3 local, miễn phí) hoặc `seedance` (trả tiền); `budget.yaml`: `images: 0` |
 | 2 | `film-writer` viết `shots.csv` theo §5 |
 | 3 | `film-3d-artist`: model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json` (`blender.py check` sạch) |
-| 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần) |
-| 5 | `film-3d-artist`: `render` mọi shot không dùng lại (`renders3d/s<NN>/`); Nhật ký ghi phút GPU |
+| 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần); duyệt xong: `bundle.py … --shot <shot mẫu> --with-turntables` (§3) |
+| 5 | `film-3d-artist`: `render` mọi shot không dùng lại (`renders3d/s<NN>/`); Nhật ký ghi phút GPU; mỗi shot duyệt: `bundle.py … --shot s<NN>` (§3) |
 | 6 | chỉ khi có `ai_motion`: `video_engine: comfy` → `film-animator` chạy `comfy.py run h3-i2v` với khung `keyframes` (`local-video.md`); `seedance` → như tập `seedance`; không có thì bỏ qua (Nhật ký: `khâu 6 bỏ qua`) |
 | 7–10 | `film-compositor` dùng `beauty/` (chuỗi PNG) hoặc `beauty.mp4` như một clip; sương, nắng, chữ bằng compose kit; âm thanh như mọi tập |
 

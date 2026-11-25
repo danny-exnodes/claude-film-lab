@@ -87,7 +87,7 @@ Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
 - file cạnh clip local (trong `clips/`): `^<ID>_<S>_[a-z0-9]+_v\d{2}(\.mp4)?\.json$`
-- `shots3d/`: `^s(\d{2}|\d{3})\.json$`; `renders3d/`: thư mục `^(s(\d{2}|\d{3})(_(preview|keys))?|turntable-[a-z0-9-]+)(_v\d{2})?$`
+- `shots3d/`: `^s(\d{2}|\d{3})\.json$`; `renders3d/`: thư mục `^(s(\d{2}|\d{3})(_(preview|keys))?|turntable-[a-z0-9][a-z0-9_-]*)(_v\d{2})?$`
   (tên khác → WARN). Nội dung một render: `beauty/0001.png…`, `depth/`, `normal/`, `line/`, `mask/<asset>/`, `beauty.mp4`,
   `render.json` (`tools/blender/README.md`)
 
@@ -397,7 +397,13 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 - Không bao giờ commit dữ liệu dự án vào repo (kể cả "tạm"). Ví dụ trong style pack (`styles/<id>/examples.md`) chỉ
   chép prompt đã duyệt, không chép kịch bản hay kinh thư.
 - Media lưu Drive theo **gói mỗi shot**: `python3 tools/bundle.py out/<project>/<id> --shot s03` → một file zip, một lần
-  duyệt tải lên `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/`. Bản nháp duyệt
+  duyệt tải lên `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/`. Đường dẫn trong zip tính từ
+  `out/<project>/<id>/`: khôi phục = kéo zip từ Drive và giải nén ngay trong `out/<project>/<id>/` (file về đúng
+  `plates/`, `clips/`, `renders3d/`). Tập `method: blender`: gói có thêm các thư mục `renders3d/s03[_v<NN>|_preview|_keys]/`
+  của shot, chỉ file ở cấp đầu (`beauty.mp4` – bản compositor dùng –, `render.json`; `_keys`: `first.png`, `last.png`,
+  `keyframes.json`); thư mục khung PNG (`beauty/`, `depth/`, `normal/`, `line/`, `mask/`; ~3 MB mỗi khung 1080p) không
+  vào gói, trừ `beauty/` của render không có `beauty.mp4` (`--no-mp4`), hoặc khi thêm `--with-frames`. Turntable G2
+  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2. Bản nháp duyệt
   (`renders/*_draft_*.mp4`) cũng vào `04_SanXuat/…/<YYYY-MM-DD>/`; bản cuối (`renders/*_final_*.mp4`) vào
   `05_ThanhPham/<thư mục tập>/`, tải riêng từng file.
 - cinecode lưu định dạng ở `~/.cinecode/formats`; hook đặt `CINECODE_FORMATS=<repo>/formats` để định dạng sống qua các phiên.

@@ -1,7 +1,7 @@
 {
   "id": "h3-r2v",
   "title": "MiniMax H3 reference-to-video with audio: 1-9 reference images, optional time anchors",
-  "source": "Comfy-Org workflow_templates video_minimax_h3_r2v.json and video_minimax_h3_multiframe_reference.json (MiniMaxH3AddGuide chain), API format; node classes, input names and wiring from the templates, values ours",
+  "source": "https://github.com/Comfy-Org/workflow_templates (MIT, Copyright (c) 2023-present Comfy Org; THIRD_PARTY.md): template video_minimax_h3_r2v.json and video_minimax_h3_multiframe_reference.json (MiniMaxH3AddGuide chain), API format; node classes, input names and wiring from the templates, values ours",
   "verified": false,
   "model_set": "minimax-h3",
   "fps": 24,

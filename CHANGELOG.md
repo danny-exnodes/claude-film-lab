@@ -29,6 +29,23 @@ MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026
 - Style `thuy-mac-blender`, `toon-3d-blender` (draft); agent mới `film-3d-artist`; mẫu `shot3d.json`, `ASSETS.md`;
   tài liệu `blender-method.md`, `local-video.md`, WORKFLOW, CONVENTIONS, MODELS, RUNBOOK, CLAUDE.md (quy tắc: engine local
   chỉ ở phiên local; không tải app/model khi chưa hỏi).
+- Sửa sau review:
+  - `bundle.py`: gói shot của tập `blender` có `renders3d/<shot>[_v<NN>|_preview|_keys]/` (`beauty.mp4`, `render.json`,
+    khung `_keys`; không chuỗi PNG trừ `--with-frames` hoặc render không có mp4); `--with-turntables` cho G2; giải nén
+    gói trong `out/<project>/<id>/` là khôi phục được render (check_episode, CONVENTIONS, skill ghi cùng một cách).
+  - `comfy.py run --keep-frames` tách khung vào `clips/<tên clip>/raw/000001.png` (đúng chỗ `check_episode` nhận và
+    `matte_seq.py` đọc), không còn `<tên>_frames/0001.png` bị báo ERROR.
+  - Mã lớp `A-<asset>` và thư mục `turntable-<asset>` nhận dấu `_` như id asset của `spec.py`; regex `renders3d/`
+    chuyển về `episode_id.py`.
+  - `blender.py find` thoát mã 3 khi thấy Blender mà `--version` lỗi; `doctor.sh` báo WARN (trước đây lẫn với "không có").
+  - `comfy.py interrupt`: lỗi mạng ở từng id được báo riêng, các id còn lại vẫn xử lý, cuối cùng thoát mã 1.
+  - `comfy.py run --steps 0` bị từ chối (mã 2), không lặng lẽ thành 20 bước.
+  - `ark.py ledger-close` trên dòng `comfy:`/`blender:` báo "không tốn gì" (thay vì "vẫn tính vào trần") và gợi ý
+    `comfy.py interrupt`, không gợi ý `--resume-task`.
+  - Bỏ chữ "Wan" lỗi thời (check_episode, `looks.json`): engine local là MiniMax H3 (`tools/comfy/comfy.py`); test chặn tái phát.
+  - THIRD_PARTY.md: hai workflow H3 phỏng theo Comfy-Org/workflow_templates (MIT, đã kiểm `LICENSE`); `.meta.json` ghi nguồn.
+  - CLAUDE.md, WORKFLOW §4, agent `film-animator`: ngoại lệ của quy tắc `--budget/--ledger` cho engine local
+    (`comfy.py run` chỉ `--ledger`; dòng `comfy:*`/`blender:*` tính 0).
 
 ## [1.3.0] - 2026-11-25
 

@@ -572,7 +572,8 @@ def check_inputs(a, meta, wid):
     ark.guard_output(a.out)
     if os.path.exists(a.out + ".json"):
         refuse(f"sidecar exists: {a.out}.json (versions only go up)")
-    frames_dir = os.path.splitext(a.out)[0] + "_frames"
+    # clips/<clip stem>/raw/000001.png: the raw-frame folder that check_episode accepts and matte_seq.py keys from
+    frames_dir = os.path.join(os.path.splitext(a.out)[0], "raw")
     if a.keep_frames:
         if not shutil.which("ffmpeg"):
             refuse("--keep-frames needs ffmpeg on PATH")
@@ -600,7 +601,7 @@ def check_inputs(a, meta, wid):
             refuse(f"--guide {sec:g}={path}: frame {idx} is outside the clip's {frames} frames "
                    f"(0..{(frames - 1) / meta['fps']:.2f} s)")
         guide_frames.append((idx, path))
-    steps = a.steps or (meta["turbo"]["steps"] if a.turbo else meta["defaults"]["steps"])
+    steps = a.steps if a.steps is not None else (meta["turbo"]["steps"] if a.turbo else meta["defaults"]["steps"])
     if steps < 1:
         refuse("--steps must be >= 1")
     if a.turbo:
@@ -970,7 +971,7 @@ def run(a):
         if a.keep_frames:
             os.makedirs(plan["frames_dir"], exist_ok=True)
             cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", a.out,
-                   os.path.join(plan["frames_dir"], "%04d.png")]
+                   os.path.join(plan["frames_dir"], "%06d.png")]
             if subprocess.run(cmd).returncode != 0:
                 warn(f"ffmpeg could not write the frames to {plan['frames_dir']} (the clip is saved)")
             else:
@@ -1298,17 +1299,28 @@ def interrupt(a):
         return FAILED
     running = {x[1] for x in q.get("queue_running") or [] if len(x) > 1}
     pending = {x[1] for x in q.get("queue_pending") or [] if len(x) > 1}
+    failed = 0
     for pid in ids:
         if pid in running:
-            call("POST", "/interrupt", {"prompt_id": pid})
+            try:
+                call("POST", "/interrupt", {"prompt_id": pid})
+            except ComfyError as e:
+                failed += 1
+                print(f"{pid}: running, interrupt FAILED ({e})", file=sys.stderr)
+                continue
             print(f"{pid}: running -> interrupted (the `run` process writes the ledger row)")
         elif pid in pending:
-            call("POST", "/queue", {"delete": [pid]})
+            try:
+                call("POST", "/queue", {"delete": [pid]})
+            except ComfyError as e:
+                failed += 1
+                print(f"{pid}: queued, removal FAILED ({e})", file=sys.stderr)
+                continue
             print(f"{pid}: queued -> removed from the queue")
         else:
             print(f"{pid}: not queued or running (if its `run` process died, close the row with "
                   f"python3 tools/ark.py ledger-close --req <id> --status abandoned --ledger L)")
-    return 0
+    return FAILED if failed else 0
 
 
 # --- CLI ----------------------------------------------------------------------------------------------------------
@@ -1356,7 +1368,7 @@ r.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FIL
 r.add_argument("--no-ledger", action="store_true", help="ad-hoc test without a ledger (main session only)")
 r.add_argument("--dry-run", action="store_true", help="validate and print the filled graph summary; send nothing")
 r.add_argument("--timeout", type=positive_float, default=2400, help="seconds before the job is interrupted (2400)")
-r.add_argument("--keep-frames", action="store_true", help="also extract PNG frames next to the clip (ffmpeg)")
+r.add_argument("--keep-frames", action="store_true", help="also extract the raw PNG frames to <clips>/<clip stem>/raw/000001.png (ffmpeg; the folder tools/layers/matte_seq.py keys from)")
 t = sp.add_parser("interrupt", help="stop our own job: --prompt-id, or every open comfy job of --ledger")
 t.add_argument("--prompt-id", default=None)
 t.add_argument("--ledger", default=None)

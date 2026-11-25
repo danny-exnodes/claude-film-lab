@@ -43,7 +43,9 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
   `COMPOSE.figure.draw` (id `figure`), `references/layers-figure.md`.
 - Trạng thái tập là `EPISODE.md`, **không bao giờ** `STATE.md` (tên đó thuộc cinecode).
 - Mọi lệnh tạo ảnh/video cho một tập phải có `--budget <tập>/budget.yaml --ledger out/<project>/ep<NN>/ledger.csv`
-  và `FILM_AGENT=<tên agent>` khi chạy trong agent.
+  và `FILM_AGENT=<tên agent>` khi chạy trong agent. Ngoại lệ, engine local miễn phí: `tools/comfy/comfy.py run` chỉ cần
+  `--ledger` (không có cờ `--budget`, đừng thêm), `tools/blender/blender.py` không nhận cờ nào trong hai cờ đó; dòng ledger
+  `comfy:*`/`blender:*` tính 0 và không vào trần nào.
 - Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe`
   từ G3) không còn ERROR, và `python3 tools/status.py <thư mục tập> --gate <G>` in `READY`. `budget.yaml` thiếu hoặc sai
   khóa, và `stage` vượt cổng chưa có ngày, đều là ERROR.

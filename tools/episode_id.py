@@ -29,6 +29,12 @@ RE_POSE = re.compile(r"^L4[b-z]$")                  # pose plate of a method: la
 RE_LAYER_FILE = re.compile(rf"^{ID}_({SHOT})_({LAYER})_[a-z0-9-]+_v\d{{2}}\.(?:png|jpg)$")
 RE_LAYER_PREFIX = re.compile(rf"^{ID}_({SHOT})_({LAYER})_")   # same groups, any tail (matte.py reads the code)
 RE_SHOT_TAG = re.compile(rf"_({SHOT})_")            # the shot of any media file name (first match)
+# method blender (blender-method.md): a 3D asset id = tools/blender/spec.py ID_RE (`_` allowed); layer code A-<asset>
+ASSET = r"[a-z0-9][a-z0-9_-]*"                      # use inside larger regexes (no group)
+# out/<project>/<id>/renders3d/<folder>/: s<NN>/ (blender.py render), s<NN>_v<NN>/ (render again: --out never
+# overwrites), s<NN>_preview[_v<NN>]/ (--preview), s<NN>_keys[_v<NN>]/ (keyframes: first/last frame of a local H3
+# clip), turntable-<asset>[_v<NN>]/. Group 1 = shot (None for a turntable), group 2 = preview | keys | None.
+RE_RENDER3D_DIR = re.compile(rf"^(?:({SHOT})(?:_(preview|keys))?|turntable-{ASSET})(?:_v\d{{2}})?$")
 
 
 def shot_number(sid):

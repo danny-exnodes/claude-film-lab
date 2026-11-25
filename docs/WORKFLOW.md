@@ -138,11 +138,16 @@ Bash) và prompt chỉ cho ghi `review/qc-*.md` của tập và `.claude/agent-m
 - Mọi lần tạo ảnh/video:
   `FILM_AGENT=<agent> python3 tools/ark.py image|video ... --ledger out/<project>/<id>/ledger.csv --budget <tập>/budget.yaml`.
   `ark.py` bắt buộc có `--budget` và `--ledger` (thiếu → thoát mã 2), cộng ledger (mỗi request một lần: pending, ok, failed, cut-502) + yêu cầu mới; vượt trần → từ chối, ghi `refused-budget`, thoát mã 3.
+- Ngoại lệ, engine local miễn phí (chỉ máy chủ lab): `FILM_AGENT=<agent> python tools/comfy/comfy.py run ... --ledger
+  out/<project>/<id>/ledger.csv` chỉ cần `--ledger` (không có cờ `--budget`); `tools/blender/blender.py` không nhận
+  `--budget`/`--ledger`. Dòng ledger `comfy:*`/`blender:*` tính 0, không vào trần nào (`images`, `video_seconds`,
+  `models`); `ledger-close` một dòng như vậy cũng báo là không tốn gì.
 - Request bị proxy cắt (502 sau ~30 s) ghi `cut-502` và không thử lại: có thể đã tính phí.
 - Ledger ghi bằng khóa file; tối đa 3 plate-maker chạy song song. Kiểm ngân sách và ghi dòng `pending` nằm trong cùng
   một khóa, nên agent song song không vượt trần (CONVENTIONS §7).
 - Agent (có `FILM_AGENT`) không dùng được `--no-budget` hay `--force` (mã 2). Request mồ côi (dòng `pending` không bao
-  giờ có dòng cuối) đóng bằng `ark.py ledger-close --req <id> --ledger L --status abandoned`: vẫn tính vào trần.
+  giờ có dòng cuối) đóng bằng `ark.py ledger-close --req <id> --ledger L --status abandoned`: vẫn tính vào trần (dòng
+  engine local `comfy:*`/`blender:*`: 0).
 - Ảnh pro/4K đi qua Lambda (`lambda/README.md`) và vẫn vào cùng ledger: `ark.py lambda-job prepare` (kiểm trần, dòng
   `pending`, in payload) → Invoke → `ark.py lambda-job finish` (dòng cuối). Không có ledger thì không gọi Lambda.
 - Mỗi tập chỉ một phiên tạo ảnh/video tại một thời điểm (ghi vào `## Nhật ký` của EPISODE.md khi bắt đầu khâu 4–6). Có
@@ -174,7 +179,8 @@ ClaudeFilmLab/<ProjectName>/
   giờ), `ledger.csv` nếu có tạo ảnh/video, cập nhật dòng của tập trong `TienDo_SanXuat`. Trước khi dừng phiên cũng đẩy:
   container bị thu hồi khi rảnh → chữ và media chưa đẩy là mất.
 - Media: `out/<project>/<id>/{plates,clips,renders}/` (git bỏ qua). Sau khi duyệt:
-  `python3 tools/bundle.py out/<project>/<id> --shot s03` → một zip mỗi shot, tải lên Drive
+  `python3 tools/bundle.py out/<project>/<id> --shot s03` → một zip mỗi shot (tập `blender`: cả `renders3d/s03*/`
+  `beauty.mp4` + `render.json`; khôi phục = giải nén trong `out/<project>/<id>/`), tải lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản nháp
   duyệt cũng vào đó; bản cuối vào `05_ThanhPham/<thư mục tập>/`. Link ghi vào cột `drive_link` của `prompts.csv`.
 - Thay đổi lõi (công cụ, skill, style pack) mới commit + push vào repo; dữ liệu dự án không bao giờ commit.

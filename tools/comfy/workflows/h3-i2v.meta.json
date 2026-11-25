@@ -1,7 +1,7 @@
 {
   "id": "h3-i2v",
   "title": "MiniMax H3 image-to-video with audio: start frame (+ optional end frame), or text only",
-  "source": "Comfy-Org workflow_templates video_minimax_h3_i2v.json (subgraph 'Image to Video (MiniMax H3)'), flattened to API format; node classes, input names and wiring from the template, values ours",
+  "source": "https://github.com/Comfy-Org/workflow_templates (MIT, Copyright (c) 2023-present Comfy Org; THIRD_PARTY.md): template video_minimax_h3_i2v.json (subgraph 'Image to Video (MiniMax H3)'), flattened to API format; node classes, input names and wiring from the template, values ours",
   "verified": false,
   "model_set": "minimax-h3",
   "fps": 24,

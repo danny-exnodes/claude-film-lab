@@ -31,7 +31,7 @@ normal, line, mask) + `render.json`. **Miễn phí, local**: không API, không 
 ## Lệnh
 
 ```bash
-python tools/blender/blender.py find                                    # đường dẫn + phiên bản (thoát 1 khi không có)
+python tools/blender/blender.py find                                    # đường dẫn + phiên bản (thoát 1 khi không có, 3 khi hỏng)
 python tools/blender/blender.py check tools/blender/demo/ink-wash-mountains.json   # chỉ kiểm spec, không cần Blender
 python tools/blender/blender.py render <shot3d.json> --out <thư mục> --preview      # bản nháp 960 ngang, 12 fps, ít sample
 python tools/blender/blender.py render <shot3d.json> --out <thư mục>               # bản cuối theo spec (1920x1080, 24 fps)
@@ -44,7 +44,8 @@ python tools/blender/blender.py lookbook --out <thư mục> [--spec S] [--frame 
 ```
 
 - Mã thoát: **0** xong · **1** không tìm thấy Blender hoặc render lỗi (in 15 dòng cuối của Blender) · **2** bị từ chối
-  trước khi render (spec sai, tham số sai, `--out` không trống) — chưa chạy gì.
+  trước khi render (spec sai, tham số sai, `--out` không trống) — chưa chạy gì · **3** (chỉ `find`) thấy Blender nhưng
+  `--version` lỗi hoặc không in phiên bản (bản cài hỏng; `doctor.sh` báo WARN).
 - **Không ghi đè**: `--out` phải chưa có hoặc là thư mục trống; `still --out` phải là file chưa có. Bản mới → thư mục/tên
   mới (`_v02`).
 - Mọi lệnh render nhận `--engine eevee|cycles`, `--look <id>` (đè look của spec), `--dry-run` (in lệnh Blender, không

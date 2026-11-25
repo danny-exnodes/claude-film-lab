@@ -47,6 +47,22 @@ class TestRepoHygiene(unittest.TestCase):
         for p in ("tools/doctor.sh", ".claude/hooks/session-start.sh", "tools/ci.sh"):
             self.assertEqual(FILES.get(p), "100755", p)
 
+    def test_no_stale_wan_engine_wording(self):
+        # The local video engine is MiniMax H3 (tools/comfy/comfy.py); Wan 2.2 was dropped before release. Tools,
+        # skills, agents and templates must not describe Wan as the engine (docs keep it only as history/backlog).
+        stale = re.compile(r"\bWan\b|wan22|flf2v", re.I)
+        roots = ("tools/", ".claude/", "templates/", "styles/", "CLAUDE.md")
+        bad = []
+        for p in FILES:
+            if not p.startswith(roots) or MEDIA.search(p) or not (REPO / p).is_file():
+                continue
+            try:
+                text = (REPO / p).read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            bad += [f"{p}:{n}" for n, line in enumerate(text.splitlines(), 1) if stale.search(line)]
+        self.assertEqual(bad, [], "stale Wan wording: the local engine is MiniMax H3 (tools/comfy/comfy.py)")
+
     def test_ci_files_are_tracked(self):
         # The workflow is a template the owner copies by hand to .github/workflows/ (cloud sessions cannot push it).
         for p in ("docs/ci/tests.yml", "requirements-ci.txt", "tools/ci.sh"):

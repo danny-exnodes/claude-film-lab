@@ -212,6 +212,7 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
 - **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm
   turntable, shot mẫu, không vượt trần.
 - **Khâu 5:** `film-3d-artist` render mọi shot không dùng lại (`renders3d/s<NN>/`). Không giao `film-plate-maker`.
+  Render chỉ có trong máy: shot duyệt nào cũng gói (`bundle.py --shot s<NN>`, mục 7) và tải lên Drive.
 - **Khâu 6:** chỉ khi có `ai_motion` (theo `video_engine` dưới đây); không có thì Nhật ký `khâu 6 bỏ qua (method blender)`.
 - **Khâu 7–10:** `film-compositor` dùng render như clip (chuỗi PNG hoặc `beauty.mp4`).
 
@@ -302,7 +303,9 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 
 Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot, G3/G4 cho bản dựng):
 1. `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → `out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
-   (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot). Lệnh in sẵn tham chiếu `sha256:<hex>:<đường dẫn>`.
+   (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot; tập `blender`: `renders3d/s03*/` gồm `beauty.mp4` +
+   `render.json` + khung `_keys`, không chuỗi PNG; G2 thêm `--with-turntables`; `blender-method.md` §3). Lệnh in sẵn
+   tham chiếu `sha256:<hex>:<đường dẫn>`. Khôi phục: kéo zip về, giải nén trong `out/<project>/ep<NN>/` (file về đúng chỗ).
 2. Tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (tạo thư mục ngày nếu chưa có,
    ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp duyệt
    (`renders/*_draft_*.mp4`) vào cùng thư mục ngày; bản cuối (`renders/*_final_*.mp4`) vào `05_ThanhPham/ep<NN>-<slug>/`.

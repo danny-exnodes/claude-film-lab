@@ -92,12 +92,11 @@ RE_LAYER_CODE = eid_mod.RE_LAYER
 # FX or FX-<effect>, T (on-screen text)
 RE_CODE_LAYER = re.compile(r"^([CM]-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
 # method: blender (3D renders, blender-method.md): A-<asset> (3D model: GLB or preset), E-<setting>, FX[-<effect>], T
-RE_BLENDER_LAYER = re.compile(r"^(A-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
+RE_BLENDER_LAYER = re.compile(rf"^(A-{eid_mod.ASSET}|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")   # asset id: spec.py ID_RE
 # <episode>/shots3d/s<NN>.json: one shot3d.json per shot (tools/blender/README.md)
 RE_SHOT3D_FILE = re.compile(r"^(s(?:\d{2}|\d{3}))\.json$")
-# out/<project>/<id>/renders3d/: s<NN>/ (blender.py render), s<NN>_v<NN>/ (render again: --out never overwrites),
-# s<NN>_preview[_v<NN>]/ (--preview), s<NN>_keys[_v<NN>]/ (keyframes for wan22-flf2v), turntable-<asset>[_v<NN>]/
-RE_RENDER3D_DIR = re.compile(r"^(?:(s(?:\d{2}|\d{3}))(?:_(preview|keys))?|turntable-[a-z0-9-]+)(?:_v\d{2})?$")
+# out/<project>/<id>/renders3d/<folder>/ (one definition in tools/episode_id.py, shared with tools/bundle.py)
+RE_RENDER3D_DIR = eid_mod.RE_RENDER3D_DIR
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RE_EP_DIR = eid_mod.RE_DIR
 RE_SHOT = eid_mod.RE_SHOT
@@ -110,8 +109,8 @@ EPISODE_KEYS = ["series", "episode", "slug", "style", "length_s", "stage", "gate
 EPISODE_OPTIONAL = ["book", "method", "video_engine"]   # book set = project split into books: id q<book>t<episode>
 # layers: image models + code motion; seedance: clips; code: no AI, all drawn in code; blender: 3D renders (local, free)
 METHODS = ("layers", "seedance", "code", "blender")
-# video_engine (stage 6, docs/WORKFLOW.md): seedance = paid Ark clips (tools/ark.py video, the default); comfy = local Wan
-# clips (tools/comfy/comfy.py run, free, owner's PC only). Allowed with method seedance and blender only.
+# video_engine (stage 6, docs/WORKFLOW.md): seedance = paid Ark clips (tools/ark.py video, the default); comfy = local
+# MiniMax H3 clips (tools/comfy/comfy.py run, free, owner's PC only). Allowed with method seedance and blender only.
 VIDEO_ENGINES = ("seedance", "comfy")
 VIDEO_ENGINE_METHODS = ("seedance", "blender")
 EPISODE_SECTIONS = ["## Ghi chú người dùng (nguyên văn)", "## Đã khóa (không làm lại)", "## Việc tiếp theo", "## Nhật ký"]
@@ -723,7 +722,8 @@ def check_shots(ep_dir, meta, rep):
             rep.error(W, f"method code: shot {sid} has ai_motion; every motion is a TOON action (code_motion)")
         if blender and r["ai_motion"].strip() and not engine_set:
             rep.error(W, f"method blender: shot {sid} has ai_motion but EPISODE.md has no video_engine: set comfy "
-                         f"(local Wan clip from Blender keyframes, free) or seedance (paid clip), or empty ai_motion")
+                         f"(local MiniMax H3 clip (tools/comfy/comfy.py) from Blender keyframes, free) or seedance (paid clip), "
+                         f"or empty ai_motion")
         r["_codes"] = codes
         r["_line"] = n
         shots[sid] = r
@@ -1078,7 +1078,9 @@ def check_renders3d(media, meta, shots, rep):
         return
     if isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
         rep.error("media/renders3d", f"no final Blender render for {', '.join(todo)} at stage {stage} (compositing "
-                                     f"needs renders3d/<shot>/: tools/blender/blender.py render, or pull the bundles)")
+                                     f"needs renders3d/<shot>/: tools/blender/blender.py render, or pull the shot "
+                                     f"bundles from Drive and unzip them in the media folder: tools/bundle.py packs "
+                                     f"renders3d/<shot>/beauty.mp4 + render.json)")
     else:
         rep.info(f"renders3d: {len(todo)} shot(s) not rendered yet (required from stage {FILES_REQUIRED_FROM_STAGE}): "
                  f"{', '.join(todo)}")
@@ -1277,7 +1279,8 @@ def check_media_missing(media, meta, prompt_rows, rep):
     n = len(required_rows(prompt_rows, stage))
     if episode_method(meta)[0] == "blender" and isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
         rep.error("media", f"media folder missing at stage {stage}: the Blender renders (renders3d/) are needed for "
-                           f"compositing; pull the shot bundles from Drive")
+                           f"compositing; pull the shot bundles from Drive and unzip them in "
+                           f"out/<project>/<id>/ (they restore renders3d/<shot>/)")
         return
     if n and isinstance(stage, int) and stage >= FILES_REQUIRED_FROM_STAGE:
         rep.error("media", f"media folder missing but {n} approved/generated file(s) are required: "

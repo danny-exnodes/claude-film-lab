@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Local 3D renders with Blender 5.x headless (method: blender). Free: no API, no ledger cost; runs on the owner's PC.
 
-  python tools/blender/blender.py find                                   # path + version (exit 1 when not found)
+  python tools/blender/blender.py find                                   # path + version (1 = not found, 3 = broken)
   python tools/blender/blender.py check <shot3d.json> [--preview]        # validate the spec only, no Blender
   python tools/blender/blender.py render <shot3d.json> --out <dir> [--frames A:B] [--preview] [--engine eevee|cycles]
                                          [--passes depth normal line mask | none] [--look L] [--samples N] [--no-mp4]
@@ -23,7 +23,8 @@ EEVEE needs a GPU session (a logged-in desktop); when an EEVEE render fails afte
 the render runs again with Cycles (OptiX, CUDA, else CPU) and render.json says so. beauty.mp4: ffmpeg when it is on PATH,
 else Blender's own FFmpeg encoder (--no-mp4 skips it).
 
-Exit codes: 0 ok · 1 Blender not found or the render failed · 2 refused before rendering (bad spec, arguments, --out).
+Exit codes: 0 ok · 1 Blender not found or the render failed · 2 refused before rendering (bad spec, arguments, --out)
+· 3 (find only) a Blender was found but `blender --version` failed or printed no version (broken install).
 """
 import argparse
 import glob
@@ -43,6 +44,7 @@ SCENE = os.path.join(HERE, "scene.py")
 DEMO = os.path.join(HERE, "demo")
 LOOKBOOK_SPEC = os.path.join(DEMO, "lookbook.json")
 KEYFRAME_SIZE = "1344x768"
+BROKEN = 3          # `find`: a Blender exists but `--version` fails (tools/doctor.sh WARNs; 1 = none found)
 
 
 def _load_spec():
@@ -268,8 +270,12 @@ def cmd_find(a):
         print(f"blender: not found: {why}", file=sys.stderr)
         return 1
     v = version(path)
-    print(f"blender {path} ({v or 'version unknown'}) via {why}")
-    return 0 if v else 1
+    if not v:
+        print(f"blender: found {path} via {why}, but `--version` failed or printed no version "
+              f"(broken or incomplete install)", file=sys.stderr)
+        return BROKEN
+    print(f"blender {path} ({v}) via {why}")
+    return 0
 
 
 def cmd_check(a):

@@ -4,7 +4,7 @@
   "looks": {
     "grey-layout": {
       "name": "Grey layout", "name_vi": "Khối xám dựng cảnh",
-      "use": "flat grey clay playblast: composition, camera and motion input for the AI bridge (Wan / LTX layout-to-render)",
+      "use": "flat grey clay playblast: composition, camera and motion input for the AI bridge (local MiniMax H3 clips, tools/comfy/comfy.py)",
       "paper": "#9A9A9A", "ink": "#2A2A2A", "base": "#B8B8B8",
       "lines": false, "view": "Standard", "mist": false, "grain": 0,
       "samples": {"eevee": [16, 4], "cycles": [32, 8]}

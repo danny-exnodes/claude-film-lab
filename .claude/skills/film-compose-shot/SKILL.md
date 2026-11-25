@@ -235,7 +235,9 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 - Gói mỗi shot: `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
   `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (đạo diễn tải; compositor không tải lên Drive).
-  Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
+  Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4). Tập `blender`: gói có `renders3d/s<NN>*/beauty.mp4`
+  + `render.json` (không chuỗi PNG, `references/blender-method.md` §3); khôi phục = giải nén gói trong
+  `$FILM_LAB/out/<project>/ep<NN>/`.
 - Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
   trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.

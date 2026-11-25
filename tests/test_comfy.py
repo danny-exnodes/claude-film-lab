@@ -27,6 +27,7 @@ class FakeComfy:
         self.mode, self.polls_until_done, self.offline = "success", 2, True
         self.missing_classes, self.models = set(), {m["file"] for m in LOCK["models"]}
         self.prompt_status, self.prompt_error = 200, None
+        self.pending, self.drop_posts = [], set()      # /queue pending ids; POST paths answered by a dropped connection
         self.calls, self.uploads, self.prompts, self.interrupts, self.deletes = [], {}, [], [], []
         self.polls = {}
         fake = self
@@ -75,7 +76,8 @@ class FakeComfy:
                     return self.send_json({pid: fake.history(pid)})
                 if u.path == "/queue":
                     running = [[1, p["prompt_id"], {}, {}, []] for p in fake.prompts]
-                    return self.send_json({"queue_running": running, "queue_pending": []})
+                    pending = [[2, pid, {}, {}, []] for pid in fake.pending]
+                    return self.send_json({"queue_running": running, "queue_pending": pending})
                 if u.path == "/view":
                     q = parse_qs(u.query)
                     fake.view = q
@@ -88,6 +90,9 @@ class FakeComfy:
             def do_POST(self):
                 fake.calls.append(("POST", self.path))
                 raw = self.body()
+                if self.path in fake.drop_posts:     # the server goes away mid-request: no answer at all
+                    self.close_connection = True
+                    return
                 if self.path == "/upload/image":
                     m = re.search(rb'name="image"; filename="([^"]+)"\r\nContent-Type: [^\r]+\r\n\r\n', raw)
                     name = m.group(1).decode()
@@ -270,6 +275,29 @@ class TestPure(ComfyCase):
         g0 = comfy.build_graph(graph, meta, {"refs": ["a.png"]})
         self.assertEqual(g0["12"]["inputs"]["conditioning"], ["8", 0])
 
+    def test_every_workflow_names_its_source_and_licence(self):
+        # A workflow JSON cannot hold a comment: its .meta.json names the template it was adapted from, and
+        # THIRD_PARTY.md has a row for it (CLAUDE.md: adapted code names its source).
+        third = (REPO / "THIRD_PARTY.md").read_text(encoding="utf-8")
+        for wid in comfy.workflow_ids():
+            meta = comfy.load_workflow(wid)[1]
+            self.assertIn("https://github.com/Comfy-Org/workflow_templates", meta.get("source", ""), wid)
+            self.assertRegex(meta["source"], r"video_minimax_h3_\w+\.json", wid)
+            self.assertIn(f"| `tools/comfy/workflows/{wid}.json` |", third)
+        self.assertIn("### MIT: Comfy-Org/workflow_templates", third)
+
+    def test_budget_rule_states_the_local_engine_exception(self):
+        # CLAUDE.md asks --budget + --ledger on every generation command; comfy.py run takes --ledger only (no
+        # --budget flag exists), so the rule must say so, in CLAUDE.md, WORKFLOW §4 and the film-animator agent.
+        self.assertNotIn("--budget", comfy.p.format_help() + " ".join(
+            a for sp in comfy.p._subparsers._group_actions for c in sp.choices.values() for a in c._option_string_actions))
+        for rel in ("CLAUDE.md", "docs/WORKFLOW.md", ".claude/agents/film-animator.md"):
+            text = re.sub(r"\s+", " ", (REPO / rel).read_text(encoding="utf-8"))
+            self.assertIn("không có cờ `--budget`", text, rel)
+        for rel in ("CLAUDE.md", "docs/WORKFLOW.md"):
+            text = re.sub(r"\s+", " ", (REPO / rel).read_text(encoding="utf-8"))
+            self.assertIn("`comfy:*`/`blender:*` tính 0", text, rel)
+
     def test_lock_and_graph_models(self):
         lock = comfy.load_lock()
         self.assertEqual(lock["custom_nodes"], [])
@@ -355,6 +383,8 @@ class TestRefusals(ComfyCase):
             (r2v + ["--guide", "1.5"], "SECONDS=IMAGE"),
             (self.base() + ["--seconds", "16"], "362"),
             (self.base() + ["--res", "1080p"], "--res 1080p"),
+            (self.base() + ["--steps", "0"], r"--steps must be >= 1"),     # 0 is refused, not the default
+            (self.base() + ["--steps", "0", "--turbo"], r"--steps must be >= 1"),
             (["run", I2V, "--prompt", "x", "--out", self.out, "--ledger", self.ledger, "--image", "nope.png"],
              "no such file"),
             (self.base()[:-2] + ["--image", str(self.tmp / "ledger-not-image.txt")], "no such file"),
@@ -594,6 +624,47 @@ class TestRun(ComfyCase):
         # interrupted closes the request: nothing open for status.py / ledger-close
         self.assertEqual([r["status"] for _, r in ark.request_rows(rows)], ["interrupted"])
 
+    def test_keep_frames_land_where_check_episode_and_matte_seq_expect_them(self):
+        f = self.server()
+        real_run = subprocess.run
+        ffmpeg_calls = []
+
+        def fake_run(cmd, *a, **kw):
+            if cmd and cmd[0] == "ffmpeg":
+                ffmpeg_calls.append(cmd)
+                for n in (1, 2, 3):
+                    Path(cmd[-1] % n).write_bytes(b"png")
+                return subprocess.CompletedProcess(cmd, 0)
+            return real_run(cmd, *a, **kw)
+        with mock.patch.object(comfy.shutil, "which", lambda name, *a, **kw: "/usr/bin/" + name),                 mock.patch.object(comfy.subprocess, "run", fake_run):
+            code, out, err = self.run_clip(I2V, "--keep-frames")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(ffmpeg_calls), 1)
+        stem = os.path.splitext(os.path.basename(self.out))[0]
+        raw = Path(self.out).parent / stem / "raw"
+        self.assertEqual(sorted(p.name for p in raw.iterdir()), ["000001.png", "000002.png", "000003.png"])
+        self.assertIn(f"frames in {raw}", out)
+        ce = load("check_episode.py", "film_check_episode_comfy_frames")
+        media = self.tmp
+        rep = ce.Report()
+        names = []
+        for root, _dirs, files in os.walk(media / "clips"):
+            for n in files:
+                rel = os.path.relpath(os.path.join(root, n), media)
+                names.append(rel)
+                ce.check_media_name(rel, n, "clips", ce.MEDIA_RULES["clips"], "ep01", rep)
+        self.assertEqual(len(names), 5, names)        # clip + sidecar + 3 frames
+        self.assertEqual(rep.errors, 0, rep.lines)
+        # a second run of the same clip name is refused before anything is sent (versions only go up)
+        os.remove(self.out)
+        os.remove(self.out + ".json")
+        n_prompts = len(f.prompts)
+        with mock.patch.object(comfy.shutil, "which", lambda name, *a, **kw: "/usr/bin/" + name):
+            code, _, err = self.run_clip(I2V, "--keep-frames")
+        self.assertEqual(code, 2, err)
+        self.assertIn("raw exists and is not empty", err)
+        self.assertEqual(len(f.prompts), n_prompts)
+
     def test_interrupted_on_server(self):
         f = self.server()
         f.mode = "interrupted"
@@ -754,6 +825,30 @@ class TestOtherCommands(ComfyCase):
         code, out, _ = self.run_comfy("interrupt", "--prompt-id", "p-other")
         self.assertIn("not queued or running", out)
         self.assertEqual(len(f.interrupts), 1)
+
+    def test_interrupt_goes_on_when_the_server_drops(self):
+        f = self.server()
+        for pid in ("p-run", "p-wait", "p-run2"):
+            ark.ledger_append(self.ledger, {"kind": "video", "model": "comfy:h3-i2v", "status": "pending",
+                                            "task_id": pid, "note": f"req={pid}"})
+        f.prompts += [{"prompt_id": "p-run"}, {"prompt_id": "p-run2"}]   # running
+        f.pending = ["p-wait"]
+        f.drop_posts = {"/interrupt"}
+        code, out, err = self.run_comfy("interrupt", "--ledger", self.ledger)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("p-run: running, interrupt FAILED (network error", err)
+        self.assertIn("p-run2: running, interrupt FAILED", err)
+        self.assertIn("p-wait: queued -> removed from the queue", out)   # the ids after a failure are still handled
+        self.assertEqual(f.deletes, [{"delete": ["p-wait"]}])
+        f.drop_posts = {"/queue"}
+        code, out, err = self.run_comfy("interrupt", "--ledger", self.ledger)
+        self.assertEqual(code, 1, out + err)
+        self.assertIn("p-wait: queued, removal FAILED", err)
+        self.assertIn("p-run: running -> interrupted", out)
+        self.assertIn("p-run2: running -> interrupted", out)
+        f.drop_posts = set()
+        code, out, err = self.run_comfy("interrupt", "--prompt-id", "p-run")
+        self.assertEqual(code, 0, out + err)
 
     def test_start_when_running_and_without_install(self):
         self.server()

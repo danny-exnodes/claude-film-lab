@@ -145,7 +145,8 @@ elif echo "$out" | grep -q "hash differs"; then bad three "$(echo "$out" | head 
 else warn three "not installed: the 3D code styles need it; run tools/toon/install_three.sh"; fi
 # Local engines (method blender, video_engine comfy) run only on the owner's PC, in a local session. They never FAIL:
 # a cloud session has neither, which is "n/a". blender: `blender.py find` searches this machine only (FILM_BLENDER,
-# PATH, the usual install folders), no network. comfy: only when FILM_COMFY_URL or FILM_COMFY_HOME is set, and the
+# PATH, the usual install folders), no network; exit 1 = none found (n/a unless FILM_BLENDER is set), 3 = found but
+# `--version` fails (WARN). comfy: only when FILM_COMFY_URL or FILM_COMFY_HOME is set, and the
 # only address ever contacted is FILM_COMFY_URL on this machine (default http://127.0.0.1:8188), by `comfy.py ping`.
 na() { printf '  INFO  %-22s %s\n' "$1" "n/a: $2"; }
 if [ ! -f "$LAB/tools/blender/blender.py" ]; then na blender "tools/blender/blender.py not in this checkout"
@@ -155,6 +156,7 @@ else
   if [ $rc = 0 ]; then ok blender "$(echo "$out" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-100)"
   elif [ $rc = 1 ] && [ -z "${FILM_BLENDER:-}" ]; then na blender "no Blender on this machine (method blender renders on the owner's PC)"
   elif [ $rc = 124 ]; then warn blender "blender.py find gave no answer within 30 s (docs/RUNBOOK.md: Blender)"
+  elif [ $rc = 3 ]; then warn blender "Blender found but broken: ${last:-no output} (docs/RUNBOOK.md: Blender)"
   elif [ -n "${FILM_BLENDER:-}" ]; then warn blender "FILM_BLENDER=$FILM_BLENDER is set but not usable: ${last:-no output} (docs/RUNBOOK.md: Blender)"
   else warn blender "blender.py find failed (rc $rc): ${last:-no output}"; fi
 fi

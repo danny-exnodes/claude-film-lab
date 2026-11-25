@@ -101,7 +101,8 @@ python tools/comfy/comfy.py interrupt --ledger out/<project>/ep01/ledger.csv    
 - Sidecar `<out>.json`: workflow, sha256 của file workflow và của graph đã điền (graph cũng được lưu), prompt id, seed,
   prompt, kích thước, số khung, fps, bước, turbo, guide, ảnh vào (sha256 gốc và bản đã tải lên), file model, phiên bản
   ComfyUI/torch/GPU, giây GPU (từ mốc `execution_start` → `execution_success`).
-- `--keep-frames`: thêm thư mục `<tên clip>_frames/` các khung PNG (cần ffmpeg).
+- `--keep-frames`: tách thêm khung PNG gốc vào `<clips>/<tên clip không đuôi>/raw/000001.png…` (cần ffmpeg) – đúng chỗ
+  `check_episode.py` chấp nhận và `tools/layers/matte_seq.py` đọc khung gốc.
 - `--seed` mặc định ngẫu nhiên, luôn in ra và ghi lại; `--timeout` (mặc định 2400 s) quá thì job bị dừng.
 
 ### Mã thoát và ledger

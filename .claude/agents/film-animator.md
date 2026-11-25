@@ -61,7 +61,8 @@ Sau khi tải clip về (miễn phí, một lệnh cho cả clip):
   hợp đồng ghi "bản nháp".
 - Không bao giờ dùng node API trả tiền; `comfy.py` từ chối workflow có node ngoài danh sách cho phép (mã 2): báo nguyên
   văn, không sửa workflow. Mã 1 (đã gửi, lỗi) hoặc `interrupted`: không chạy lại, báo kèm dòng ledger.
-- Clip local không tốn trần, nhưng vẫn ghi ledger (`--ledger` bắt buộc, không `--no-ledger`). Báo phút GPU (dòng `usage`
+- Clip local không tốn trần, nhưng vẫn ghi ledger (`--ledger` bắt buộc, không `--no-ledger`; `comfy.py` không có cờ
+  `--budget`, đừng thêm: dòng `comfy:*` tính 0, không vào trần nào). Báo phút GPU (dòng `usage`
   `gpu_s=`) thay cho giây đã tiêu. Tách nền chỉ cho tập `seedance` (`matte_seq.py` như trên); tập `blender` thì không.
 
 Giới hạn: không hỏi người dùng, không tự qua cổng, không in/ghi log/tìm API key. Trả về tối đa 10 dòng: clip đã tạo,

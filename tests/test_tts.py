@@ -1077,6 +1077,18 @@ class TestNarratorAgent(unittest.TestCase):
         self.assertIn("--check", flags)
         self.assertEqual(flags - known, set())
 
+    def test_every_render_requires_the_watermark(self):
+        """#37: a final read without watermark had to be read again in full; the agent never renders without it."""
+        text = (self.AGENTS / "film-narrator.md").read_text(encoding="utf-8")
+        renders = [l for l in text.splitlines() if "vieneu_tts.py" in l and "--voice" in l]
+        self.assertTrue(renders)
+        for line in renders:
+            self.assertIn("--require-watermark", line)
+        self.assertIn("Không bao giờ bỏ `--require-watermark`", text)
+        readme = (REPO / "tools" / "tts" / "README.md").read_text(encoding="utf-8")
+        self.assertIn("requirements-tts.txt", readme)
+        self.assertIn("| 4 |", readme)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -186,3 +186,19 @@
 > fails at 30.1 s (reproduced with 3 different payloads). `/__agentproxy/status` shows no `recentRelayFailures`.
 > The upstream API (synchronous image generation) legitimately takes 30–60 s. Please raise or make configurable
 > the upstream timeout for injected-credential hosts.
+
+## CI (bộ test miễn phí)
+- Chạy tay ở mọi máy: `tools/ci.sh` (python ≥ 3.10, `bash -n` mọi script, lint bộ compose, toàn bộ unit test). Máy mới:
+  `tools/ci.sh --install` (cài `requirements-ci.txt`: numpy, scipy, pillow, PyYAML; không rembg/torch). Chạy vài module:
+  `tools/ci.sh -- test_ark test_docs -v`. Không gọi Ark, Drive hay dịch vụ có phí; test cần Chrome, Playwright, rembg,
+  cinecode, VieNeu tự bỏ qua khi máy thiếu.
+- Bật GitHub Actions (chủ dự án, một lần): phiên cloud không đẩy được file workflow. Trên GitHub web chọn
+  *Add file → Create new file*, tên `.github/workflows/tests.yml`, dán nội dung `docs/ci/tests.yml`, commit vào `main`.
+  Sửa mẫu thì sửa `docs/ci/tests.yml` trước rồi chép lại.
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| `ci: FAILED: python 3.x is too old (3.10+ needed)` | Python của máy cũ hơn 3.10 | Dùng python 3.10+ (CI mẫu dùng 3.12) |
+| `ci: FAILED: bash -n: <script>` | Script shell sai cú pháp | Sửa script; `bash -n <script>` để xem dòng lỗi |
+| `test_docs` báo `missing path`, `unknown subcommand` hoặc `unknown option` | Tài liệu (CLAUDE.md, docs, skill, agent) nhắc tới file, lệnh con hoặc cờ không còn trong mã | Sửa tài liệu theo mã. Chỉ khi chưa sửa được ngay mới thêm vào `ALLOW` trong `tests/test_docs.py` kèm lý do |
+| `ImportError`/`PermissionError` trên `/root/...` khi chạy test bằng user thường | Test cũ ghi cứng `/root/.claude/skills/cinecode` | Dùng `helpers.CINECODE` (`$CINECODE_DIR`, mặc định `~/.claude/skills/cinecode`) và `helpers.exists()` |

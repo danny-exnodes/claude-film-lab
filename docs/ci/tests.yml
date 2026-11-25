@@ -1,0 +1,37 @@
+# TEMPLATE for GitHub Actions. A cloud session cannot push workflow files, so the owner copies this file by
+# hand to .github/workflows/tests.yml (GitHub web UI: Add file -> Create new file). docs/RUNBOOK.md, "CI".
+# Free: no secrets, no Ark, no Drive. The tests that need Chrome + Playwright, rembg, cinecode, VieNeu or
+# torch skip when those are missing.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg
+      - name: tests
+        run: bash tools/ci.sh --install

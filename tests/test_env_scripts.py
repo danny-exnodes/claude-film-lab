@@ -441,5 +441,98 @@ class TestSessionStartHook(unittest.TestCase):
                          r"FAIL\s+ark\.py\s.*%s" % re.escape(str(lab / ".claude/hooks/session-start.sh")))
 
 
+CI_PY_SHIM = """#!/bin/bash
+# python3 shim for the tools/ci.sh tests: pip never runs for real; SHIM_PYV fakes the version check.
+if [ "${1:-}" = "-m" ] && [ "${2:-}" = "pip" ]; then
+  echo "$*" >> "$SHIM_LOG.pip"
+  exit "${SHIM_PIP_RC:-0}"
+fi
+if [ -n "${SHIM_PYV:-}" ]; then
+  for a in "$@"; do case "$a" in *version_info*) echo "$SHIM_PYV"; exit 0;; esac; done
+fi
+exec %s "$@"
+"""
+
+
+@unittest.skipUnless(BASH, "needs bash")
+class TestCiScript(unittest.TestCase):
+    """tools/ci.sh: usage, the python check, --install, and each failing step ending in exit 1. The real repo
+    runs only one small test module; a fake lab (not a git checkout) holds a broken shell script."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.td = Path(os.path.realpath(tempfile.mkdtemp(prefix="film-ci-")))
+        shims = cls.td / "shims"
+        shims.mkdir()
+        write_exec(shims / "python3", CI_PY_SHIM % sys.executable)
+        fake = cls.td / "fakelab"
+        (fake / "tools" / "compose").mkdir(parents=True)
+        (fake / "tests").mkdir()
+        shutil.copy2(REPO / "tools" / "ci.sh", fake / "tools" / "ci.sh")
+        (fake / "tools" / "compose" / "inline.py").write_text("print('compose kit v0.0.0: 1 files, lint ok')\n")
+        (fake / "tests" / "test_x.py").write_text("import unittest\nclass T(unittest.TestCase):\n    def test_x(self):\n        pass\n")
+        (fake / "broken.sh").write_text("#!/bin/bash\nif then fi\n")
+        ci, fci = REPO / "tools" / "ci.sh", fake / "tools" / "ci.sh"
+        env = base_env(cls.td, PATH=str(shims) + os.pathsep + os.environ["PATH"], SHIM_LOG=str(cls.td / "shim"))
+        jobs = {
+            "help": ([ci, "--help"], {}),
+            "bogus": ([ci, "--bogus"], {}),
+            "one": ([ci, "--", "test_episode_id"], {}),
+            "install": ([ci, "--install", "--", "test_episode_id"], {"SHIM_LOG": str(cls.td / "install")}),
+            "pip_fails": ([ci, "--install"], {"SHIM_LOG": str(cls.td / "pipfail"), "SHIM_PIP_RC": "1"}),
+            "old_python": ([ci], {"SHIM_PYV": "3.8.10"}),
+            "missing_test": ([ci, "--", "test_this_module_does_not_exist"], {}),
+            "broken_sh": ([fci], {}),
+        }
+
+        def go(item):
+            name, ((script, *args), extra) = item
+            return name, run([BASH, script, *args], dict(env, **extra))
+
+        with concurrent.futures.ThreadPoolExecutor(4) as pool:
+            cls.r = dict(pool.map(go, jobs.items()))
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.td, ignore_errors=True)
+
+    def calls(self, log):
+        f = self.td / f"{log}.pip"
+        return f.read_text().splitlines() if f.exists() else []
+
+    def test_help_and_usage_errors(self):
+        rc, out, err = self.r["help"]
+        self.assertEqual(rc, 0, err)
+        self.assertIn("--install", out)
+        self.assertNotIn("ci: python", out)
+        rc, out, err = self.r["bogus"]
+        self.assertEqual((rc, out), (2, ""))
+        self.assertIn("--install", err)
+
+    def test_selected_tests_pass_through_every_step(self):
+        rc, out, err = self.r["one"]
+        self.assertEqual(rc, 0, out + err)
+        for want in ("ci: python 3.", "ci: bash -n ok", "ci: compose kit v", "lint ok", "ci: all steps passed"):
+            self.assertIn(want, out)
+        self.assertRegex(err, r"Ran \d+ tests")
+        self.assertEqual(self.calls("shim"), [], "pip runs only with --install")
+
+    def test_install_uses_requirements_ci(self):
+        rc, out, err = self.r["install"]
+        self.assertEqual(rc, 0, out + err)
+        (pip,) = self.calls("install")
+        self.assertIn("-r requirements-ci.txt", pip)
+        self.assertIn("installed requirements-ci.txt", out)
+
+    def test_each_failing_step_exits_1(self):
+        cases = {"pip_fails": "pip install -r requirements-ci.txt", "old_python": "python 3.8.10 is too old",
+                 "missing_test": "unit tests", "broken_sh": "bash -n: broken.sh"}
+        for name, why in cases.items():
+            rc, out, err = self.r[name]
+            self.assertEqual(rc, 1, f"{name}: {out}{err}")
+            self.assertIn(f"ci: FAILED: {why}", err, name)
+            self.assertNotIn("all steps passed", out, name)
+
+
 if __name__ == "__main__":
     unittest.main()

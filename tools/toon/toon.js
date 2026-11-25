@@ -25,7 +25,9 @@
     'lowpoly-90s': { engine: 'three', hold: 1 },
     'cardboard': { engine: 'three', hold: 2 },
     'popup-paper': { engine: 'three', hold: 1 },
+    'ink-wash-3d': { engine: 'three', hold: 1, creatures: true },
   };
+  for (const id of ['clay-3d', 'lowpoly-90s']) T.LOOKS[id].creatures = true;   // looks that draw creature.js beasts
   T.POSTS = ['riso', 'pixel-16', 'ascii'];
   T.THREE_URL = T.THREE_URL || 'file:///opt/film-lab/vendor/three/build/three.module.js';
 
@@ -59,16 +61,29 @@
     const fps = scene.fps || 24;
     const hold = Math.max(1, Math.round(scene.hold || look.hold || 1));
     const tp = hold > 1 ? Math.floor(t * fps / hold + 1e-6) * hold / fps : t;
-    const cast = (scene.cast || []).map((c, i) => {
+    const cast = [], beasts = [];
+    let follow = null;
+    (scene.cast || []).forEach((c, i) => {
+      if (c.creature) {                    // a creature.js beast: { creature: <spec>, timeline }
+        const cr = once('cr' + JSON.stringify(c.creature), () => T.creature(c.creature));
+        const tl = c.timeline || {}, s = seed + i * 101;
+        const J = T.creatureJoints(cr, T.creaturePose(cr, tl, tp, s));
+        beasts.push({ J, cr, tl, seed: s });
+        follow = follow || J.rootPos;
+        return;
+      }
       const ch = once('ch' + JSON.stringify(c.character || {}), () => T.character(c.character));
       const pose = T.pose(ch, c.timeline || {}, tp, seed + i * 101);
-      return T.joints(ch, pose);
+      const J = T.joints(ch, pose);
+      cast.push(J);
+      follow = follow || J.rootPos;
     });
-    const cam = T.camera(Object.assign({ seed }, scene.camera), tp, cast[0] ? cast[0].rootPos : null);
+    if (beasts.length && !look.creatures) T.warn(`look '${scene.look}' does not draw creatures (ink-wash-3d, clay-3d, lowpoly-90s do)`);
+    const cam = T.camera(Object.assign({ seed }, scene.camera), tp, follow);
     const P = T.projector(cam, W, H);
     const chars = cast.map((J) => ({ J, items: T.drawList(J, P, { hose: !!look.hose }) }));
     const props = once('pr' + seed + JSON.stringify(scene.env || {}), () => T.props(scene.env, seed));
-    return { t, tp, W, H, P, chars, props, seed, pal: scene.pal || {}, opts: scene.opts || {}, envKey: scene.env || null,
+    return { t, tp, W, H, P, chars, beasts, props, seed, pal: scene.pal || {}, opts: scene.opts || {}, envKey: scene.env || null,
              look: scene.look };
   };
 

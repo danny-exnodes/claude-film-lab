@@ -12,7 +12,9 @@
   //   move: { t: [a, b], ease: 'inOut', pos, target, fov, orbit: degrees },   // where the move ends
   //   follow: 0..1 (share of the character's x/z the camera follows), shake: px-like amount (0.002) }
   // Named moves of shots.csv `camera` map onto this: static (no move), push-in / pull-out (pos toward / away from
-  // the target), pan-left/right (target moves), dolly (pos and target move together), crane (pos.y), orbit.
+  // the target), pan-left/right (target moves), dolly (pos and target move together), crane (pos.y), orbit,
+  // fly-through (move.path: waypoints [[x, y, z], ...] from pos, on a Catmull-Rom curve; move.look: 'ahead' aims the lens
+  // `lead` (0.08) further along the path, lowered by `drop` (0.15) world units; otherwise target / move.target).
   T.CAMERA_DEFAULT = { pos: [0, 0.75, 4.2], target: [0, 0.55, 0], fov: 32 };
   T.camera = (spec, t, follow) => {
     const s = Object.assign({}, T.CAMERA_DEFAULT, spec || {});
@@ -20,8 +22,16 @@
     const m = s.move;
     if (m && m.t) {
       const k = C.easeOf(m.ease || 'inOut')(C.clamp((t - m.t[0]) / Math.max(1e-3, m.t[1] - m.t[0])));
-      if (m.pos) pos = V.lerp(pos, m.pos, k);
-      if (m.target) target = V.lerp(target, m.target, k);
+      if (m.path && m.path.length) {
+        const pts = [pos, ...m.path];
+        pos = T.pathAt(pts, k);
+        if (m.look === 'ahead') {
+          const ahead = T.pathAt(pts, Math.min(1, k + (m.lead || 0.08)));
+          const d = V.sub(ahead, pos);
+          target = V.add(V.len(d) > 1e-6 ? ahead : V.add(pos, V.norm(V.sub(target, pos))), [0, -(m.drop == null ? 0.15 : m.drop), 0]);
+        }
+      } else if (m.pos) pos = V.lerp(pos, m.pos, k);
+      if (m.target && m.look !== 'ahead') target = V.lerp(target, m.target, k);
       if (m.fov) fov = C.lerp(fov, m.fov, k);
       if (m.orbit) {                       // rotate pos about the target in the ground plane
         const a = (m.orbit * Math.PI / 180) * k, dx = pos[0] - target[0], dz = pos[2] - target[2];
@@ -38,6 +48,16 @@
       pos = [pos[0] + s.shake * (C.fbm(seed, t * 0.6, 1) - 0.5), pos[1] + s.shake * (C.fbm(seed, t * 0.6, 2) - 0.5), pos[2]];
     }
     return { pos, target, fov, roll, near: 0.05, far: 200 };
+  };
+
+  // A point at share k (0..1) of a Catmull-Rom curve through pts (the ends are clamped), by equal spans.
+  T.pathAt = (pts, k) => {
+    if (pts.length === 1) return pts[0].slice();
+    const n = pts.length - 1, x = C.clamp(k) * n, i = Math.min(n - 1, Math.floor(x)), f = x - i;
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(n, i + 2)];
+    const f2 = f * f, f3 = f2 * f;
+    return [0, 1, 2].map((j) => 0.5 * (2 * p1[j] + (-p0[j] + p2[j]) * f + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * f2
+                                        + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * f3));
   };
 
   // A projector for a camera at a W x H frame: p3 -> [sx, sy, depth, px per world unit at that depth].

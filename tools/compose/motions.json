@@ -28,6 +28,14 @@
     "blink": {"module": "toon/motion.js", "call": "TOON automatic (timeline.blink) or { do: 'blink', t: [a, b] }", "needs": [], "engine": "toon"},
     "orbit": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, orbit: degrees } } (tools/toon/project.js)", "needs": [], "engine": "toon"},
     "dolly": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, pos, target } }", "needs": [], "engine": "toon"},
-    "crane": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, pos: [x, y higher, z] } }", "needs": [], "engine": "toon"}
+    "crane": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, pos: [x, y higher, z] } }", "needs": [], "engine": "toon"},
+    "head-turn": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'head-turn', t: [a, b], yaw, pitch } or { do: 'look', t, at } (neck follows half)", "needs": [], "engine": "toon"},
+    "tail-fan": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'tail-fan', t: [a, b], open } (tails spread and rise; sway travels down each tail)", "needs": [], "engine": "toon"},
+    "wing-flap": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'flap', t: [a, b], freq, amp, bias } (elevation kept inside TOON.WING_LIMITS)", "needs": [], "engine": "toon"},
+    "fly": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'fly', t: [a, b], to: [x, y, z] } (legs tucked, wings flap by themselves)", "needs": [], "engine": "toon"},
+    "swim": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'swim', t: [a, b], to: [x, z], wave } (body wave tied to the distance; env.water)", "needs": [], "engine": "toon"},
+    "fly-through": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, path: [[x, y, z], ...], look: 'ahead' } }", "needs": [], "engine": "toon"},
+    "ink-reveal-3d": {"module": "toon/ink3d.js", "call": "TOON scene opts { reveal: { at, dur } } (look ink-wash-3d)", "needs": [], "engine": "toon"},
+    "water-ripple": {"module": "toon/ink3d.js", "call": "TOON scene env { water: true } (swimmers leave rings) + opts { ripples: [{ at: [x, z], t }] }", "needs": [], "engine": "toon"}
   }
 }

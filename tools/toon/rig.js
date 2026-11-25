@@ -11,7 +11,7 @@
   const C = root.COMPOSE;
   if (!C) throw new Error('TOON needs tools/compose/core.js (COMPOSE) loaded first');
   const T = root.TOON = root.TOON || {};
-  T.VERSION = '1.1.0';
+  T.VERSION = '1.2.0';
   T.warnings = [];
   T.warn = (msg) => { if (!T.warnings.includes(msg)) T.warnings.push(msg); };
 

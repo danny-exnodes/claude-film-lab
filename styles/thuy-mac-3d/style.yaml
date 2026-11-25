@@ -1,0 +1,26 @@
+# Thủy mặc 3D (Ink wash 3D) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Phong cách số 12 của bộ vẽ bằng code: dị thú và núi non là model 3D dựng bằng code (#35), tô như mực trên giấy dó.
+# Bảng màu lấy từ styles/thuy-mac (style ảnh cùng series). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip thuy-mac-3d --creature mac-loc --draft --out out/_lab/thuy-mac-3d.mp4
+id: thuy-mac-3d
+name: Thủy mặc 3D
+name_en: Ink wash 3D
+status: draft
+base: cinecode:ink-wash
+engine: code
+render:
+  engine: three
+  look: ink-wash-3d
+  post: []
+  hold: 1
+  palette: {ink: '#1A1714', paper: '#EFE6D3', ochre: '#C89A5A'}
+  opts: {line: 2.4, steps: 3, glow: 0.35, grain: 1, bleed: 1}
+  env: {mist: 3, bands: 3, water: false}
+palette: {ink: '#1A1714', grey: '#8C8378', paper: '#EFE6D3', ochre: '#C89A5A', accent: '#B02E22'}
+motion: [walk-cycle, run-cycle, turn, look-at, head-turn, blink, breath, tail-fan, wing-flap, fly, swim, orbit, dolly, crane,
+         fly-through, ink-reveal-3d, water-ripple]
+sound:
+  scale: D minor pentatonic
+  instruments: [plucked zither, end-blown flute, frame drum, small gong, bowed drone]
+  notes: Như thuy-mac (cùng series); thêm tiếng nước khi dị thú bơi, tiếng cánh vỗ trầm.
+type: {latin: Cormorant Garamond, cjk: Noto Serif CJK TC}

@@ -49,7 +49,7 @@ TEMPLATE = REPO / ".claude" / "skills" / "film-compose-shot" / "templates" / "pl
 TOON_TEMPLATE = TEMPLATE.parent / "toon-film-section.js"
 TOON_DIR = HERE.parent / "toon"
 # tools/toon/*.js for method: code, inlined after ORDER with --toon (tests/js/toon.test.cjs loads the same list)
-TOON_ORDER = ["rig.js", "motion.js", "project.js", "look2d.js", "look3d.js", "post.js", "toon.js"]
+TOON_ORDER = ["rig.js", "motion.js", "creature.js", "project.js", "look2d.js", "look3d.js", "ink3d.js", "post.js", "toon.js"]
 TOON_MARK = "// ---- tools/toon/"
 THREE_DEFAULT = "/opt/film-lab/vendor/three/build/three.module.js"
 # cloth.js cuts its region out of the plate at load, so it comes after strip-warp.js and eyelid.js, which sample the

@@ -1,0 +1,27 @@
+{
+  "id": "mac-loc",
+  "name": "Mặc Lộc",
+  "note": "Original design for the lab (not from any franchise): a long-legged ink deer-beast with three eyes, branched horns and three brush-stroke tails that fan open.",
+  "seed": 31,
+  "body": {"length": 1.0, "radius": 0.2, "flat": 0.82, "belly": 0.85, "arch": 0.05, "rump": 0.8, "waist": 0.86, "chest": 1.0},
+  "neck": {"length": 0.5, "radius": 0.1, "rise": 0.95},
+  "head": {"length": 0.32, "radius": 0.105, "pitch": -0.45, "snout": 0.5},
+  "legs": {"pairs": 2, "length": 0.82, "radius": 0.042, "foot": 0.07},
+  "tails": {"count": 3, "length": 0.72, "radius": 0.065, "segments": 12, "spread": 0.75, "droop": 0.2, "curl": 1.1, "sway": 0.4, "lag": 0.07, "freq": 0.5},
+  "horns": {"count": 2, "length": 0.44, "radius": 0.022, "sweep": 0.35, "curl": 0.55, "branch": 2},
+  "ears": {"count": 2, "length": 0.12, "radius": 0.032},
+  "eyes": {"count": 3, "radius": 0.02},
+  "pattern": {"kind": "stripes", "scale": 1},
+  "palette": {"body": "#5C5148", "ink": "#1A1714", "accent": "#B02E22", "eye": "#B02E22"},
+  "demo": {
+    "seconds": 6,
+    "turntable": {"pos": [0, 1.05, 4.3], "target": [0, 0.82, 0], "fov": 34},
+    "timeline": {"start": {"at": [-2.6, 0], "face": "right"},
+                 "clips": [{"do": "walk", "t": [0, 3.2], "to": [0, 0]},
+                           {"do": "turn", "t": [3.2, 3.9], "face": 0.5},
+                           {"do": "look", "t": [3.9, 6], "at": [0, 1.2, 5]},
+                           {"do": "tail-fan", "t": [4.3, 6], "open": 1}]},
+    "camera": {"pos": [0, 1.15, 5.4], "target": [0, 0.8, 0], "fov": 34,
+               "move": {"t": [0, 6], "pos": [0.35, 1.05, 4.6], "target": [0.1, 0.85, 0]}}
+  }
+}

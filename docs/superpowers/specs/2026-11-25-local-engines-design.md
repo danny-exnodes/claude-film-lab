@@ -2,6 +2,19 @@
 
 Date: 2026-11-25 · Branch: `claude/local-engines` · Research: `docs/superpowers/research/2026-11-25-blender-comfyui.md`
 
+> **Update 2026-11-25 (owner):** "don't download new model, we already have MiniMax H3 in ComfyUI". The local video
+> model is **MiniMax H3**, already installed in the owner's **Comfy Desktop** (ComfyUI v0.43.1,
+> `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI`, models in `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\models`).
+> Wan 2.2 is dropped and **nothing is downloaded**. Workflows: `h3-i2v` (`minimax_h3_fl2va_pruned_int8_convrot`, start
+> frame + optional last frame) and `h3-r2v` (`minimax_h3_ref2va_pruned_int8_convrot`, ≤ 9 reference images +
+> `MiniMaxH3AddGuide` time anchors); text encoder `qwen3vl_32b_minimax_h3_nvfp4_awq`, VAEs
+> `minimax_h3_video_vae_int8_convrot` + `minimax_h3_audio_vae_fp32`, turbo LoRAs for drafts only. H3 rules: 24 fps,
+> length on the 17k+5 grid, 1344×768 final / 864×480 draft, start frame centre-cropped to 7:4 + lanczos before upload,
+> cfg 1 and no negative prompt, 20 steps, English prompts in fields; clips carry generated audio. Measured on this PC:
+> ~9–10 s per step → ≈ 3.5 min per 10 s clip at 1344×768. `comfy.py start` runs the Desktop's own Python headless on
+> port 8188. The same install holds MiniMax's **paid API nodes** (`comfy_api_nodes/nodes_minimax.py`): never allowed.
+> Sections below that name Wan describe the superseded plan; where they conflict, this note wins.
+
 ## 1. Intent
 
 The owner wants the lab to "unlock the power of the local computer": build film shots from **3D models rendered in

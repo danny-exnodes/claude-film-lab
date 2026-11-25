@@ -7,13 +7,16 @@ const BACKGROUNDS = [['blueprint', 'Bản vẽ'], ['plain', 'Tối'], ['grey', '
 const MODES = [['solid', 'Đặc'], ['wire', 'Khung dây'], ['normals', 'Pháp tuyến'], ['clay', 'Đất sét']];
 const LIGHTS = [['studio', 'Studio'], ['soft', 'Mềm'], ['drama', 'Kịch tính']];
 
-export default async function mount(root, [id], live) {
+export default async function mount(root, [id], live, alive = () => true) {
   if (!id) { location.hash = '#/'; return {}; }
   let data;
   try { data = await api(`builds/${encodeURIComponent(id)}`); } catch (e) {
-    root.append(h('p', { class: 'empty', text: `Không có build "${id}".` }));
+    if (alive()) root.append(h('p', { class: 'empty', text: `Không có build "${id}".` }));
     return {};
   }
+  if (!alive()) return {};                 // the user already left: build nothing, load no GLB
+  let destroyed = false;
+  let loadToken = 0;
   let steps = data.steps.filter((s) => s.glb);
   const prefs = Object.assign({ bg: 'blueprint', mode: 'solid', light: 'studio', spin: true, grid: true }, store('viewer') || {});
   const save = () => store('viewer', prefs);
@@ -130,11 +133,14 @@ export default async function mount(root, [id], live) {
   async function load(index) {
     const s = steps[index];
     if (!s) return;
+    const my = ++loadToken;
     let gltf;
     try { gltf = await loadGLB(mediaUrl(s.glb)); } catch (e) {
-      stage.querySelector('.hint').textContent = `Không đọc được ${s.glb}`;
+      if (!destroyed && my === loadToken) stage.querySelector('.hint').textContent = `Không đọc được ${s.glb}`;
       return;
     }
+    // A newer pick or a closed view: drop the result (loadGLB's parse is cached and shared; nothing was cloned yet).
+    if (destroyed || !alive() || my !== loadToken) return;
     if (model) { scene.remove(model); model.traverse((o) => { if (o.userData.wire) o.userData.wire.forEach((m) => m.dispose()); }); }
     mixer?.stopAllAction();
     model = gltf.scene.clone(true);
@@ -187,6 +193,8 @@ export default async function mount(root, [id], live) {
 
   return {
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       off();
       cancelAnimationFrame(raf);
       controls.dispose();

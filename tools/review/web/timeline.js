@@ -10,9 +10,10 @@ const MAX_CANVAS = 32000;
 const MIN_LEN = 0.1;
 const uid = () => Math.random().toString(36).slice(2, 10);
 
-export default async function mount(root, [buildId], live) {
+export default async function mount(root, [buildId], live, alive0 = () => true) {
   let lib = [];
   try { lib = (await api('renders')).renders; } catch (e) { /* empty library */ }
+  if (!alive0()) return {};                // the user already left
   const key = 'timeline.' + (buildId || '_all');
   const saved = store(key);
 

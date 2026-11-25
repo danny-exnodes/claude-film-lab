@@ -14,11 +14,12 @@ Docker trên máy chủ lab.
 |---|---|---|
 | `server.py` | trong container | cổng 8790 (chỉ đọc): web app, `/api/*`, `/api/stream` (SSE), `/media/<đường dẫn>` có Range; cổng 8791: `POST /ingest/event` |
 | `client.py` | máy chủ lab và Python 3.13 trong Blender | `Review(build, title, kind, project, expected_steps)`: `.step()`, `.progress()`, `.render()`, `.job()`, `.done()`, `.fail()`; chép/hard-link file vào `out/_review/media/<build>/`; không bao giờ làm hỏng hay làm chậm lệnh gọi |
-| `review.py` | máy chủ lab | CLI: `up`, `down`, `url`, `status`, `publish-video`, `publish-model` |
+| `review.py` | máy chủ lab | CLI: `up`, `down`, `url`, `status`, `monitor`, `publish-video`, `publish-model` |
+| `monitor.py` | máy chủ lab | mỗi 2 giây gửi số đo máy (CPU, RAM, GPU, VRAM, nhiệt độ, công suất, ổ đĩa, tên job nặng) và tiến độ ComfyUI (đọc log tqdm) tới cổng ghi; chỉ thư viện chuẩn |
 | `bpy_snapshot.py` | trong Blender | `snapshot(review, label)`: xuất GLB `step_<NN>.glb`, đếm đỉnh/mặt, ảnh nhỏ Workbench, gửi một bước |
 | `demo_build_giot.py` | trong Blender | dựng lại linh vật Giọt từng bước (thân → chỏm → mắt → má → miệng → tay → bàn tay → chân → giày → vật liệu) |
 | `vendor_three.py` | máy chủ lab | chép three.js 0.186.1 (đúng bản ghim của `tools/toon/three.lock`) + 4 file example vào `web/vendor/three/` (git bỏ qua), kiểm sha256 với `three-examples.lock` |
-| `web/` | trình duyệt | bảng theo dõi, bản vẽ dựng, xem model, dòng thời gian (ES module, import map, không build, không framework) |
+| `web/` | trình duyệt | bảng theo dõi (+ thẻ **Máy** và **ComfyUI**), bản vẽ dựng, xem model, dòng thời gian (ES module, import map, không build, không framework) |
 
 ## Chạy
 
@@ -35,6 +36,36 @@ python tools/review/review.py down               # dừng container (volume dữ
   đọc hay in cấu hình/authtoken của ngrok; ngrok phải được chủ lab đăng nhập sẵn.
 - Container `film-lab-review` khởi động lại tự động (`restart: unless-stopped`) khi Docker Desktop chạy.
 - Xoá hết dữ liệu (cẩn thận, không lấy lại được): `docker compose -f tools/review/docker-compose.yml down -v`.
+
+## Máy và ComfyUI (`monitor.py`)
+
+```bash
+python tools/review/review.py up --no-ngrok      # dựng lại container + bật monitor (không đụng ngrok đang chạy)
+python tools/review/review.py monitor [--restart] [--comfy-log PATH] [--interval 2]   # chỉ monitor, chạy nền
+python tools/review/review.py monitor --stop
+python tools/review/monitor.py --once --print    # đo một lần, in hai sự kiện, không gửi gì (kiểm tra riêng tư)
+```
+
+- Chạy nền tách khỏi cửa sổ (Windows: `DETACHED_PROCESS`), PID ở `out/_review/monitor.pid`, log ở
+  `out/_review/monitor.log`. `up` bật monitor (trừ `--no-monitor`), `down` tắt, `status` in trạng thái + số đo mới nhất.
+- **Máy**: CPU % (`GetSystemTimes`), RAM (`GlobalMemoryStatusEx`), GPU %, VRAM, nhiệt độ, công suất (`nvidia-smi`; không có
+  thì bỏ GPU, thử lại mỗi phút), dung lượng trống mọi ổ cố định (C:, D:…), job nặng. Linux: đọc `/proc`. Biểu đồ vùng
+  (canvas) 10 phút (mẫu 2 giây) hoặc 24 giờ (trung bình 1 phút). Màu cảnh báo: VRAM > 90 %, GPU > 83 °C, ổ còn < 10 GB
+  (vàng khi < 20 GB, > 80 % VRAM, > 76 °C).
+- **Riêng tư** (trang công khai, không đăng nhập): job nặng chỉ là **nhãn trong danh sách cho phép** kèm số lượng
+  (`blender ×2`, `ComfyUI (python)`, `ComfyUI Desktop`, `ffmpeg`, `DaVinci Resolve`…), không bao giờ có dòng lệnh, đường
+  dẫn, tiêu đề cửa sổ, biến môi trường hay tên người dùng. Server chỉ nhận đúng các nhãn đó (`PROC_LABELS`, test giữ hai
+  danh sách bằng nhau), tên ổ chỉ dạng `C:`. Python được tính là `ComfyUI (python)` khi nó nghe cổng ComfyUI (Windows) hoặc
+  chạy `main.py` của ComfyUI (Linux, đọc tại chỗ, không gửi). Log ComfyUI chỉ được đọc lấy số.
+- **ComfyUI**: bật/tắt và số job đang chạy/chờ từ `GET <FILM_COMFY_URL>/queue`; bước i/n, s/bước, đã chạy, còn lại, %
+  của job hiện tại và 10 lượt gần nhất (thời gian, số bước, s/bước) từ dòng tqdm trong log (`\r` hay `\n`, cả dòng
+  `Prompt executed in 138.35 seconds` lẫn `00:11:52`). Mọi job đều thấy, kể cả job xếp từ cửa sổ ComfyUI. Log mặc định
+  là log của `comfy.py start` (`FILM_COMFY_LOG`, else `$FILM_COMFY_WORK/server.log`, else `out/_comfy/server.log`); với
+  Comfy Desktop: `--comfy-log %LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI\logs\comfyui.log` và
+  `FILM_COMFY_URL` trỏ cổng của Desktop. Job do `comfy.py run --review B` chạy được nối với build `B` (job review tên
+  `comfy-<prompt id>`) và có link trên thẻ.
+- Server không có (chưa `up`): monitor vẫn đo, thử gửi lại với khoảng chờ 2 → 60 giây, không bao giờ thoát vì lỗi.
+- SSE: tối đa một sự kiện `metrics` và một `comfy` mỗi 2 giây (bản mới nhất thắng), không vào bộ đệm phát lại.
 
 ## Publish
 
@@ -59,6 +90,9 @@ python tools/comfy/comfy.py run h3-i2v --image <start>.png --prompt "..." --out 
 
 ## Web app
 
+Mỗi trang vẽ vào một khung riêng (`web/route.js`): chuyển trang khi trang trước còn đang tải (vd. GLB 12 MB) thì trang
+cũ bị huỷ ngay khi tải xong và không bao giờ hiện chồng lên trang mới.
+
 - **Bảng theo dõi** (`#/`): mỗi build một thẻ: trạng thái, thanh tiến độ, bước hiện tại, thời gian chạy, ảnh nhỏ, job
   đang chạy; cập nhật trực tiếp qua SSE. Dùng tốt trên điện thoại.
 - **Bản vẽ dựng** (`#/build/<id>`): nền bản vẽ xanh navy có lưới và đường kích thước (m); phần hình mới của mỗi bước
@@ -81,10 +115,15 @@ progress 0..1, expected_steps, current, message, thumb, started/updated/finished
 glb, image, t), `renders` (build, label, video, image, frames, fps, duration, engine, seconds_per_frame, t), `jobs` (build,
 job, tool `blender|comfy`, status `queued|running|done|failed`, progress, gpu_s, message, started, t). Sự kiện ingest:
 `build`, `step`, `progress`, `render`, `job`, `done`, `fail`; kiểu hay trường lạ, đường dẫn media ra ngoài
-`<build>/` bị từ chối (400).
+`<build>/` bị từ chối (400). Sự kiện `metrics` và `comfy` (của `monitor.py`, không có build): 10 phút mẫu 2 giây nằm trong
+bộ nhớ; bảng `metrics_min` (t, JSON trung bình 1 phút) giữ 24 giờ, xoá dần khi ghi phút mới. API: `/api/metrics?window=10m|24h`,
+`/api/comfy`.
 
 ## Test
 
+`tests/test_review_monitor.py`: parser tqdm (dòng dở, `\r`, 100 %, dòng hỏng), đọc `/proc` giả, danh sách nhãn cho
+phép (payload không có dòng lệnh/đường dẫn), monitor khi không có server, kiểm sự kiện, lịch sử 24 giờ và xoá dần, giới
+hạn SSE, API, và chặn tranh chấp chuyển trang của web app (`web/route.js`, chạy bằng node).
 `tests/test_review.py` (WSL, chỉ thư viện chuẩn, không cần Docker): API và SSE trên DB tạm, Range 206/416, chặn
 path traversal, cổng công khai từ chối POST/PUT/DELETE, MIME, CSP; client không có server vẫn nhanh và không lỗi; kiểm
 hash của `vendor_three.py`; `review.py up --no-ngrok --dry-run`; hook của `blender.py`/`comfy.py` với server ingest giả.

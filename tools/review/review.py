@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Run the Film Lab review web app (Docker) and publish files to it. Standard library only; Windows and Linux.
 
-  python tools/review/review.py up [--no-ngrok] [--dry-run]    # vendor check -> docker compose up -d --build -> ngrok
-  python tools/review/review.py down                           # stop the container (the database volume stays) + our ngrok
+  python tools/review/review.py up [--no-ngrok] [--no-monitor] [--comfy-log PATH] [--dry-run]
+                                    # vendor check -> docker compose up -d --build -> monitor.py (detached) -> ngrok
+  python tools/review/review.py down                           # stop monitor + container (the volume stays) + our ngrok
+  python tools/review/review.py monitor [--stop|--restart] [--comfy-log PATH] [--interval S]   # only monitor.py
   python tools/review/review.py url                            # the public ngrok URL of port 8790
   python tools/review/review.py status                         # builds on the server (local port 8790)
   python tools/review/review.py publish-video <mp4> --build ID --label L [--title T] [--project P] [--open]
@@ -35,6 +37,9 @@ PUBLIC = "http://127.0.0.1:8790"
 NGROK_API = "http://127.0.0.1:4040/api/tunnels"
 STATE = os.path.join(LAB, "out", "_review")
 NGROK_PID = os.path.join(STATE, "ngrok.pid")
+MONITOR_PID = os.path.join(STATE, "monitor.pid")
+MONITOR_LOG = os.path.join(STATE, "monitor.log")
+MONITOR = os.path.join(HERE, "monitor.py")
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
@@ -106,6 +111,105 @@ def start_ngrok(exe):
     return proc
 
 
+# ------------------------------------------------------------------ monitor.py (detached)
+def monitor_cmd(a):
+    cmd = [sys.executable, MONITOR]
+    if getattr(a, "interval", None):
+        cmd += ["--interval", f"{a.interval:g}"]
+    if getattr(a, "comfy_log", None):
+        cmd += ["--comfy-log", a.comfy_log]
+    return cmd
+
+
+def process_name(pid):
+    """The image name of a live process ('python.exe'), else None."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if os.name == "nt":
+        try:
+            r = subprocess.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], capture_output=True,
+                               timeout=10, creationflags=0x08000000)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        line = r.stdout.decode("utf-8", "replace").strip()
+        return line.split('","')[0].strip('"') if line.startswith('"') else None
+    try:
+        os.kill(pid, 0)
+        with open(f"/proc/{pid}/comm", encoding="utf-8") as f:
+            return f.read().strip()
+    except (OSError, ValueError):
+        return None
+
+
+def monitor_pid():
+    """PID of our running monitor (from monitor.pid, checked to be a live python), else None."""
+    try:
+        with open(MONITOR_PID, encoding="utf-8") as f:
+            pid = int(f.read().strip())
+    except (OSError, ValueError):
+        return None
+    name = (process_name(pid) or "").lower()
+    return pid if name.startswith("python") else None
+
+
+def start_monitor(a):
+    pid = monitor_pid()
+    if pid:
+        say(f"monitor already runs (pid {pid})")
+        return 0
+    os.makedirs(STATE, exist_ok=True)
+    try:
+        if os.path.getsize(MONITOR_LOG) > 1 << 20:
+            os.remove(MONITOR_LOG)
+    except OSError:
+        pass
+    kw = {"stdin": subprocess.DEVNULL, "cwd": LAB}
+    if os.name == "nt":
+        kw["creationflags"] = 0x00000008 | 0x00000200          # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kw["start_new_session"] = True
+    env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
+    with open(MONITOR_LOG, "ab") as log:
+        proc = subprocess.Popen(monitor_cmd(a), stdout=log, stderr=subprocess.STDOUT, env=env, **kw)
+    with open(MONITOR_PID, "w", encoding="utf-8") as f:
+        f.write(str(proc.pid))
+    say(f"monitor started (pid {proc.pid}; log {MONITOR_LOG})")
+    return 0
+
+
+def stop_monitor():
+    pid = monitor_pid()
+    if pid:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
+        else:
+            try:
+                os.kill(pid, 15)
+            except OSError:
+                pass
+        say(f"stopped monitor (pid {pid})")
+    try:
+        os.remove(MONITOR_PID)
+    except OSError:
+        pass
+
+
+def cmd_monitor(a):
+    if a.dry_run:
+        if a.stop:
+            say("dry-run: would stop the monitor of " + MONITOR_PID)
+        else:
+            print(show(monitor_cmd(a)) + "   # detached; pid in " + MONITOR_PID)
+        return 0
+    if a.stop or a.restart:
+        stop_monitor()
+    if a.stop:
+        return 0
+    return start_monitor(a)
+
+
 # ------------------------------------------------------------------ commands
 def cmd_up(a):
     problems = vendor_three.verify()
@@ -121,6 +225,8 @@ def cmd_up(a):
     if a.dry_run:
         say(f"mkdir {media}")
         print(show(up))
+        if not a.no_monitor:
+            print(show(monitor_cmd(a)) + "   # detached; pid in " + MONITOR_PID)
         if not a.no_ngrok:
             print(show(["ngrok", "http", "127.0.0.1:8790", "--log", "stdout"]) + "   # detached; URL from " + NGROK_API)
         say("dry-run: nothing started")
@@ -140,6 +246,8 @@ def cmd_up(a):
         err(f"the container started but {PUBLIC}/api/health does not answer yet "
             f"(docker compose -f {COMPOSE} logs film-lab-review)")
         return 1
+    if not a.no_monitor:
+        start_monitor(a)
     if a.no_ngrok:
         say("--no-ngrok: local only")
         return 0
@@ -168,6 +276,7 @@ def cmd_down(a):
     if a.dry_run:
         print(show(cmd))
         return 0
+    stop_monitor()
     rc = 0
     if shutil.which("docker"):
         say(show(cmd))
@@ -215,9 +324,35 @@ def cmd_status(a):
         jtxt = f" · {job.get('tool')} {job.get('status')}" if job else ""
         print(f"{b['id']:24} {b['status']:9} {round(100 * (b.get('progress') or 0)):3d}%  {b.get('steps', 0):3d} steps "
               f"{b.get('renders', 0):2d} renders  {b.get('title', '')}{jtxt}")
+    pid = monitor_pid()
+    say(f"monitor: running (pid {pid})" if pid else "monitor: not running (python tools/review/review.py monitor)")
+    try:
+        say_machine(get_json(PUBLIC + "/api/metrics?window=10m"), get_json(PUBLIC + "/api/comfy"))
+    except Exception:
+        pass
     url = ngrok_url()
     say(f"public URL: {url}" if url else "no ngrok tunnel (local only)")
     return 0
+
+
+def say_machine(m, c):
+    s = m.get("latest") or {}
+    if s:
+        g = (s.get("gpus") or [{}])[0]
+
+        def gb(b):
+            return f"{b / 2 ** 30:.1f}" if b is not None else "?"
+        disks = " ".join(f"{d['name']} {gb(d['free'])} GB free" for d in s.get("disks") or [])
+        jobs = ", ".join(p["name"] + (f" x{p['count']}" if p["count"] > 1 else "") for p in s.get("procs") or [])
+        say(f"machine ({'live' if m.get('online') else 'stale'}, {m.get('age')} s ago): CPU {s.get('cpu')}% · "
+            f"RAM {gb(s.get('ram_used'))}/{gb(s.get('ram_total'))} GB · GPU {g.get('util')}% · VRAM "
+            f"{gb(g.get('mem_used'))}/{gb(g.get('mem_total'))} GB · {g.get('temp')} C · {g.get('power')} W · "
+            f"{disks}{' · jobs: ' + jobs if jobs else ''}")
+    cs = c.get("comfy") or {}
+    if cs:
+        cur = cs.get("current") or {}
+        say(f"ComfyUI: {'up' if cs.get('up') else 'down'} · running {cs.get('running')} · pending {cs.get('pending')}"
+            + (f" · step {cur['step']}/{cur['total']} ({cur.get('s_per_step')} s/step)" if cur else ""))
 
 
 def mp4_duration(path):
@@ -342,7 +477,16 @@ def main(argv=None):
     sp = p.add_subparsers(dest="cmd", required=True)
     q = sp.add_parser("up", help="verify vendor files, docker compose up -d --build, then ngrok (unless --no-ngrok)")
     q.add_argument("--no-ngrok", action="store_true", help="local only (http://127.0.0.1:8790)")
+    q.add_argument("--no-monitor", action="store_true", help="do not start monitor.py (machine metrics, ComfyUI)")
     q.add_argument("--dry-run", action="store_true", help="print the commands, start nothing")
+    q.add_argument("--comfy-log", default=None, help="ComfyUI log for monitor.py (default: comfy.py start's log)")
+    q.add_argument("--interval", type=float, default=None, help="monitor.py interval (default 2 s)")
+    q = sp.add_parser("monitor", help="start (or --stop) only monitor.py, detached; pid in out/_review/monitor.pid")
+    q.add_argument("--stop", action="store_true")
+    q.add_argument("--restart", action="store_true", help="stop the running monitor first (new options)")
+    q.add_argument("--comfy-log", default=None)
+    q.add_argument("--interval", type=float, default=None)
+    q.add_argument("--dry-run", action="store_true")
     q = sp.add_parser("down", help="docker compose down (keeps the database volume) and stop our ngrok")
     q.add_argument("--dry-run", action="store_true")
     sp.add_parser("url", help="the public ngrok URL (from ngrok's local API)")
@@ -363,7 +507,7 @@ def main(argv=None):
     if getattr(a, "build", None) and not client.BUILD_ID.match(a.build):
         err("refused: --build must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}")
         return 2
-    fn = {"up": cmd_up, "down": cmd_down, "url": cmd_url, "status": cmd_status, "publish-video": cmd_publish_video,
+    fn = {"up": cmd_up, "down": cmd_down, "monitor": cmd_monitor, "url": cmd_url, "status": cmd_status, "publish-video": cmd_publish_video,
           "publish-model": cmd_publish_model}[a.cmd]
     return fn(a)
 

@@ -890,6 +890,7 @@ def run(a):
     state = {"logged": False}
     hook = review_hook(a)
     if hook:
+        hook.key = f"comfy-{pid}"          # the review monitor links ComfyUI's running prompt to this build by it
         hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
 
     def final(status, note="", usage=""):

@@ -93,14 +93,15 @@ export class Live {
   }
   connect() {
     this.es = new EventSource('/api/stream');
-    const names = ['hello', 'heartbeat', 'build', 'step', 'progress', 'render', 'job', 'done', 'fail'];
+    const names = ['hello', 'heartbeat', 'build', 'step', 'progress', 'render', 'job', 'done', 'fail', 'metrics', 'comfy'];
+    const own = new Set(['metrics', 'comfy']);         // machine events go to their own subscribers, never to '*'
     for (const name of names) {
       this.es.addEventListener(name, (e) => {
         this.lastBeat = Date.now();
         let msg = {};
         try { msg = JSON.parse(e.data); } catch (err) { return; }
         if (name === 'hello' || name === 'heartbeat') { this.paint(); return; }
-        for (const fn of [...(this.handlers.get(name) || []), ...(this.handlers.get('*') || [])]) {
+        for (const fn of [...(this.handlers.get(name) || []), ...(own.has(name) ? [] : this.handlers.get('*') || [])]) {
           try { fn(msg, name); } catch (err) { console.error(err); }
         }
       });

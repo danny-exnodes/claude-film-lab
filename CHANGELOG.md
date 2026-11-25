@@ -13,6 +13,14 @@
 - `review.py up|down|url|status|publish-video|publish-model`; `client.py` không bao giờ làm hỏng hay làm chậm lệnh gọi;
   `bpy_snapshot.py` + `demo_build_giot.py` (Giọt dựng 10 bước); `--review BUILD` cho `blender.py render|turntable|keyframes`
   và `comfy.py run`; `vendor_three.py` chép three.js 0.186.1 đã ghim (example ghim trong `three-examples.lock`).
+- **Thẻ Máy và ComfyUI** trên bảng theo dõi: `monitor.py` (máy chủ lab, chỉ thư viện chuẩn) gửi mỗi 2 giây CPU, RAM, GPU %,
+  VRAM, nhiệt độ, công suất GPU, dung lượng trống mọi ổ cố định và tên job nặng (chỉ nhãn trong danh sách cho phép, không
+  dòng lệnh/đường dẫn), cùng tiến độ ComfyUI đọc từ log tqdm (bước i/n, s/bước, ETA, %, 10 lượt gần nhất; nối với build
+  khi job chạy bằng `comfy.py run --review`). Biểu đồ canvas 10 phút / 24 giờ (SQLite trung bình 1 phút), màu cảnh báo
+  VRAM > 90 %, > 83 °C, ổ < 10 GB. `/api/metrics`, `/api/comfy`; SSE tối đa một sự kiện mỗi loại mỗi 2 giây.
+  `review.py up|down|status|monitor` bật/tắt/xem monitor (`out/_review/monitor.pid`).
+- Sửa: chuyển từ một build sang build khác khi trang trước còn tải GLB làm model của build trước hiện trong trang sau;
+  mỗi trang giờ vẽ vào khung riêng, trang cũ bị huỷ khi tải xong (`web/route.js`, test node).
 
 ### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
 Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với

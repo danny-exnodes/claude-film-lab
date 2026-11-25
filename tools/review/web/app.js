@@ -1,10 +1,14 @@
 // Film Lab Review: router + dashboard. Views with three.js load on demand (blueprint.js, viewer.js, timeline.js).
 import { h, chip, bar, api, mediaUrl, fmtDur, ago, Live, STATUS_VI, JOB_VI } from './lib.js';
+import { makeRouter } from './route.js';
+import { systemPanels } from './sys.js';
 
 const view = document.getElementById('view');
 const live = new Live(document.getElementById('live'));
-let current = null;
-let seq = 0;
+const router = makeRouter(view, () => h('div', { class: 'route' }), (e, box) => {
+  console.error(e);
+  if (box) box.replaceChildren(h('p', { class: 'empty', text: `Không mở được trang: ${e.message}` }));
+});
 
 const ROUTES = {
   '': () => Promise.resolve({ default: dashboard }),
@@ -13,23 +17,12 @@ const ROUTES = {
   timeline: () => import('./timeline.js'),
 };
 
-async function route() {
-  const my = ++seq;
+function route() {
   const path = location.hash.replace(/^#\/?/, '');
   const [name, ...rest] = path.split('/');
   const key = name in ROUTES ? name : '';
   for (const a of document.querySelectorAll('.tabs a')) a.classList.toggle('on', a.dataset.route === key);
-  try { current?.destroy?.(); } catch (e) { console.error(e); }
-  current = null;
-  view.replaceChildren();
-  try {
-    const mod = await ROUTES[key]();
-    if (my !== seq) return;
-    current = await mod.default(view, rest.map(decodeURIComponent).filter(Boolean), live);
-  } catch (e) {
-    console.error(e);
-    if (my === seq) view.replaceChildren(h('p', { class: 'empty', text: `Không mở được trang: ${e.message}` }));
-  }
+  return router.go(ROUTES[key], rest.map(decodeURIComponent).filter(Boolean), live);
 }
 window.addEventListener('hashchange', route);
 route();
@@ -50,7 +43,8 @@ function dashboard(root, _args, live) {
       class: k === filter ? 'on' : '', dataset: { f: k }, text: label,
       onclick: (e) => { filter = k; for (const b of filters.children) b.classList.toggle('on', b.dataset.f === k); paint(); },
     })));
-  root.append(h('section', { class: 'dash' },
+  const sys = systemPanels(live);
+  root.append(h('section', { class: 'dash' }, sys.el,
     h('div', { class: 'dash-head' }, h('h1', { text: 'Bảng theo dõi' }), count, filters), grid, empty));
 
   function visible(b) {
@@ -137,5 +131,5 @@ function dashboard(root, _args, live) {
   const timer = setInterval(() => { for (const [id, el] of cards) { const b = builds.get(id); if (b && ACTIVE.has(b.status)) tick(el, b); } }, 1000);
   api('builds').then((d) => { builds = new Map(d.builds.map((b) => [b.id, b])); paint(); for (const b of d.builds) { const el = cards.get(b.id); if (el) fill(el, b); } })
     .catch((e) => { empty.textContent = `Không tải được danh sách: ${e.message}`; empty.hidden = false; });
-  return { destroy() { off(); clearInterval(timer); } };
+  return { destroy() { off(); clearInterval(timer); sys.destroy(); } };
 }

@@ -13,15 +13,21 @@ Two listeners:
       /api/builds/<id>       one build with its steps, renders and jobs
       /api/builds/<id>/steps | /renders | /jobs
       /api/renders           every render of every build (the timeline's library)
-      /api/stream            Server-Sent Events: build, step, progress, render, job, done, fail + heartbeat
+      /api/metrics?window=10m|24h   machine metrics from monitor.py: 2 s samples (10 min, memory) or 1 min averages
+                             (24 h, SQLite), plus the latest full sample
+      /api/comfy             ComfyUI state from monitor.py: up, queue, current job's steps, last 10 jobs (+ linked build)
+      /api/stream            Server-Sent Events: build, step, progress, render, job, done, fail, metrics, comfy
+                             (metrics and comfy: at most one each per 2 s, not replayed) + heartbeat
       /media/<path>          files under the read-only media mount, HTTP Range (206/416), allowlisted types only
   ingest 8791 (write)
-      POST /ingest/event     one JSON event (types above); unknown types and fields are refused (400)
+      POST /ingest/event     one JSON event (types above); unknown types and fields are refused (400); metrics and
+                             comfy events carry no build
 The compose file publishes both ports on 127.0.0.1 only; ngrok tunnels 8790. This process is the only one that opens
 the SQLite database (a named Docker volume): nothing else may share the .db file.
 """
 import argparse
 import base64
+import collections
 import email.utils
 import hashlib
 import json
@@ -37,7 +43,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 KINDS = ("model", "render", "clip", "demo")
 STATUSES = ("queued", "building", "rendering", "done", "failed")
@@ -47,6 +53,11 @@ MAX_BODY = 256 * 1024
 HEARTBEAT = 15.0
 REPLAY = 500                     # events kept for SSE reconnects (Last-Event-ID)
 CHUNK = 64 * 1024
+METRICS_RING = 300               # 10 min of 2 s samples, in memory
+MINUTE = 60.0                    # the 24 h history: one averaged row per minute in SQLite
+KEEP_HISTORY = 24 * 3600.0
+PUSH_EVERY = 2.0                 # SSE: at most one metrics and one comfy event per 2 s (the newest one wins)
+MONITOR_STALE = 10.0             # no sample for this long: the monitor is shown as offline
 
 MEDIA_TYPES = {
     ".glb": "model/gltf-binary", ".gltf": "model/gltf+json", ".bin": "application/octet-stream",
@@ -132,6 +143,10 @@ CREATE TABLE IF NOT EXISTS jobs (
   started REAL NOT NULL,
   t REAL NOT NULL,
   UNIQUE (build, job)
+);
+CREATE TABLE IF NOT EXISTS metrics_min (
+  t INTEGER PRIMARY KEY,
+  data TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS steps_build ON steps(build, n);
 CREATE INDEX IF NOT EXISTS renders_build ON renders(build, t);
@@ -227,6 +242,159 @@ def validate(ev):
         if name in out and out[name] < 0:
             raise BadEvent(f"{kind}: {name} must be >= 0")
     return kind, bid, out
+
+
+# --- machine metrics and ComfyUI state (monitor.py). The public page shows them: names are tightly limited so a path,
+# a command line or a user name can never get through, whatever the sender puts in.
+SYS_EVENTS = ("metrics", "comfy")
+# Job labels: exactly the labels of monitor.py's allow list (HEAVY + "ComfyUI (python)"; a test keeps both equal).
+PROC_LABELS = frozenset({"blender", "ComfyUI Desktop", "ComfyUI (python)", "ffmpeg", "DaVinci Resolve", "Unreal Editor",
+                         "Houdini", "Maya", "ollama", "llama.cpp"})
+DISK_NAME = re.compile(r"^(?:[A-Z]:|/)$")
+GPU_NAME = re.compile(r"^[A-Za-z0-9 ._()+-]{1,60}$")
+PROMPT_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+BIG = 1e16
+GPU_FIELDS = {"util": (0, 100), "mem_used": (0, BIG), "mem_total": (0, BIG), "temp": (-50, 200), "power": (0, 5000)}
+CURRENT_FIELDS = {"step": (0, 1e7), "total": (1, 1e7), "pct": (0, 100), "s_per_step": (0, 1e7), "elapsed": (0, 1e8),
+                  "eta": (0, 1e8), "bar": (1, 1e4), "job_elapsed": (0, 1e8)}
+HISTORY_FIELDS = {"t": (0, 1e11), "duration": (0, 1e8), "steps": (0, 1e7), "s_per_step": (0, 1e7), "bars": (0, 1e4)}
+HISTORY_STATUS = ("ok", "failed", "interrupted")
+
+
+def _sys_num(where, v, lo, hi, integer=False):
+    if v is None:
+        return None
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+        raise BadEvent(f"{where} must be a number")
+    if not lo <= v <= hi:
+        raise BadEvent(f"{where} must be {lo:g}..{hi:g}")
+    if integer:
+        if int(v) != v:
+            raise BadEvent(f"{where} must be an integer")
+        return int(v)
+    return round(float(v), 3)
+
+
+def _sys_keys(where, obj, allowed):
+    if not isinstance(obj, dict):
+        raise BadEvent(f"{where} must be an object")
+    extra = sorted(set(obj) - set(allowed))
+    if extra:
+        raise BadEvent(f"{where}: unknown field(s) {', '.join(map(str, extra))}")
+
+
+def _sys_list(where, v, most):
+    if v is None:
+        return []
+    if not isinstance(v, list) or len(v) > most:
+        raise BadEvent(f"{where} must be a list of at most {most}")
+    return v
+
+
+def validate_sys(ev):
+    """A metrics or comfy event of monitor.py -> (type, clean dict). Raises BadEvent."""
+    kind = ev.get("type")
+    if kind == "metrics":
+        _sys_keys("metrics", ev, ("type", "t", "cpu", "ram_used", "ram_total", "gpus", "disks", "procs"))
+        out = {"cpu": _sys_num("metrics: cpu", ev.get("cpu"), 0, 100),
+               "ram_used": _sys_num("metrics: ram_used", ev.get("ram_used"), 0, BIG, True),
+               "ram_total": _sys_num("metrics: ram_total", ev.get("ram_total"), 0, BIG, True),
+               "gpus": [], "disks": [], "procs": []}
+        for i, g in enumerate(_sys_list("metrics: gpus", ev.get("gpus"), 8)):
+            _sys_keys(f"metrics: gpus[{i}]", g, ("name",) + tuple(GPU_FIELDS))
+            name = g.get("name")
+            if name is not None and (not isinstance(name, str) or not GPU_NAME.fullmatch(name)):
+                raise BadEvent(f"metrics: gpus[{i}].name must match {GPU_NAME.pattern}")
+            d = {"name": name}
+            for f, (lo, hi) in GPU_FIELDS.items():
+                d[f] = _sys_num(f"metrics: gpus[{i}].{f}", g.get(f), lo, hi, f.startswith("mem_"))
+            out["gpus"].append(d)
+        for i, d in enumerate(_sys_list("metrics: disks", ev.get("disks"), 26)):
+            _sys_keys(f"metrics: disks[{i}]", d, ("name", "free", "total"))
+            if not isinstance(d.get("name"), str) or not DISK_NAME.fullmatch(d["name"]):
+                raise BadEvent(f"metrics: disks[{i}].name must be a drive letter like C: (or /)")
+            out["disks"].append({"name": d["name"],
+                                 "free": _sys_num(f"metrics: disks[{i}].free", d.get("free"), 0, BIG, True),
+                                 "total": _sys_num(f"metrics: disks[{i}].total", d.get("total"), 0, BIG, True)})
+        for i, p in enumerate(_sys_list("metrics: procs", ev.get("procs"), 20)):
+            _sys_keys(f"metrics: procs[{i}]", p, ("name", "count"))
+            if not isinstance(p.get("name"), str) or p["name"] not in PROC_LABELS:
+                raise BadEvent(f"metrics: procs[{i}].name must be one of the allow-listed job labels")
+            cnt = _sys_num(f"metrics: procs[{i}].count", p.get("count"), 1, 9999, True)
+            out["procs"].append({"name": p["name"], "count": cnt or 1})
+        return kind, out
+    if kind == "comfy":
+        _sys_keys("comfy", ev, ("type", "t", "up", "running", "pending", "prompt_id", "log", "current", "history"))
+        if not isinstance(ev.get("up"), bool):
+            raise BadEvent("comfy: up (true/false) is required")
+        if ev.get("log") is not None and not isinstance(ev["log"], bool):
+            raise BadEvent("comfy: log must be true or false")
+        out = {"up": ev["up"], "log": bool(ev.get("log")),
+               "running": _sys_num("comfy: running", ev.get("running"), 0, 100000, True),
+               "pending": _sys_num("comfy: pending", ev.get("pending"), 0, 100000, True),
+               "prompt_id": _prompt_id("comfy: prompt_id", ev.get("prompt_id")), "current": None, "history": []}
+        cur = ev.get("current")
+        if cur is not None:
+            _sys_keys("comfy: current", cur, CURRENT_FIELDS)
+            out["current"] = {f: _sys_num(f"comfy: current.{f}", cur.get(f), lo, hi, f in ("step", "total", "bar"))
+                              for f, (lo, hi) in CURRENT_FIELDS.items()}
+            if out["current"]["step"] is None or out["current"]["total"] is None:
+                raise BadEvent("comfy: current needs step and total")
+        for i, h in enumerate(_sys_list("comfy: history", ev.get("history"), 10)):
+            _sys_keys(f"comfy: history[{i}]", h, tuple(HISTORY_FIELDS) + ("status", "prompt_id"))
+            d = {f: _sys_num(f"comfy: history[{i}].{f}", h.get(f), lo, hi, f in ("steps", "bars"))
+                 for f, (lo, hi) in HISTORY_FIELDS.items()}
+            st = h.get("status") or "ok"
+            if st not in HISTORY_STATUS:
+                raise BadEvent(f"comfy: history[{i}].status must be one of {', '.join(HISTORY_STATUS)}")
+            d["status"] = st
+            d["prompt_id"] = _prompt_id(f"comfy: history[{i}].prompt_id", h.get("prompt_id"))
+            out["history"].append(d)
+        return kind, out
+    raise BadEvent(f"unknown event type {kind!r}")
+
+
+def _prompt_id(where, v):
+    if v is None:
+        return None
+    if not isinstance(v, str) or not PROMPT_ID.fullmatch(v):
+        raise BadEvent(f"{where} must match {PROMPT_ID.pattern}")
+    return v
+
+
+def flat_sample(s):
+    """A full metrics sample -> the chart row {t, cpu, ram_used, ram_total, gpu_util, vram_used, vram_total, gpu_temp,
+    gpu_power} (the first GPU)."""
+    g = (s.get("gpus") or [{}])[0]
+    return {"t": s["t"], "cpu": s.get("cpu"), "ram_used": s.get("ram_used"), "ram_total": s.get("ram_total"),
+            "gpu_util": g.get("util"), "vram_used": g.get("mem_used"), "vram_total": g.get("mem_total"),
+            "gpu_temp": g.get("temp"), "gpu_power": g.get("power")}
+
+
+FLAT_FIELDS = ("cpu", "ram_used", "ram_total", "gpu_util", "vram_used", "vram_total", "gpu_temp", "gpu_power")
+
+
+def downsample(rows, bucket=MINUTE):
+    """Chart rows -> one row per bucket (t = bucket start): the mean of every field (None ignored), the peak GPU
+    temperature and VRAM, the sample count, and the disks of the bucket's last sample."""
+    groups = {}
+    for r in rows:
+        groups.setdefault(int(r["t"] // bucket * bucket), []).append(r)
+    out = []
+    for t in sorted(groups):
+        g = groups[t]
+        row = {"t": t, "n": len(g)}
+        for f in FLAT_FIELDS:
+            vals = [r[f] for r in g if r.get(f) is not None]
+            row[f] = round(sum(vals) / len(vals), 2) if vals else None
+        temps = [r["gpu_temp"] for r in g if r.get("gpu_temp") is not None]
+        vram = [r["vram_used"] for r in g if r.get("vram_used") is not None]
+        row["gpu_temp_max"] = max(temps) if temps else None
+        row["vram_max"] = max(vram) if vram else None
+        disks = [r["disks"] for r in g if r.get("disks")]
+        row["disks"] = disks[-1] if disks else []
+        out.append(row)
+    return out
 
 
 # ------------------------------------------------------------------ storage
@@ -419,6 +587,39 @@ class Store:
             return dict(f, t=now)
         raise BadEvent(kind)
 
+    # --- machine metrics history (1-min rows) and ComfyUI links
+    def save_minutes(self, rows, prune_before):
+        with self.lock:
+            self.db.execute("BEGIN IMMEDIATE")
+            try:
+                for r in rows:
+                    self.db.execute("INSERT OR REPLACE INTO metrics_min (t, data) VALUES (?, ?)",
+                                    (int(r["t"]), json.dumps(r, separators=(",", ":"))))
+                self.db.execute("DELETE FROM metrics_min WHERE t < ?", (int(prune_before),))
+                self.db.execute("COMMIT")
+            except Exception:
+                self.db.execute("ROLLBACK")
+                raise
+
+    def minutes(self, since):
+        with self.lock:
+            rows = self.db.execute("SELECT data FROM metrics_min WHERE t >= ? ORDER BY t", (int(since),)).fetchall()
+        out = []
+        for (data,) in rows:
+            try:
+                out.append(json.loads(data))
+            except ValueError:
+                pass
+        return out
+
+    def comfy_build(self, prompt_id):
+        """The build whose comfy.py job ran this prompt (comfy.py --review names the job comfy-<prompt id>)."""
+        with self.lock:
+            row = self.db.execute("SELECT j.build, b.title FROM jobs j JOIN builds b ON b.id = j.build "
+                                  "WHERE j.tool = 'comfy' AND j.job = ? ORDER BY j.t DESC LIMIT 1",
+                                  ("comfy-" + prompt_id,)).fetchone()
+        return {"id": row[0], "title": row[1]} if row else None
+
 
 # ------------------------------------------------------------------ live events
 class Hub:
@@ -454,6 +655,126 @@ class Hub:
     def unsubscribe(self, q):
         with self.lock:
             self.clients.discard(q)
+
+
+class Throttle:
+    """At most one publish per `every` seconds. A value offered too soon is held and the newest held value goes out when
+    the interval ends, so viewers are never flooded and the last state always arrives."""
+
+    def __init__(self, publish, every=None, clock=time.monotonic):
+        self.publish, self.every, self.clock = publish, PUSH_EVERY if every is None else every, clock
+        self.lock = threading.Lock()
+        self.last = None
+        self.pending = None
+        self.timer = None
+        self.closed = False
+
+    def offer(self, payload):
+        with self.lock:
+            if self.closed:
+                return False
+            now = self.clock()
+            wait = 0.0 if self.last is None else self.last + self.every - now
+            if wait <= 0 and self.timer is None:
+                self.last = now
+                send = True
+            else:
+                self.pending = payload
+                if self.timer is None:
+                    self.timer = threading.Timer(max(0.0, wait), self._flush)
+                    self.timer.daemon = True
+                    self.timer.start()
+                send = False
+        if send:
+            self.publish(payload)
+        return send
+
+    def _flush(self):
+        with self.lock:
+            payload, self.pending, self.timer = self.pending, None, None
+            if payload is None or self.closed:
+                return
+            self.last = self.clock()
+        self.publish(payload)
+
+    def close(self):
+        with self.lock:
+            self.closed = True
+            if self.timer:
+                self.timer.cancel()
+                self.timer = None
+
+
+class Machine:
+    """monitor.py's samples: a ring of 2 s samples (10 min) in memory, 1-min averages in SQLite (24 h), the newest
+    ComfyUI state."""
+
+    def __init__(self, store, clock=time.time):
+        self.store, self.clock = store, clock
+        self.lock = threading.Lock()
+        self.ring = collections.deque(maxlen=METRICS_RING)
+        self.latest = None
+        self.bucket = []            # chart rows of the minute in progress
+        self.comfy = None
+        self.links = {}             # prompt id -> build (positive answers only)
+
+    def add_metrics(self, sample, now=None):
+        now = self.clock() if now is None else now
+        sample = dict(sample, t=round(now, 2))
+        row = dict(flat_sample(sample), disks=sample.get("disks") or [])
+        flush = []
+        with self.lock:
+            self.ring.append(sample)
+            self.latest = sample
+            if self.bucket and int(self.bucket[0]["t"] // MINUTE) != int(now // MINUTE):
+                flush, self.bucket = downsample(self.bucket), []
+            self.bucket.append(row)
+        if flush:
+            self.store.save_minutes(flush, now - KEEP_HISTORY)
+        return sample
+
+    def window(self, name, now=None):
+        now = self.clock() if now is None else now
+        with self.lock:
+            if name == "10m":
+                rows = [flat_sample(s) for s in self.ring if s["t"] >= now - 600]
+                return {"interval": 2, "samples": rows}
+            live = downsample(self.bucket) if self.bucket else []
+        rows = self.store.minutes(now - KEEP_HISTORY) + live
+        for r in rows:
+            r.pop("disks", None)
+        return {"interval": 60, "samples": rows}
+
+    def set_comfy(self, state, now=None):
+        now = self.clock() if now is None else now
+        state = dict(state, t=round(now, 2))
+        state["build"] = self.link(state.get("prompt_id"))
+        for h in state.get("history") or []:
+            h["build"] = self.link(h.get("prompt_id"))
+        with self.lock:
+            self.comfy = state
+        return state
+
+    def link(self, pid):
+        if not pid:
+            return None
+        if pid in self.links:
+            return self.links[pid]
+        b = self.store.comfy_build(pid)
+        if b:
+            if len(self.links) > 500:
+                self.links.clear()
+            self.links[pid] = b
+        return b
+
+    def status(self, now=None):
+        now = self.clock() if now is None else now
+        with self.lock:
+            latest, comfy = self.latest, self.comfy
+        m_age = round(now - latest["t"], 1) if latest else None
+        c_age = round(now - comfy["t"], 1) if comfy else None
+        return {"latest": latest, "age": m_age, "online": m_age is not None and m_age < MONITOR_STALE,
+                "comfy": comfy, "comfy_age": c_age, "comfy_online": c_age is not None and c_age < MONITOR_STALE}
 
 
 # ------------------------------------------------------------------ files
@@ -525,6 +846,8 @@ class App:
     def __init__(self, db, media, web, host="0.0.0.0", public_port=8790, ingest_port=8791, quiet=False):
         self.store = Store(db)
         self.hub = Hub()
+        self.machine = Machine(self.store)
+        self.push = {k: Throttle(lambda p, k=k: self.hub.publish(k, p, keep=False)) for k in SYS_EVENTS}
         self.media = os.path.abspath(media)
         self.web = os.path.abspath(web) if web else None
         self.csp = csp_header(importmap_hashes(self.web))
@@ -558,17 +881,31 @@ class App:
 
     def stop(self):
         self.hub.closed.set()
+        for t in self.push.values():
+            t.close()
         for s in (self.public, self.ingest):
             s.shutdown()
             s.server_close()
         self.store.close()
 
     def ingest_event(self, ev):
+        if isinstance(ev, dict) and ev.get("type") in SYS_EVENTS:
+            return self.ingest_sys(ev)
         kind, bid, fields = validate(ev)
         data = self.store.apply(kind, bid, fields)
         summary = self.store.build(bid)
         seq = self.hub.publish(kind, {"type": kind, "build": summary, "data": data})
         return {"ok": True, "id": seq, "build": summary}
+
+    def ingest_sys(self, ev):
+        kind, fields = validate_sys(ev)
+        if kind == "metrics":
+            sample = self.machine.add_metrics(fields)
+            self.push[kind].offer({"type": kind, "sample": sample})
+        else:
+            state = self.machine.set_comfy(fields)
+            self.push[kind].offer({"type": kind, "comfy": state})
+        return {"ok": True}
 
 
 class Base(BaseHTTPRequestHandler):
@@ -642,7 +979,20 @@ class PublicHandler(Base):
         parts = [urllib.parse.unquote(p) for p in path.strip("/").split("/")]
         if parts == ["health"]:
             return self.send_json({"ok": True, "version": VERSION, "uptime": round(time.time() - self.app.started, 1),
-                                   "clients": len(self.app.hub.clients)})
+                                   "clients": len(self.app.hub.clients),
+                                   "monitor": self.app.machine.status()["online"]})
+        if parts == ["metrics"]:
+            win = (qs.get("window") or ["10m"])[0]
+            if win not in ("10m", "24h"):
+                return self.send_json({"error": "window must be 10m or 24h"}, 400)
+            st = self.app.machine.status()
+            out = {"window": win, "now": round(time.time(), 2), "latest": st["latest"], "age": st["age"],
+                   "online": st["online"]}
+            out.update(self.app.machine.window(win))
+            return self.send_json(out)
+        if parts == ["comfy"]:
+            st = self.app.machine.status()
+            return self.send_json({"comfy": st["comfy"], "age": st["comfy_age"], "online": st["comfy_online"]})
         if parts == ["builds"]:
             return self.send_json({"builds": store.builds()})
         if parts == ["renders"]:

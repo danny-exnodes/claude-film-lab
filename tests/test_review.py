@@ -634,7 +634,7 @@ class TestContainerFiles(unittest.TestCase):
 
     def test_server_and_client_are_stdlib_only(self):
         stdlib = set(sys.stdlib_module_names)
-        for name in ("server.py", "client.py", "review.py", "vendor_three.py"):
+        for name in ("server.py", "client.py", "review.py", "vendor_three.py", "monitor.py"):
             src = (REPO / "tools" / "review" / name).read_text(encoding="utf-8")
             mods = {m.split(".")[0] for m in re.findall(r"^\s*(?:import|from) ([\w.]+)", src, re.M)}
             self.assertLessEqual(mods - stdlib - {"client", "vendor_three"}, set(), name)
@@ -740,6 +740,7 @@ class TestComfyHook(tc.ComfyCase if tc else unittest.TestCase):
         self.assertEqual((r["video"], r["engine"], r["frames"]), ("clip-a/ep01_s03_clip_v01.mp4", "comfy:h3-i2v", 124))
         self.assertEqual((self.tmp / "media" / "clip-a" / "ep01_s03_clip_v01.mp4").read_bytes(), tc.MP4)
         self.assertEqual(self.fake.of("job")[-1]["status"], "done")
+        self.assertRegex(self.fake.of("job")[0]["job"], r"^comfy-[0-9a-f-]{36}$")   # monitor.py links prompt -> build
 
     def test_error_is_published_and_env_works(self):
         f = self.server()

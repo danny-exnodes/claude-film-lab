@@ -96,6 +96,7 @@ python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> | ke
 python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
 python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
 python tools/review/review.py up [--no-ngrok] | down | url | status        # web app xem trực tiếp (Docker + ngrok), chỉ máy chủ lab
+python tools/review/review.py monitor [--stop|--restart] [--comfy-log PATH]  # monitor.py: số đo máy + tiến độ ComfyUI lên bảng theo dõi (chỉ nhãn job, không dòng lệnh)
 python tools/review/review.py publish-video <clip>.mp4 --build <id> --label L | publish-model <model>.glb --build <id>
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL

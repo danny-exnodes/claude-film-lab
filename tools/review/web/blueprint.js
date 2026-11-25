@@ -16,13 +16,15 @@ const ACTIVE = new Set(['queued', 'building', 'rendering']);
 const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2);
 const sleep = (s) => new Promise((r) => setTimeout(r, s * 1000));
 
-export default async function mount(root, [id], live) {
+export default async function mount(root, [id], live, alive = () => true) {
   if (!id) { location.hash = '#/'; return {}; }
   let data;
   try { data = await api(`builds/${encodeURIComponent(id)}`); } catch (e) {
-    root.append(h('p', { class: 'empty', text: `Không có build "${id}".` }));
+    if (alive()) root.append(h('p', { class: 'empty', text: `Không có build "${id}".` }));
     return {};
   }
+  if (!alive()) return {};                 // the user already left: build nothing, load no GLB
+  let destroyed = false;
   let build = data.build;
   let steps = data.steps;
   let speed = 1;
@@ -159,11 +161,13 @@ export default async function mount(root, [id], live) {
     }
     let gltf;
     try { gltf = await loadGLB(mediaUrl(steps[gi].glb)); } catch (e) {
+      if (destroyed) return;
       console.error(e);
       shown = i; paintStep();
       return;
     }
-    if (my !== showToken) return;
+    // A newer step or a closed view: drop the result (loadGLB's parse is cached and shared; nothing was cloned yet).
+    if (destroyed || !alive() || my !== showToken) return;
     finishAll();
     const next = gltf.scene.clone(true);
     const sigs = new Map();
@@ -445,6 +449,7 @@ export default async function mount(root, [id], live) {
   async function reload() {
     try {
       const d = await api(`builds/${encodeURIComponent(id)}`);
+      if (destroyed) return;
       build = d.build;
       steps = d.steps;
       finishAll();
@@ -488,6 +493,8 @@ export default async function mount(root, [id], live) {
 
   return {
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
       off();
       clearInterval(timer);
       clearTimeout(scrubTimer);

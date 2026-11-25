@@ -1,0 +1,23 @@
+# Hoạt hình 3D Blender (Toon 3D) – style pack render bằng Blender (engine: blender), schema: docs/CONVENTIONS.md §3.
+# Cho tập method: blender: model 3D tô toon (dải sáng tối gắt, viền Line Art đen), màu phẳng tươi; hợp linh vật, phim
+# thiếu nhi, giải thích kiến thức. Không model ảnh, không trả tiền.
+# Hướng dẫn: .claude/skills/film-compose-shot/references/blender-method.md
+id: toon-3d-blender
+name: Hoạt hình 3D Blender
+name_en: Toon 3D (Blender)
+status: draft
+base: null
+engine: blender
+render:
+  look: toon-ink          # toon ramp + Line Art grease pencil
+  engine: eevee           # toon ramp (Shader to RGB) chỉ có trong EEVEE
+  line: 3.0
+  mist: 0.1
+  palette: {ink: '#14161C', paper: '#F4EEDF', sky: '#BFE3F2', grass: '#7FBF5A'}
+palette: {ink: '#14161C', paper: '#F4EEDF', sky: '#BFE3F2', grass: '#7FBF5A', accent: '#F2A33A'}
+motion: [sun-glow]
+sound:
+  scale: C major pentatonic
+  instruments: [marimba, pizzicato strings, frame drum, small bells]
+  notes: Vui, nảy; tiếng động hoạt hình ngắn theo sự kiện (bước, nhảy, chạm).
+type: {latin: Inter, cjk: Noto Sans CJK TC}

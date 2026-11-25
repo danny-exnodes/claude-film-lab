@@ -491,6 +491,26 @@ def run_check(ep_dir, media):
     return p.returncode, lines[-1] if lines else f"no Summary line (exit {p.returncode})"
 
 
+def narration_watermark(media):
+    """G4: (ok, text) for <media>/vo/tts-log.json of tools/tts/vieneu_tts.py: every take rendered with the audio
+    watermark on. No log = no narration rendered by the lab's TTS = n/a."""
+    path = os.path.join(media, "vo", "tts-log.json") if media else None
+    if not path or not os.path.isfile(path):
+        return True, "narration watermark: n/a (no vo/tts-log.json)"
+    try:
+        with open(path, encoding="utf-8") as f:
+            log = json.load(f)
+    except (OSError, ValueError) as e:
+        return False, f"narration watermark: vo/tts-log.json unreadable ({e})"
+    if not isinstance(log, list) or not log or not all(isinstance(e, dict) for e in log):
+        return False, "narration watermark: vo/tts-log.json is not a non-empty list of takes"
+    off = [str(e.get("id", "?")) for e in log if e.get("watermark") is not True]
+    if off:
+        return False, (f"narration watermark on for every take (off: {', '.join(off[:6])}"
+                       f"{f', +{len(off) - 6} more' if len(off) > 6 else ''}; render again with --require-watermark)")
+    return True, f"narration watermark on for every take ({len(log)})"
+
+
 def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     req = []
 
@@ -557,6 +577,7 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     else:
         need(d["media"]["final"], f"final render ({d['media']['final'] or 'none'})")
         need(not n_open, f"no open paid request ({n_open} open)")
+        need(*narration_watermark(media))
     missing = sum(1 for r in req if not r["ok"])
     return {"gate": gate, "ready": missing == 0, "missing": missing, "requirements": req}
 

@@ -850,5 +850,57 @@ class DegradeTest(StatusCase):
         self.assertEqual(tree(self.tmp), before)
 
 
+class NarrationWatermarkTest(StatusCase):
+    """G4 checks vo/tts-log.json of tools/tts/vieneu_tts.py: every take rendered with the watermark on (#37)."""
+
+    def setUp(self):
+        super().setUp()
+        self.episode(stage=10, G1=True, G2=True, G3=True)
+        self.approve_all()
+        self.put("renders", "ep01_draft_v01.mp4", "ep01_final_v01.mp4")
+
+    def vo_log(self, entries=None, raw=None):
+        (self.media / "vo").mkdir(parents=True, exist_ok=True)
+        (self.media / "vo" / "tts-log.json").write_text(raw if raw is not None else json.dumps(entries),
+                                                       encoding="utf-8")
+
+    def requirement(self, g):
+        return [r for r in g["requirements"] if r["text"].startswith("narration watermark")]
+
+    def test_no_narration_is_not_applicable(self):
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["ready"]), (0, True))
+        self.assertEqual(self.requirement(g), [{"ok": True, "text": "narration watermark: n/a (no vo/tts-log.json)"}])
+
+    def test_every_take_watermarked_is_ready(self):
+        self.vo_log([{"id": "VO1", "watermark": True}, {"id": "VO2", "watermark": True}])
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["ready"]), (0, True), self.missing(g))
+        self.assertIn("(2)", self.requirement(g)[0]["text"])
+
+    def test_a_take_without_watermark_blocks_g4(self):
+        self.vo_log([{"id": "VO1", "watermark": True}, {"id": "VO2", "watermark": False}, {"id": "VO3"}])
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["ready"], g["missing"]), (1, False, 1))
+        self.assertIn("off: VO2, VO3", self.missing(g)[0])
+        self.assertIn("--require-watermark", self.missing(g)[0])
+        code, out = self.run_status("--gate", "G4")
+        self.assertIn("narration watermark", out)
+
+    def test_unreadable_log_blocks_g4(self):
+        for raw in ("{broken", "{}", "[]"):
+            with self.subTest(raw=raw):
+                self.vo_log(raw=raw)
+                code, g = self.gate("--gate", "G4")
+                self.assertEqual((code, g["missing"]), (1, 1), self.missing(g))
+
+    def test_other_gates_do_not_look_at_it(self):
+        self.vo_log([{"id": "VO1", "watermark": False}])
+        self.episode(stage=8, G1=True, G2=True)
+        self.put("clips", "ep01_s03_seedance25_v01.mp4")
+        code, g = self.gate("--gate", "G3")
+        self.assertEqual(self.requirement(g), [])
+
+
 if __name__ == "__main__":
     unittest.main()

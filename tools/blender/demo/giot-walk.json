@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "title": "Toon ink: Giọt walks past the rocks, the camera tracks",
+  "size": [1920, 1080], "fps": 24, "seconds": 4, "seed": 11,
+  "look": "toon-ink", "engine": "eevee",
+  "world": {"paper": "#F4EFE4", "mist": 0.5, "mist_range": [6, 80], "sun": [42, 240]},
+  "assets": [
+    {"id": "ground", "src": "preset:ground", "params": {"relief": 0.2}, "color": "#D9CDB0", "mask": false},
+    {"id": "hills", "src": "preset:mountains", "at": [0, 45, -1], "params": {"width": 120, "depth": 24, "height": 12, "peaks": 6, "sharp": 0.7, "seed": 2}, "color": "#8FA67A"},
+    {"id": "rocks", "src": "preset:rocks", "at": [1.2, 2.6, 0], "params": {"count": 3, "spread": 1.0, "size": 0.55}, "color": "#9A8F84"},
+    {"id": "pine", "src": "preset:pines", "at": [-2.8, 6.0, 0], "params": {"height": 3.4}, "color": "#4E6B45", "anim": {"action": "sway"}},
+    {"id": "giot", "src": "preset:giot", "at": [-1.6, 1.0, 0],
+     "anim": {"action": "walk", "speed": 1.4, "path": [[0, [0, 0, 0]], [4, [3.2, 0.2, 0]]]}}
+  ],
+  "camera": {"move": "track", "from": [-1.4, -3.4, 1.0], "target": "giot", "lens": 40, "ease": "linear"},
+  "passes": ["depth", "mask"], "depth_range": [0.5, 60]
+}

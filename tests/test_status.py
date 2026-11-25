@@ -918,6 +918,15 @@ class NarrationWatermarkTest(StatusCase):
         self.assertEqual((code, g["ready"]), (0, True), self.missing(g))
         self.assertIn("(5)", self.requirement(g)[0]["text"])
 
+    def test_takes_from_vo_lines_json_are_checked(self):
+        """--lines (vo-lines.json) takes have their own ids: G4 checks them instead of calling them missing."""
+        self.vo_log([{"id": f"N{i:02d}", "watermark": True} for i in range(1, 4)])
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["ready"]), (0, True), self.missing(g))
+        self.vo_log([{"id": "N01", "watermark": True}, {"id": "N02", "watermark": False}])
+        code, g = self.gate("--gate", "G4")
+        self.assertEqual((code, g["missing"]), (1, 1), self.missing(g))
+
     def test_unreadable_log_blocks_g4(self):
         for raw in ("{broken", "{}", "[]"):
             with self.subTest(raw=raw):

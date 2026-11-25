@@ -1209,6 +1209,18 @@ class TestLedgerPreDone(DriveSyncCase):
         self.assertIn("ledger-merge", block)
         self.assertIn("not merged yet: out/demo/ep01/ledger.drive-1.csv", block)
 
+    def test_a_second_identical_row_without_req_is_not_merged(self):
+        """Two identical old rows (no req=) are two requests to ledger-merge: one local copy of it is not enough."""
+        old = "2026-11-09T09:00:00Z,image,m,2K,,1,ok,o.png,,,film-plate-maker,\n"
+        (self.out / "ep01" / "ledger.csv").write_text(LEDGER_HEAD + old + ROW_A + ROW_B)
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + old + old)
+        self.assertEqual(self.pre()["unmerged"], ["out/demo/ep01/ledger.drive-1.csv"])
+
+    def test_a_copy_that_bills_more_for_a_request_is_not_merged(self):
+        more = ROW_A.replace(",1,ok,", ",2,ok,")
+        (self.out / "ep01" / "ledger.drive-1.csv").write_text(LEDGER_HEAD + more)
+        self.assertEqual(self.pre()["unmerged"], ["out/demo/ep01/ledger.drive-1.csv"])
+
 
 if __name__ == "__main__":
     unittest.main()

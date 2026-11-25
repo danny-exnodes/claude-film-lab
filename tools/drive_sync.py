@@ -394,28 +394,24 @@ def map_out(rel, project_dir, man, day):
 
 # --- ledger copies (§11.6 push step 3) --------------------------------------------------------------------------
 
-LEDGER_FIELDS = ["ts", "kind", "model", "size", "seconds", "count", "status", "out", "task_id", "usage", "agent", "note"]
-RE_REQ = re.compile(r"req=([0-9a-f]+)")          # as tools/ark.py REQ_RE (matched at the start of note)
-
-
-def ledger_keys(path):
-    """The rows of a ledger as tools/ark.py ledger-merge dedupes them: (req, status, task_id) for rows with
-    note `req=<hex>...`, the whole row otherwise; rows without ts/kind/status are dropped there too.
-    None when the file cannot be read as UTF-8 CSV (counted as not merged)."""
-    try:
-        with open(path, newline="", encoding="utf-8") as f:
-            text = f.read()
-        rows = list(csv.DictReader(io.StringIO(text.lstrip("﻿"))))
-    except (OSError, UnicodeDecodeError, csv.Error):
-        return None
-    keys = set()
-    for r in rows:
-        if not (r.get("ts") and r.get("kind") and r.get("status")):
-            continue
-        m = RE_REQ.match(r.get("note") or "")
-        keys.add(("req", m.group(1), r.get("status") or "", r.get("task_id") or "") if m
-                 else ("row",) + tuple(r.get(k) or "" for k in LEDGER_FIELDS))
-    return keys
+def ledger_adds_nothing(mine_path, copy_path):
+    """True when ark.py ledger-merge of the local ledger with a downloaded copy would give back the local ledger:
+    every billed row of the copy is already counted. Uses ark's own merge (multiset rows without req=, the row with
+    more billing units per request), so `plan` never calls a copy merged that ledger-merge would still add to.
+    False when either file cannot be read or fails ark's row checks (counted as not merged)."""
+    import ark                                   # tools/ark.py; imported here, only plans with ledger copies need it
+    rows = []
+    for path in (mine_path, copy_path):
+        try:
+            with open(path, newline="", encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError):
+            return False
+        got, problems = ark.read_ledger_strict(path, text)
+        if problems:
+            return False
+        rows.append(got)
+    return ark.merge_rows([rows[0], rows[1]]) == ark.merge_rows([rows[0]])
 
 
 # --- archive naming (§11.6 step 3) ----------------------------------------------------------------------------
@@ -704,12 +700,7 @@ def build_plan(a):
                                          "excludeContentSnippets": True}}
             copies = sorted(glob.glob(os.path.join(glob.escape(os.path.dirname(full)), LEDGER_COPIES)))
             if copies:               # downloaded already: done once every copy's rows are in the ledger
-                mine = ledger_keys(full)
-                unmerged = []
-                for c in copies:
-                    theirs = ledger_keys(c)
-                    if mine is None or theirs is None or not theirs <= mine:
-                        unmerged.append(key_for(pd, c))
+                unmerged = [key_for(pd, c) for c in copies if not ledger_adds_nothing(full, c)]
                 x["pre"]["ledger_merge"].update(copies=[key_for(pd, c) for c in copies], unmerged=unmerged,
                                                 done=not unmerged)
         elif origin == "media":

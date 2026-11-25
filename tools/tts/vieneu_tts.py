@@ -230,6 +230,8 @@ UNITS = [  # longest first; matched only right after a number
     ("%", "phần trăm"),
 ]
 ORDINAL_WORDS = r"thế kỷ thứ|thế kỉ thứ|thế kỷ|thế kỉ|thứ|chương|quyển|hồi|tập|phần"
+# words before a bare m/yyyy that make it a month and year (vào 4/2024); without one it is a fraction
+MONTH_CUES = "vào|từ|đến|tới|cuối|đầu|giữa|trước|sau|hồi|khoảng"
 RANGE_DASH = "[-–—]"
 
 
@@ -369,15 +371,16 @@ def normalize_vi(text, pron=(), dialect="nam"):
         return m.group(0) if mo is None else f"{nw(int(m.group(1)))} tháng {mo} năm {nw(int(m.group(4)))}"
     t = re.sub(r"(?<![\w.,])(\d{1,2})([/-])(\d{1,2})\2(\d{3,4})(?![\w/])", date, t)
 
-    def month_only(m):                               # 4/2024
-        mo = month(m.group(1))
-        return m.group(0) if mo is None else f"tháng {mo} năm {nw(int(m.group(2)))}"
-    t = re.sub(r"(?<![\w.,/])(\d{1,2})/(\d{4})(?![\w/])", month_only, t)
+    def month_only(m):                               # vào 4/2024 (a bare 1/1000 is a fraction, not a date)
+        mo = month(m.group(2))
+        return m.group(0) if mo is None else f"{m.group(1)} tháng {mo} năm {nw(int(m.group(3)))}"
+    t = re.sub(rf"(?<!\w)((?i:{MONTH_CUES}))\s+(\d{{1,2}})/(\d{{4}})(?![\w/])", month_only, t)
 
-    def day_month(m):                                # ngày 1/5 (a bare 1/5 is a fraction)
+    def day_month(m):                                # ngày 1/5, ngày 2-9 (a bare 1/5 is a fraction)
         mo = month(m.group(3))
         return m.group(0) if mo is None else f"{m.group(1)} {nw(int(m.group(2)))} tháng {mo}"
-    t = re.sub(r"(?<!\w)((?i:ngày|hôm|mùng|mồng))\s+(\d{1,2})/(\d{1,2})(?![\w/])", day_month, t)
+    t = re.sub(rf"(?<!\w)((?i:ngày|hôm|mùng|mồng))\s+(\d{{1,2}})(?:/|\s*{RANGE_DASH}\s*)(\d{{1,2}})(?![\w/])(?!\s+(?i:tháng))",
+               day_month, t)   # ngày 3-5 tháng 6 is a range
     t = re.sub(r"\b(\d{1,2})h(\d{2})\b", lambda m: f"{nw(int(m.group(1)))} giờ {nw(int(m.group(2)))} phút", t)
     t = re.sub(r"\b(\d{1,2})h\b", lambda m: f"{nw(int(m.group(1)))} giờ", t)
     t = re.sub(r"(?<![\w.,/])(\d+)/(\d+)(?![\w/])",                          # 3/4 -> ba phần tư

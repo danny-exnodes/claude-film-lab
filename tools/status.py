@@ -513,7 +513,8 @@ def script_vo_ids(ep_dir):
 def narration_watermark(media, ids=None):
     """G4: (ok, text) for <media>/vo/tts-log.json of tools/tts/vieneu_tts.py: every take rendered with the audio
     watermark on. No log = no narration rendered by the lab's TTS = n/a. With `ids` (the current script's VO ids),
-    takes of lines cut from the script are ignored, as `vieneu_tts.py --check` does (the log keeps them)."""
+    takes VO<n> of lines cut from the script are ignored, as `vieneu_tts.py --check` does (the log keeps them);
+    takes with other ids (rendered from vo-lines.json with --lines) are always checked."""
     path = os.path.join(media, "vo", "tts-log.json") if media else None
     if not path or not os.path.isfile(path):
         return True, "narration watermark: n/a (no vo/tts-log.json)"
@@ -524,8 +525,8 @@ def narration_watermark(media, ids=None):
         return False, f"narration watermark: vo/tts-log.json unreadable ({e})"
     if not isinstance(log, list) or not log or not all(isinstance(e, dict) for e in log):
         return False, "narration watermark: vo/tts-log.json is not a non-empty list of takes"
-    if ids is not None:
-        log = [e for e in log if str(e.get("id")) in ids]
+    if ids is not None:      # VO<n> takes come from --script; other ids (vo-lines.json, --lines) are always checked
+        log = [e for e in log if str(e.get("id")) in ids or not re.fullmatch(r"VO\d+", str(e.get("id")))]
         if not log:
             return False, "narration watermark: vo/tts-log.json has no take of the current script.md"
     off = [str(e.get("id", "?")) for e in log if e.get("watermark") is not True]

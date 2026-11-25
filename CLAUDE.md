@@ -118,7 +118,7 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   Đổi phiên bản three.js: `tools/toon/three.lock` + `docs/setup-script.sh` (`THREE_VER`), `docs/RUNBOOK.md` ("three.js").
 - Sửa `tools/compose/*.js` → tăng `C.VERSION` trong `core.js`, chạy test (`tests/test_compose_js.py`,
   `tests/test_compose_character.py`, `tests/test_compose_figure.py` cần node) và `python3 tools/compose/inline.py --lint`. Module mới → thêm vào `ORDER`
-  của `inline.py` và `motions.json`.
+  của `inline.py` và `motions.json` (trừ `preflight.js`: công cụ kiểm, không nhúng vào film).
 - Mã phỏng theo dự án khác → ghi nguồn ở đầu file và thêm một dòng vào `THIRD_PARTY.md`.
 - Lỗi đã biết nhưng chưa sửa và việc hoãn lại: `docs/BACKLOG.md`.
 - cinecode được ghim ở `tools/compose/cinecode.ref` (= `CINECODE_REF` trong `docs/setup-script.sh`); đổi ghim theo

@@ -78,6 +78,20 @@ class TestPreflight(TmpDirCase, unittest.TestCase):
         self.assertRegex(out, r"(?m)^ERROR load: ")
         self.assertIn("0 frame(s) drawn", out)
 
+    def test_a_jpeg_plate_with_a_large_icc_block_is_measured(self):
+        """The start-of-frame of a JPEG may lie past 64 KB (EXIF / ICC): the size is still read, not assumed."""
+        Image.new("RGB", (2400, 1350)).save(self.ep / "plates" / "ep00_s01_L1_demo-nui_v01.png", "JPEG",
+                                            icc_profile=bytes(200_000))
+        out = self.preflight(0)
+        self.assertNotIn("assumed", out)
+        self.assertIn("preflight: 0 error(s), 0 warning(s)", out)
+
+    def test_fps_before_the_film_path(self):
+        r = subprocess.run([NODE, str(REPO / "tools" / "compose" / "preflight.cjs"), "--fps", "6", str(self.film)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("frame(s) drawn at 6 fps", r.stdout)
+
     def test_an_l1_too_small_for_the_camera_travel_names_the_overscan_it_needs(self):
         self.edit(("depth: 0.12, overscan: 1.02 }", "depth: 0.12 }"),
                   ("zoom: [1.0, 1.1],", "zoom: [1.0, 1.0], pan: [[-400, 0], [400, 0]],"))

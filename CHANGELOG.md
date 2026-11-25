@@ -83,6 +83,16 @@ Bảy gói việc làm song song, mỗi gói một nhánh, gộp và chạy lạ
 - Hook khởi động trong git worktree không chạy pip, không ghi đè dấu cài đặt.
 - Setup script v4 ghi dấu `/opt/film-lab/setup-script.version`: **dán lại setup script** vào môi trường cloud để doctor hết WARN.
 
+#### Sửa sau review PR #45
+- Lời bình: `1/1000` đứng một mình đọc là phân số (trước đây thành "tháng một năm một ngàn"); `m/yyyy` chỉ đọc là tháng
+  năm sau `tháng` hoặc một từ dẫn (`vào`, `từ`, `đến`, `cuối`, `đầu`, `giữa`, `trước`, `sau`, `hồi`, `khoảng`);
+  `ngày 2-9` đọc "ngày hai tháng chín", còn `ngày 3-5 tháng 6` vẫn là khoảng ngày.
+- `drive_sync.py plan` dùng chính phép gộp của `ark.py ledger-merge` để xét bản ledger trên Drive đã gộp chưa: hai dòng cũ
+  giống nhau (không `req=`) hay một request tính nhiều hơn ở bản Drive không còn bị báo `pre done`.
+- Cổng G4: lời bình đọc từ `vo-lines.json` (`--lines`, id khác `VO<n>`) được kiểm watermark thay vì bị báo thiếu.
+- `preflight.cjs`: đọc kích thước JPEG có khối EXIF/ICC lớn hơn 64 KB; `--fps N` đặt trước đường dẫn film không còn bị hiểu
+  là tên file.
+
 ## [1.2.0] - 2026-11-25
 
 ### Phương pháp dựng thứ ba `code` và bộ 11 phong cách vẽ bằng code (#38–#43, 2026-11-19 / 24)

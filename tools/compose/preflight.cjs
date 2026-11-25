@@ -23,15 +23,21 @@ function sizeOfFile(file) {
   let fd;
   try {
     fd = fs.openSync(file, 'r');
-    const b = Buffer.alloc(64 * 1024), n = fs.readSync(fd, b, 0, b.length, 0);
-    if (n >= 24 && b.readUInt32BE(0) === 0x89504e47 && b.toString('ascii', 12, 16) === 'IHDR') return [b.readUInt32BE(16), b.readUInt32BE(20)];
-    if (n >= 4 && b[0] === 0xff && b[1] === 0xd8) {                 // JPEG: walk the markers to a start-of-frame
+    const read = (pos, len) => { const b = Buffer.alloc(len); return b.subarray(0, fs.readSync(fd, b, 0, len, pos)); };
+    const b = read(0, 24);
+    if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47 && b.toString('ascii', 12, 16) === 'IHDR') return [b.readUInt32BE(16), b.readUInt32BE(20)];
+    if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {          // JPEG: seek from marker to marker to a start-of-frame
+      const size = fs.fstatSync(fd).size;                            // (EXIF / ICC segments may be far larger than 64 KB)
       let i = 2;
-      while (i + 9 < n) {
-        if (b[i] !== 0xff) { i++; continue; }
-        const m = b[i + 1], len = b.readUInt16BE(i + 2);
-        if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) return [b.readUInt16BE(i + 7), b.readUInt16BE(i + 5)];
-        i += 2 + len;
+      while (i + 9 <= size) {
+        const h = read(i, 9);
+        if (h.length < 9) break;
+        if (h[0] !== 0xff) { i++; continue; }
+        const m = h[1];
+        if (m === 0xff) { i++; continue; }                           // fill byte before a marker
+        if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { i += 2; continue; }   // markers without a length
+        if (m >= 0xc0 && m <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(m)) return [h.readUInt16BE(7), h.readUInt16BE(5)];
+        i += 2 + h.readUInt16BE(2);
       }
     }
     return null;
@@ -77,8 +83,8 @@ const STUB = new Proxy(function stub() {}, {
 
 function main(argv) {
   const args = argv.slice(2);
-  const file = args.find((a) => !a.startsWith('--'));
   const fi = args.indexOf('--fps'), fps = fi >= 0 ? Number(args[fi + 1]) : 12;
+  const file = args.find((a, i) => !a.startsWith('--') && !(fi >= 0 && i === fi + 1));   // not the value of --fps
   if (!file) die('usage: node tools/compose/preflight.cjs <film.html> [--fps 12]');
   let html;
   try { html = fs.readFileSync(file, 'utf8').replace(/\r\n/g, '\n'); } catch (e) { die(`${file}: cannot be read (${e.code || e.message})`); }

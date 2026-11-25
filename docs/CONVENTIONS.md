@@ -484,8 +484,18 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
 1. `PROJECT.md`: ID thư mục lấy từ người dùng hoặc tìm một lần `parentId = '<lab_root>'` → `<ProjectName>` →
    `00_QuanLy`; tải `PROJECT.md` về `projects/<project>/PROJECT.md`.
 2. Với mỗi thư mục cần (bảng §11.3: kinh thư, tập đang làm, ledger): `search_files` với
-   `parentId = '<id>' and trashed = false`, tải từng file chữ (`download_file_content`, giải base64) về đúng đường dẫn;
-   thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
+   `parentId = '<id>' and trashed = false`, tải từng file chữ bằng `download_file_content` rồi **ngay sau đó** ghi
+   xuống đĩa: `python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <đường dẫn> --size <fileSize>`
+   (nhiều nhóm `--id … --to … --size …` trong một lệnh được). Connector trả base64 vào hội thoại, không ghi ra đĩa;
+   `save` đọc kết quả mới nhất của ID đó trong bản ghi phiên (`~/.claude/projects/<thư mục repo>/*.jsonl`, cả
+   `subagents/`; không thấy thì mọi dự án; bản ghi khác: `--transcript <glob>`), giải base64 (chuẩn hoặc url-safe), so
+   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). **Không bao giờ chép lại
+   chuỗi base64 bằng tay** (tốn gấp đôi ngữ cảnh, sai một ký tự là hỏng file). Mỗi file vẫn đi qua ngữ cảnh một lần
+   (≈ 1,33 × kích thước file), nên vẫn kéo theo khâu, không kéo cả cây. `--to` tương đối với `projects/<project>/`,
+   hoặc bắt đầu bằng `projects/<project>/` / `out/<project>/`; đường dẫn ra ngoài dự án (kể cả qua symlink) bị từ chối.
+   `save` từ chối (mã thoát 1, không ghi gì) khi file đích có thay đổi chưa đẩy: muốn so với bản Drive thì lưu cạnh
+   nó (`--to <file>.orig`, file tạm không bao giờ đẩy); `--force` chỉ khi chắc chắn bỏ phần sửa. Không in nội dung file.
+   Thư mục con chưa có trong manifest thì thêm ID vào `PROJECT.md`. `TienDo_SanXuat` tải với `exportMimeType: text/csv`.
 3. Một thư mục có hai file cùng tên (lần đẩy trước bị ngắt giữa chừng): lấy file `modifiedTime` mới nhất, chuyển file
    cũ vào `99_LuuTru/` theo bước 3 của mục đẩy. **Ngoại lệ `ledger.csv`:** tải **mọi** bản về
    (`out/<project>/ep<NN>/ledger.drive-1.csv`, `…-2.csv`) rồi gộp, không chọn bản mới nhất:
@@ -498,6 +508,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    từ chối (mã thoát 1, không ghi gì) khi còn thay đổi chưa đẩy, vì chụp lại sẽ đánh dấu chúng là đã đẩy; `--force`
    chỉ dùng khi chắc chắn bỏ các thay đổi đó khỏi danh sách đẩy. File tạm (`*.b64`, `*.orig`, `*.bak`, `*.tmp`,
    `*.part`, `*~`) và `ledger.drive-*.csv` không vào dấu, không vào danh sách đẩy.
+   Lỡ tạo file mới trước lần chụp dấu đầu: `snapshot projects/<project> --only <các file/thư mục vừa kéo>` chỉ chụp
+   những file đó (file khác vẫn là NEW); đã có snapshot thì `--only` từ chối, dùng `pulled`. `snapshot` không có
+   `--include-out` giữ nguyên các dòng `out/<project>/…` của dấu cũ. File là symlink trỏ ra ngoài `projects/<project>/`
+   và `out/<project>/` không vào dấu; `plan` in nó là UNMAPPED, `pulled`/`record`/`save` từ chối.
    Lệnh ghi `projects/<project>/.pulled.sha256` (định dạng `sha256sum`: `<hex>  <đường dẫn>`, đường dẫn như
    `find projects/<project>` in ra, media dạng `out/<project>/…`; không có file nào bắt đầu bằng `.`) và
    `projects/<project>/.pulled.at` (`2026-11-10T15:30:00Z`). Tương đương bằng shell khi không chạy được công cụ:
@@ -544,7 +558,9 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    after every stage that generated; no approval gate` – ledger không chờ duyệt như media. Tải bản đang ở Drive về
    `out/<project>/ep<NN>/ledger.drive-1.csv`, `ark.py ledger-merge out/<project>/ep<NN>/ledger.csv
    out/<project>/ep<NN>/ledger.drive-1.csv -o out/<project>/ep<NN>/ledger.csv`, xoá bản tạm, rồi mới đẩy bản đã gộp
-   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào).
+   (bản trên Drive luôn là tập con của bản vừa đẩy, nên chuyển nó vào `99_LuuTru/` không mất dòng nào). Khi các
+   `ledger.drive-<n>.csv` còn trên đĩa và mọi dòng của chúng đã có trong ledger, `plan` in `pre done` (JSON:
+   `done: true`, `unmerged: []`) thay cho các bước: xoá bản tạm rồi tải lên.
 4. Người dùng sửa trên Drive: trước khi đẩy, file trên Drive có `modifiedTime` sau `.pulled.at` **và** ID không có
    trong `.pushed.log` (không phải bản chính phiên này đẩy) → tải về, so với bản làm việc, gộp (giữ chữ của người
    dùng), xung đột thì hỏi người dùng; rồi mới đẩy. Với file NEW, mọi kết quả `search_files` có ID không nằm trong

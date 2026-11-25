@@ -139,6 +139,7 @@ class ComfyCase(TmpDirCase, unittest.TestCase):
         env["FILM_AGENT"] = "film-animator"
         env["FILM_COMFY_URL"] = "http://127.0.0.1:9"          # closed port unless a test starts the fake server
         env["FILM_COMFY_MODELS"] = str(self.tmp / "models")
+        env["FILM_COMFY_WORK"] = str(self.tmp / "comfy-work")   # `start` never writes into the lab's out/
         self._env = mock.patch.dict(os.environ, env, clear=True)
         self._env.start()
         for name, val in (("POLL_SECONDS", 0.01), ("PROGRESS_SECONDS", 0), ("START_POLL", 0.1)):
@@ -768,9 +769,10 @@ class TestOtherCommands(ComfyCase):
 
     def test_start_dry_run_command(self):
         home = self.desktop(models=False)
-        shared = self.tmp / "models"
-        (self.tmp / "input").mkdir()
+        (self.tmp / "input").mkdir()            # the Desktop's shared input/output (owner's files, on C:): never used
         (self.tmp / "output").mkdir()
+        work = self.tmp / "work"
+        os.environ["FILM_COMFY_WORK"] = str(work)
         yml = self.tmp / "inst.yaml"
         yml.write_text("x: 1\n")
         os.environ["FILM_COMFY_MODEL_PATHS"] = str(yml)
@@ -778,10 +780,12 @@ class TestOtherCommands(ComfyCase):
         self.assertEqual(code, 0, out)
         self.assertIn(str(home / "ComfyUI" / ".venv" / "Scripts" / "python.exe"), out)
         for part in ("--listen 127.0.0.1 --port 9", "--disable-auto-launch", "--offline",
-                     f"--extra-model-paths-config {yml}", f"--input-directory {self.tmp / 'input'}",
-                     f"--output-directory {self.tmp / 'output'}"):
+                     f"--extra-model-paths-config {yml}", f"--input-directory {work / 'input'}",
+                     f"--output-directory {work / 'output'}", f"--temp-directory {work / 'temp'}",
+                     f"--user-directory {work / 'user'}", f"log: {work / 'server.log'}"):
             self.assertIn(part, out)
-        self.assertTrue(shared)
+        self.assertNotIn(f"--input-directory {self.tmp / 'input'}", out)
+        self.assertFalse(work.exists(), "a dry run creates nothing")
         (home / "ComfyUI" / "comfy" / "cli_args.py").write_text("# old ComfyUI\n")
         self.assertIn("no flag that blocks the paid API nodes", self.run_comfy("start", "--dry-run")[2])
 
@@ -808,7 +812,9 @@ class TestOtherCommands(ComfyCase):
             self.assertIn("ComfyUI fake", out)
         finally:
             os.kill(pid, 15)
-        self.assertTrue((home / "film-lab-server.log").exists())
+        work = self.tmp / "comfy-work"
+        self.assertTrue((work / "server.log").exists())
+        self.assertTrue(all((work / k).is_dir() for k in ("input", "output", "temp", "user")))
 
 
 if __name__ == "__main__":

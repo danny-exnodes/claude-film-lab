@@ -11,7 +11,8 @@ Date: 2026-11-25 · Branch: `claude/local-engines` · Research: `docs/superpower
 > `minimax_h3_video_vae_int8_convrot` + `minimax_h3_audio_vae_fp32`, turbo LoRAs for drafts only. H3 rules: 24 fps,
 > length on the 17k+5 grid, 1344×768 final / 864×480 draft, start frame centre-cropped to 7:4 + lanczos before upload,
 > cfg 1 and no negative prompt, 20 steps, English prompts in fields; clips carry generated audio. Measured on this PC:
-> ~9–10 s per step → ≈ 3.5 min per 10 s clip at 1344×768. `comfy.py start` runs the Desktop's own Python headless on
+> ~34 s per step at 1344×768 → 713 s for a 5.17 s clip (measured on the first real run; the owner's "9–10 s per
+> step" was the 864×480 draft). `comfy.py start` runs the Desktop's own Python headless on
 > port 8188. The same install holds MiniMax's **paid API nodes** (`comfy_api_nodes/nodes_minimax.py`): never allowed.
 > Sections below that name Wan describe the superseded plan; where they conflict, this note wins.
 

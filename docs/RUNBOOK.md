@@ -230,6 +230,10 @@ Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compo
 | `check_episode`: `no final Blender render for sNN at stage 7` | Container bị thu hồi, hoặc chỉ có bản `--preview` | Kéo gói shot từ Drive; hoặc `blender.py render … --out …/renders3d/sNN_v<NN>/` |
 | `blender.py render` từ chối: `--out` đã có/không rỗng | Không ghi đè render cũ | Dùng thư mục `_v<NN>` tiếp theo |
 | Render rất chậm hoặc hết VRAM khi ComfyUI đang chạy | Hai việc GPU cùng lúc trên 16 GB | Chờ clip xong (`comfy.py interrupt` chỉ khi người dùng đồng ý), một việc GPU một lúc |
+| Khung đầu tiên sau khi đổi look/shader mất 1–2 phút | EEVEE biên dịch shader một lần (có cache cho lần sau) | Bình thường; đo tốc độ từ khung thứ hai |
+| Log Blender: `Warning: edge N - M appears twice, correcting` | Freestyle dựng mesh nét | Vô hại (`blender.py` không in ra) |
+| Pass normal/depth ra xám đều hoặc bị cong sRGB | Blender 5.x áp view transform lên File Output | `scene.py` đặt `save_as_render = False` + `color_management = OVERRIDE`, `Non-Color`; sửa `scene.py` thì giữ hai dòng đó |
+| Hai lần render cùng khung ra byte khác nhau | PNG mang metadata ngày giờ | `scene.py` tắt mọi `use_stamp_*`; đừng bật lại |
 
 ## ComfyUI (`tools/comfy/`, clip MiniMax H3 local, `video_engine: comfy`)
 
@@ -246,8 +250,10 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | `comfy.py run` thoát 2: thiếu file model | Model H3 bị xoá/đổi tên, hoặc `FILM_COMFY_MODELS` trỏ sai | `python tools/comfy/comfy.py models`; sửa `FILM_COMFY_MODELS`; không tải bản khác thay thế khi chưa hỏi người dùng |
 | Lỗi hết VRAM (`CUDA out of memory`, `torch.OutOfMemoryError`) | Clip dài/lớn, Blender hoặc ứng dụng khác đang giữ GPU | Một việc GPU một lúc; thử bản nháp 864×480 hoặc shot ngắn hơn; đóng Comfy Desktop nếu `comfy.py start` cũng đang chạy |
 | `ping` báo torch không thấy GPU / thiếu `sm_120`; chạy chậm như CPU | Custom node cài kèm đã thay torch bằng bản CPU/CUDA cũ | Không cài custom node có `requirements` kéo torch; cài lại torch đúng bản của Comfy Desktop, `comfy.py ping` kiểm lại; ghi vào đây |
-| Ổ C: đầy giữa lúc chạy | Thư mục đầu ra/tạm của ComfyUI nằm trên C: (còn ~16 GB) | Đặt đầu ra/tạm ra ổ khác (`comfy.py start` dùng thư mục dưới `FILM_COMFY_HOME`; cấu hình theo `tools/comfy/README.md`); xoá file tạm cũ của ComfyUI |
-| Dòng ledger `comfy:*` là `pending` mãi, `status.py` LOCAL in `open` | Lần chạy chết giữa chừng (máy tắt, server đóng) | Miễn phí, không có gì để lấy lại: xem `/history` của server nếu còn chạy, rồi tạo clip mới với `_v<NN>` tiếp theo |
+| Ổ C: đầy giữa lúc chạy | Server do app Comfy Desktop mở ghi vào `ComfyUI-Shared\output` trên C: (còn ~16 GB) | Dùng `comfy.py start` (input/output/temp/user vào `out/_comfy/` của lab, `FILM_COMFY_WORK`); xoá clip cũ trong `out/_comfy/output` khi đã có bản ở `clips/` |
+| `comfy.py start`: `ModuleNotFoundError: No module named 'torch'` | Chạy nhầm `standalone-env\python.exe` (trình thông dịch gốc của Desktop, không có torch) | Python đúng là `ComfyUI\.venv\Scripts\python.exe` (`comfy.py` tự chọn); `FILM_COMFY_PYTHON` chỉ khi bản cài khác |
+| Dòng ledger `comfy:*` là `pending` mãi, `status.py` LOCAL in `open` | Lần chạy chết giữa chừng (máy tắt, server đóng) | Miễn phí, không có gì để lấy lại: xem `/history` của server nếu còn chạy (`comfy.py interrupt --prompt-id <task_id>` nếu còn chạy), `ark.py ledger-close --req <id> --ledger L --status abandoned`, rồi tạo clip mới với `_v<NN>` tiếp theo |
+| `comfy.py run` cảnh báo `below the model's trained range (124..362 frames)` | Clip H3 ngắn hơn ~5,2 s | Dùng `--seconds 5` trở lên (124 khung); khung cuối Blender vẫn dùng được, chuyển động chỉ chậm lại |
 | Clip H3 có tiếng (soundscape) lẫn dưới lời bình | H3 sinh âm thanh cùng hình | Compositor tắt tiếng clip (mặc định) và ghi vào `review/sound-audit.md` |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic

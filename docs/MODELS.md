@@ -47,7 +47,7 @@ thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Các
 
 | Model | File (bản đóng gói Comfy-Org/MiniMax-H3) | Workflow | Dùng cho | Đo được |
 |---|---|---|---|---|
-| MiniMax H3 – image/first-last-frame to video | `minimax_h3_fl2va_pruned_int8_convrot` | `h3-i2v` | clip từ khung đầu, tuỳ chọn khung cuối (nối hai khung Blender) | ~9–10 s mỗi bước, 20 bước: ≈ 3,5 phút cho 10 s ở 1344×768 |
+| MiniMax H3 – image/first-last-frame to video | `minimax_h3_fl2va_pruned_int8_convrot` | `h3-i2v` | clip từ khung đầu, tuỳ chọn khung cuối (nối hai khung Blender) | 20 bước ~34 s mỗi bước ở 1344×768: ≈ 12 phút cho clip 5 s (đo 2026-11-25: 713 s); nháp 864×480 ≈ 4 phút |
 | MiniMax H3 – reference to video | `minimax_h3_ref2va_pruned_int8_convrot` | `h3-r2v` | tối đa 9 ảnh tham chiếu + mốc "Add Guide" | chưa đo |
 | Bộ mã hoá chữ | `qwen3vl_32b_minimax_h3_nvfp4_awq` | cả hai | | |
 | VAE hình / âm thanh | `minimax_h3_video_vae_int8_convrot`, `minimax_h3_audio_vae_fp32` | cả hai | clip có âm thanh tự sinh | |

@@ -475,7 +475,7 @@ class StatusBlender(BlenderEpisode):
         self.assertAlmostEqual(loc["h3_min"], 9.5 * st.H3_MIN_PER_S["final"])
         code, out, _ = self.status()
         self.assertRegex(out, r"local GPU \(free; estimate, measure\): Blender 2 shot\(s\) ≈ 11 min · H3 1 clip\(s\) "
-                              r"≈ 3 min at 1344x768 \(draft 864x480 ≈ 2 min\)")
+                              r"≈ 22 min at 1344x768 \(draft 864x480 ≈ 8 min\)")   # 9.5 s x 2.3 / 0.8 min per s
 
     def test_paid_seedance_clip_counts_against_video_seconds(self):
         self.front(engine="seedance")

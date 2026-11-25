@@ -50,9 +50,10 @@ DEFAULT_METHOD = "seedance"
 VIDEO_ENGINES = ("seedance", "comfy")      # EPISODE.md `video_engine:` (method seedance and blender); missing = seedance
 LOCAL_PREFIXES = ("comfy:", "blender:")   # ledger models of the local engines: free, counted against no cap
 # Local GPU time, for FORECAST only. ESTIMATES, not a promise: measure on the owner's PC and fix these numbers.
-#   MiniMax H3 (tools/comfy/, workflow h3-i2v / h3-r2v): measured ~9-10 s per step at 20 steps on the owner's PC
-#   (2026-11-25) = ~3.5 min per 10 s clip at 1344x768; the 864x480 draft is an estimate (~1 min per 5 s).
-H3_MIN_PER_S = {"final": 0.35, "draft": 0.2}
+#   MiniMax H3 (tools/comfy/, workflow h3-i2v / h3-r2v), measured on the owner's PC 2026-11-25: a 5.17 s clip at
+#   1344x768, 20 steps = 713 GPU s (~34 s per step) = 2.3 min per clip second; the 864x480 draft (~10 s per step, from
+#   the owner's Desktop logs) is ~0.8 min per clip second.
+H3_MIN_PER_S = {"final": 2.3, "draft": 0.8}
 #   Blender (tools/blender/blender.py render), per shot: --preview 960x540 12 fps, final 1920x1080 24 fps EEVEE (estimate)
 BLENDER_MIN_PER_SHOT = {"preview": 1.0, "final": 5.0}
 MIN_CLIP_S = 4                     # shortest clip Seedance accepts (docs/MODELS.md): a shorter shot still bills 4 s

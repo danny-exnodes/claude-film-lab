@@ -56,7 +56,11 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
   hoặc server của ứng dụng Comfy Desktop qua `FILM_COMFY_URL` (localhost). **Không bao giờ dùng node API trả tiền** (bản
   cài có node MiniMax trả tiền trong `comfy_api_nodes/`); `comfy.py run` từ chối workflow có node ngoài danh sách cho phép.
 - Lần chạy local vẫn ghi ledger của tập (`--ledger`, `FILM_AGENT` trong agent); dòng `comfy:*`/`blender:*` không tính trần.
-- Một việc GPU một lúc (16 GB VRAM). Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:.
+- Một việc GPU một lúc (16 GB VRAM). Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:
+  (`comfy.py start` đặt input/output/temp/user của ComfyUI vào `out/_comfy/` của lab, đổi bằng `FILM_COMFY_WORK`).
+- **Không tải app hay model nào khi chưa hỏi.** Trước hết tìm cái đã cài trên máy (Blender ở `C:\Program Files\Blender
+  Foundation\`, Comfy Desktop và model ở `%LOCALAPPDATA%\Comfy-Desktop\`), báo chủ lab, nêu dung lượng, chỉ tải khi được
+  đồng ý. `comfy.py install` không bao giờ tải model, chỉ in cái còn thiếu.
 
 ## Khởi động phiên
 Hook `.claude/hooks/session-start.sh` tự chạy: cài font CJK + `rembg`, trỏ `/opt/byteplus/ark.py` vào

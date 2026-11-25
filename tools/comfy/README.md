@@ -32,8 +32,11 @@ python tools/comfy/comfy.py workflows                  # các workflow, tham s�
 
 `start` chạy chính môi trường Python của Desktop, **không đụng tới cài đặt của Desktop**:
 `<python> -s <home>\ComfyUI\main.py --listen 127.0.0.1 --port 8188 --disable-auto-launch --offline
---extra-model-paths-config <yaml instance của Desktop> --input-directory/--output-directory <ComfyUI-Shared\input|output>`,
-chạy tách rời, log vào `<FILM_COMFY_HOME>\film-lab-server.log`, chờ tối đa `--wait` giây. `--offline` chặn các
+--extra-model-paths-config <yaml instance của Desktop> --input/--output/--temp/--user-directory <FILM_COMFY_WORK>\...`,
+chạy tách rời, log vào `<FILM_COMFY_WORK>\server.log`, chờ tối đa `--wait` giây. `FILM_COMFY_WORK` mặc định là
+`out\_comfy\` của lab (git bỏ qua, trên ổ của lab): ảnh tải lên, clip, file tạm của lab không rơi vào thư mục
+`ComfyUI-Shared\input|output` của Desktop (ổ C: ít chỗ, và đó là file riêng của chủ lab). Model vẫn đọc từ thư mục
+model chung của Desktop. `--offline` chặn các
 **node API trả phí** (partner nodes); nếu bản ComfyUI không có cờ đó thì `start` từ chối. Nếu đã có server trả lời ở
 `FILM_COMFY_URL` (ví dụ app Desktop đang mở) thì `start` báo và không làm gì. `start --dry-run` chỉ in lệnh.
 
@@ -61,7 +64,9 @@ Luật của H3 (comfy.py tự áp dụng):
 - Checkpoint đã chưng cất CFG: `BasicGuider` (cfg 1), **không có prompt âm** (`--negative` bị từ chối).
 - 20 bước mặc định. `--turbo` bật LoRA Lightning (h3-i2v 6 bước, h3-r2v 4 bước): **chỉ cho bản nháp**, không dùng cho
   cảnh có mặt người hay bản chất lượng (in cảnh báo).
-- Tốc độ đo trên máy chủ dự án: ~9–10 s mỗi bước ở 1344×768, 20 bước; clip 10 s ≈ 205–220 s.
+- Tốc độ đo trên máy chủ dự án (2026-11-25): clip 5,17 s (124 khung) 1344×768, 20 bước = 713 s GPU, ~34 s mỗi bước
+  (model 20 GB chạy từ RAM vì VRAM 16 GB); bản nháp 864×480 ~10 s mỗi bước (log Desktop) ≈ 4 phút cho 5 s.
+  `run` in ước lượng theo số này.
 
 ### Prompt
 

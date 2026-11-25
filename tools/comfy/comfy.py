@@ -44,7 +44,7 @@ prompt, sizes, frames, model files, ComfyUI/torch versions, GPU seconds).
 Env: FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_HOME (Windows default
 %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI: Desktop layout ComfyUI\\.venv\\Scripts\\python.exe + ComfyUI\\main.py;
 the portable layout python_embeded\\python.exe + ComfyUI\\main.py works too), FILM_COMFY_MODELS (Windows default
-%LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\models, else <ComfyUI>/models), FILM_COMFY_PYTHON (python for `start`),
+%LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Shared\\models, else <ComfyUI>/models), FILM_COMFY_PYTHON (python for `start`), FILM_COMFY_WORK (start: input/output/temp/user + log, default <lab>/out/_comfy),
 FILM_COMFY_MODEL_PATHS (extra_model_paths yaml for `start`; default: the Desktop's instance yaml), FILM_LEDGER,
 FILM_AGENT. No key is needed or read; nothing but FILM_COMFY_URL is contacted (except `install --portable`).
 """
@@ -66,7 +66,11 @@ POLL_ERRORS = 5           # consecutive failed polls before the job is given up 
 HTTP_TIMEOUT = 30
 UPLOAD_TIMEOUT = 120
 START_POLL = 2
-SECONDS_PER_STEP = {"768p": 10.0, "480p": 4.0}   # estimate on the owner's RTX 5070 Ti (768p measured ~9-10 s); measure
+# GPU seconds per sampling step for a 124-frame (5.2 s) clip on the owner's RTX 5070 Ti, plus a fixed setup/decode
+# overhead. 768p measured 2026-11-25: 20 steps x ~34 s + ~33 s = 713 s (the 20 GB model streams from RAM: 16 GB VRAM).
+# 480p (~10 s/step) comes from the owner's own Desktop logs. Step time is scaled linearly by the frame count.
+SECONDS_PER_STEP = {"768p": 34.0, "480p": 10.0}
+SETUP_SECONDS = 35.0
 # Every node class a graph sent by `run` may contain: exactly the classes of workflows/h3-*.json plus the nodes `run`
 # adds itself (LoadImage per reference, MiniMaxH3AddGuide per --guide). ComfyUI's paid API/partner nodes (e.g. the
 # Minimax*Node classes of comfy_api_nodes) are not in it, so they can never be queued from here.
@@ -145,6 +149,14 @@ def layout(home):
             break
     py = os.environ.get("FILM_COMFY_PYTHON") or py
     return {"home": home, "root": root, "python": py, "kind": kind}
+
+
+def comfy_work():
+    """FILM_COMFY_WORK, else <lab>/out/_comfy: where `start` puts ComfyUI's input/output/temp/user folders and its log."""
+    env = os.environ.get("FILM_COMFY_WORK")
+    if env:
+        return os.path.abspath(env)
+    return os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "out", "_comfy")
 
 
 def models_dir(lay=None):
@@ -789,7 +801,7 @@ def run(a):
     for idx, p in plan["guides"]:
         print(f"guide frame {idx} ({idx / plan['fps']:.2f} s): {p} -> {w}x{h} lanczos")
     print("models: " + ", ".join(f for *_, f in models))
-    est = plan["steps"] * SECONDS_PER_STEP.get(plan["res"], 10.0) * plan["frames"] / 241
+    est = plan["steps"] * SECONDS_PER_STEP.get(plan["res"], 34.0) * plan["frames"] / 124 + SETUP_SECONDS
     print(f"estimate ~{est / 60:.1f} min of GPU (estimate; measure)")
     mdir = models_dir(layout(comfy_home()))
     if a.dry_run:
@@ -1019,18 +1031,20 @@ def start(a):
     yaml_paths = model_paths_yaml()
     if yaml_paths and os.path.isfile(yaml_paths):
         cmd += ["--extra-model-paths-config", yaml_paths]
-    mdir = models_dir(lay)
-    shared = os.path.dirname(mdir) if mdir else None
-    for kind in ("input", "output"):
-        d = os.path.join(shared, kind) if shared and os.path.isdir(os.path.join(shared, kind)) else None
-        if d:
-            cmd += [f"--{kind}-directory", d]
-    log = os.path.join(lay["home"], "film-lab-server.log")
+    # The lab's uploads, outputs, temp files and UI state go to its own work folder (default out/_comfy in the lab,
+    # git-ignored), never into Comfy Desktop's shared input/output folders: those sit on the owner's small C: drive
+    # and hold the owner's own files. Models still come from the Desktop's shared models folder.
+    work = comfy_work()
+    for kind in ("input", "output", "temp", "user"):
+        cmd += [f"--{kind}-directory", os.path.join(work, kind)]
+    log = os.path.join(work, "server.log")
     print("command: " + subprocess.list2cmdline(cmd))
     print(f"log: {log}")
     if a.dry_run:
         print("dry-run: not started")
         return 0
+    for kind in ("input", "output", "temp", "user"):
+        os.makedirs(os.path.join(work, kind), exist_ok=True)
     kw = {"stdin": subprocess.DEVNULL, "cwd": lay["root"]}
     if os.name == "nt":
         kw["creationflags"] = 0x00000008 | 0x00000200      # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP

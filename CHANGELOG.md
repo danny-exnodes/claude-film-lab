@@ -4,6 +4,32 @@
 
 ## [Unreleased]
 
+### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
+Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với
+MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026-11-25-local-engines-design.md`.
+
+- **`tools/blender/`**: render 3D chạy nền bằng Blender 5.3 từ `shot3d.json` v1 (asset thủ tục: núi, đá, thông, nước,
+  đất, linh vật Giọt; hoặc file `.glb`; 9 chuyển động máy như `tools/toon/project.js`), 4 look `grey-layout`, `clay`,
+  `toon-ink`, `ink-wash`; pass depth (16-bit, dải cố định), normal, line, mask; `render.json`; cùng khung render hai lần
+  ra cùng byte. CLI `blender.py find|check|render|still|turntable|keyframes|lookbook`; `keyframes` cho khung đầu/cuối
+  1344×768 để làm clip H3. EEVEE ~2 s/khung ở 1080p cho look mực, < 1 s cho look phẳng.
+- **`tools/comfy/comfy.py`**: clip AI tại chỗ qua ComfyUI + **MiniMax H3**: `h3-i2v` (khung đầu, tuỳ chọn khung cuối),
+  `h3-r2v` (tối đa 9 ảnh tham chiếu + neo ảnh theo giây); 24 fps, lưới 17k+5 khung, 1344×768 (nháp 864×480), khung đầu
+  cắt 7:4 + lanczos trước khi gửi, không negative, 20 bước (`--turbo` chỉ cho nháp); clip có tiếng. `start` chạy Python
+  của Comfy Desktop không giao diện, `--offline`; input/output/temp vào `out/_comfy/` (không đụng thư mục của Desktop
+  trên ổ C:); `run` từ chối node ngoài danh sách cho phép (node API MiniMax trả phí không bao giờ qua), ghi ledger
+  `comfy:<workflow>` + file `.json` cạnh clip (seed, hash graph, model). `ping|models|workflows|install|interrupt`;
+  `install` không bao giờ tải model. Đo trên máy chủ lab: clip 5,17 s 1344×768, 20 bước = 713 s GPU (~12 phút).
+- **`tools/ark.py`**: khoá ledger chạy được trên Windows (msvcrt); dòng `comfy:*`/`blender:*` không trừ trần nào; trạng
+  thái cuối mới `interrupted`.
+- **Phương pháp thứ tư `method: blender`** và khoá **`video_engine: seedance | comfy`** trong `EPISODE.md`:
+  `check_episode.py` (style `engine: blender`, mã lớp `A-<asset>`, `shots3d/s<NN>.json` kiểm bằng `tools/blender/spec.py`,
+  `renders3d/`, `ASSETS.md`; tập `blender` có `ai_motion` phải ghi rõ `video_engine`), `status.py` (dự báo phút GPU,
+  mục LOCAL), `doctor.sh` (dòng `blender`, `comfy`; `n/a` ở cloud).
+- Style `thuy-mac-blender`, `toon-3d-blender` (draft); agent mới `film-3d-artist`; mẫu `shot3d.json`, `ASSETS.md`;
+  tài liệu `blender-method.md`, `local-video.md`, WORKFLOW, CONVENTIONS, MODELS, RUNBOOK, CLAUDE.md (quy tắc: engine local
+  chỉ ở phiên local; không tải app/model khi chưa hỏi).
+
 ## [1.3.0] - 2026-11-25
 
 ### Đợt sửa issue mở (#45, 2026-11-25)

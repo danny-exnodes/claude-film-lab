@@ -50,8 +50,9 @@ Thông số H3: 24 hình/s; số khung theo lưới `17k + 5`; bản dùng 1344�
 về 7:4 (lanczos) trong `comfy.py`, nên đặt chủ thể ở giữa (khung 16:9 mất ~0,8 % mỗi bên trái/phải; khung
 Blender cho clip nên render đúng 1344×768). Không có negative prompt (cfg 1); mặc định 20 bước. LoRA Turbo/Lightning
 **chỉ cho bản nháp**, không bao giờ cho bản dùng hay shot có mặt người/nhân vật cận.
-Thời gian (đo trên máy chủ lab, ~9–10 s mỗi bước ở 20 bước): ≈ 3,5 phút cho clip 10 s 1344×768 (≈ 2 phút cho 5 s); bản
-nháp 864×480 ≈ 1 phút cho 5 s (ước lượng). `status.py` FORECAST cộng phút GPU từ các hằng số này (ghi rõ "estimate").
+Thời gian (đo trên máy chủ lab 2026-11-25): clip 5,17 s 1344×768, 20 bước = 713 s GPU (~34 s mỗi bước: model 20 GB
+chạy từ RAM vì VRAM 16 GB) ≈ **12 phút cho 5 s**; bản nháp 864×480 ~10 s mỗi bước ≈ 4 phút cho 5 s (theo log Desktop
+của chủ lab). Một tập 20 clip bản cuối ≈ 4 giờ GPU: duyệt bằng bản nháp trước. `status.py` FORECAST cộng phút GPU từ các hằng số này (ghi rõ "estimate").
 
 ## 4. Prompt (tiếng Anh, theo trường)
 

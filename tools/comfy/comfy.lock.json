@@ -1,0 +1,75 @@
+{
+  "comfyui": {
+    "version": "v0.46.0",
+    "asset": "ComfyUI_windows_portable_nvidia.7z",
+    "url": "https://github.com/Comfy-Org/ComfyUI/releases/download/v0.46.0/ComfyUI_windows_portable_nvidia.7z",
+    "size": 2085169944,
+    "sha256": "6a5255c7ec01fdc54bdbd8e4507073cf6acda2fbeea74ae1829a50681af5fac6"
+  },
+  "custom_nodes": [
+    {
+      "name": "ComfyUI-GGUF",
+      "repo": "https://github.com/city96/ComfyUI-GGUF",
+      "commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
+      "pip": [
+        "gguf>=0.13.0"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "set": "wan22-i2v",
+      "folder": "diffusion_models",
+      "file": "Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf",
+      "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/HighNoise/Wan2.2-I2V-A14B-HighNoise-Q5_K_M.gguf",
+      "size": 10792055296,
+      "sha256": "163e9e5ae7ff83a4598d55242c767384be8909749dc07240d388a24838e8bac6",
+      "license": "Apache-2.0"
+    },
+    {
+      "set": "wan22-i2v",
+      "folder": "diffusion_models",
+      "file": "Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf",
+      "url": "https://huggingface.co/QuantStack/Wan2.2-I2V-A14B-GGUF/resolve/main/LowNoise/Wan2.2-I2V-A14B-LowNoise-Q5_K_M.gguf",
+      "size": 10792055296,
+      "sha256": "c5affcba15576959fa6d63c18261275b6407c3edd5ad3d8ab1c420e96f9d05d0",
+      "license": "Apache-2.0"
+    },
+    {
+      "set": "wan22-i2v",
+      "folder": "text_encoders",
+      "file": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "size": 6735906897,
+      "sha256": "c3355d30191f1f066b26d93fba017ae9809dce6c627dda5f6a66eaa651204f68",
+      "license": "Apache-2.0"
+    },
+    {
+      "set": "wan22-i2v",
+      "folder": "vae",
+      "file": "wan_2.1_vae.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+      "size": 253815318,
+      "sha256": "2fc39d31359a4b0a64f55876d8ff7fa8d780956ae2cb13463b0223e15148976b",
+      "license": "Apache-2.0"
+    },
+    {
+      "set": "wan22-i2v",
+      "folder": "loras",
+      "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors",
+      "size": 1226977424,
+      "sha256": "d176c808d6fc461999b68e321efcb7501b20b8c3797523ed0df14f7d1deff11e",
+      "license": "Apache-2.0"
+    },
+    {
+      "set": "wan22-i2v",
+      "folder": "loras",
+      "file": "wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors",
+      "size": 1226977424,
+      "sha256": "024f21de095bc8fad9809ded3e9e49a2e170dcf27075da8145ba7d60d8aab7f9",
+      "license": "Apache-2.0"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+# three.js pinned for the TOON 3D looks (method: code). tools/toon/install_three.sh installs and verifies it;
+# tools/doctor.sh line `three`. Change the version on purpose only: docs/RUNBOOK.md ("three.js").
+version 0.186.1
+sha256 build/three.module.js 9052042d676cb0fdc1ddfefe193053f34b7ac0513a616fdac4535d49987812ea
+sha256 build/three.core.js 9edde002b066a9a05676a6127f67735b62baf399bdea529f2f7e31657da769e6

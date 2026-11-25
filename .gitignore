@@ -5,6 +5,8 @@ __pycache__/
 *.zip
 .env
 *.lock
+# the pinned three.js hashes are part of the core (tools/toon/install_three.sh)
+!tools/toon/three.lock
 
 # Bản làm việc của dự án phim: nguồn gốc nằm trên Google Drive (docs/CONVENTIONS.md §11), không commit
 /projects/

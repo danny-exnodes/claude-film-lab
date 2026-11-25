@@ -7,6 +7,7 @@ set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LOCK="$HERE/three.lock"
 DIR="${FILM_THREE_DIR:-/opt/film-lab/vendor/three}"
+[ -f "$LOCK" ] && grep -q '^sha256 ' "$LOCK" || { echo "three: $LOCK missing or has no sha256 line"; exit 1; }
 VER=$(awk '$1 == "version" {print $2}' "$LOCK")
 verify() {
   local ok=0 f want have

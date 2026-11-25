@@ -6,9 +6,11 @@
 //   post: ['riso'] | [{ id: 'ascii', cols: 120 }],// post passes, in order (optional)
 //   hold: 1,                                      // 1 = 24 drawings/s, 2 = on twos, 3 = stop motion
 //   seed: 7,
-//   cast: [{ character: <character.json>, timeline: <motion.js timeline> }],
-//   camera: <project.js camera spec>, env: <project.js props spec>, pal: { ... look colours }, opts: { ... look options }
-// }
+//   cast: [{ character: <character.json>, timeline: <motion.js timeline> }
+//          | { creature: <creature spec, creature.js>, timeline: <creature timeline> }],
+//   camera: <project.js camera spec>, env: <project.js props spec>, pal: { ... look colours }, opts: { ... look options },
+//   write: [{ text: '山海', t: [a, b], x: 0.86, y: 0.12, size: 0.09, vertical: true, color: '#1A1714', font }]
+// }                                               // write: brush-write, glyphs appear stroke-down one after another
 // Pure: the frame depends only on (SCENE, t). Character and props are memoised by value.
 (function (root) {
   'use strict';
@@ -25,7 +27,9 @@
     'lowpoly-90s': { engine: 'three', hold: 1 },
     'cardboard': { engine: 'three', hold: 2 },
     'popup-paper': { engine: 'three', hold: 1 },
+    'ink-wash-3d': { engine: 'three', hold: 1, creatures: true },
   };
+  for (const id of ['clay-3d', 'lowpoly-90s']) T.LOOKS[id].creatures = true;   // looks that draw creature.js beasts
   T.POSTS = ['riso', 'pixel-16', 'ascii'];
   T.THREE_URL = T.THREE_URL || 'file:///opt/film-lab/vendor/three/build/three.module.js';
 
@@ -59,16 +63,29 @@
     const fps = scene.fps || 24;
     const hold = Math.max(1, Math.round(scene.hold || look.hold || 1));
     const tp = hold > 1 ? Math.floor(t * fps / hold + 1e-6) * hold / fps : t;
-    const cast = (scene.cast || []).map((c, i) => {
+    const cast = [], beasts = [];
+    let follow = null;
+    (scene.cast || []).forEach((c, i) => {
+      if (c.creature) {                    // a creature.js beast: { creature: <spec>, timeline }
+        const cr = once('cr' + JSON.stringify(c.creature), () => T.creature(c.creature));
+        const tl = c.timeline || {}, s = seed + i * 101;
+        const J = T.creatureJoints(cr, T.creaturePose(cr, tl, tp, s));
+        beasts.push({ J, cr, tl, seed: s });
+        follow = follow || J.rootPos;
+        return;
+      }
       const ch = once('ch' + JSON.stringify(c.character || {}), () => T.character(c.character));
       const pose = T.pose(ch, c.timeline || {}, tp, seed + i * 101);
-      return T.joints(ch, pose);
+      const J = T.joints(ch, pose);
+      cast.push(J);
+      follow = follow || J.rootPos;
     });
-    const cam = T.camera(Object.assign({ seed }, scene.camera), tp, cast[0] ? cast[0].rootPos : null);
+    if (beasts.length && !look.creatures) T.warn(`look '${scene.look}' does not draw creatures (ink-wash-3d, clay-3d, lowpoly-90s do)`);
+    const cam = T.camera(Object.assign({ seed }, scene.camera), tp, follow);
     const P = T.projector(cam, W, H);
     const chars = cast.map((J) => ({ J, items: T.drawList(J, P, { hose: !!look.hose }) }));
     const props = once('pr' + seed + JSON.stringify(scene.env || {}), () => T.props(scene.env, seed));
-    return { t, tp, W, H, P, chars, props, seed, pal: scene.pal || {}, opts: scene.opts || {}, envKey: scene.env || null,
+    return { t, tp, W, H, P, chars, beasts, props, seed, pal: scene.pal || {}, opts: scene.opts || {}, envKey: scene.env || null,
              look: scene.look };
   };
 
@@ -85,8 +102,61 @@
       const fn = T.post[pid];
       if (fn) fn(g, W, H, fs, typeof p === 'string' ? {} : p);
     }
+    for (const w of scene.write || []) T.brushWrite(g, W, H, w, t, fs.seed);
     g.restore();
     return fs;
+  };
+
+  // ------------------------------------------------------------------ brush-write
+  // How far each glyph of a write item is written at t (0..1, in order, each the same share of [a, b]).
+  T.writeProgress = (w, t) => {
+    const glyphs = Array.from(w.text || '');
+    const [a, b] = w.t || [0, 1];
+    const d = Math.max(1e-3, b - a) / Math.max(1, glyphs.length);
+    return glyphs.map((_, i) => C.clamp((t - a - i * d) / d));
+  };
+  // The glyphs are set in the font, then shown through a ragged edge that moves down each one like a brush, with a
+  // soft bleed of the same ink under them. x, y: the first glyph's centre (shares of W, H); size: share of H.
+  T.brushWrite = (g, W, H, w, t, seed) => {
+    const prog = T.writeProgress(w, t);
+    if (!prog.some((p) => p > 0)) return;
+    const glyphs = Array.from(w.text), s = Math.round((w.size || 0.09) * H), vertical = w.vertical !== false;
+    const font = w.font || "'Noto Serif CJK TC', 'Noto Serif CJK SC', 'Noto Serif CJK JP', serif";
+    const color = w.color || '#1A1714';
+    T.writeCache = T.writeCache || new Map();
+    glyphs.forEach((ch, i) => {
+      const p = prog[i];
+      if (p <= 0) return;
+      const key = `${ch}|${s}|${font}|${color}`;
+      let c = T.writeCache.get(key);
+      if (!c) {
+        if (T.writeCache.size > 256) T.writeCache.clear();
+        c = document.createElement('canvas'); c.width = c.height = Math.ceil(s * 1.3);
+        const q = c.getContext('2d');
+        q.fillStyle = color; q.textAlign = 'center'; q.textBaseline = 'middle';
+        q.font = `700 ${s}px ${font}`;
+        q.fillText(ch, c.width / 2, c.height / 2);
+        T.writeCache.set(key, c);
+      }
+      const cx = (w.x == null ? 0.86 : w.x) * W + (vertical ? 0 : i * s * 1.05);
+      const cy = (w.y == null ? 0.14 : w.y) * H + (vertical ? i * s * 1.05 : 0);
+      const x0 = cx - c.width / 2, y0 = cy - c.height / 2;
+      g.save();
+      if (p < 1) {                                   // the wet front: a ragged line moving down the glyph
+        const cut = y0 + p * c.height;
+        g.beginPath(); g.moveTo(x0, y0);
+        for (let k = 0; k <= 12; k++) {
+          const x = x0 + c.width * k / 12;
+          g.lineTo(x, cut + (C.noise(seed + i * 13, k * 0.9 + p * 3, 17) - 0.5) * s * 0.18);
+        }
+        g.lineTo(x0 + c.width, y0); g.closePath(); g.clip();
+      }
+      g.globalAlpha = 0.35; g.filter = `blur(${Math.max(1, s * 0.025).toFixed(1)}px)`;
+      g.drawImage(c, x0, y0);
+      g.filter = 'none'; g.globalAlpha = 0.92;
+      g.drawImage(c, x0, y0);
+      g.restore();
+    });
   };
 
   // warnings for READY's qc list (like COMPOSE.report)

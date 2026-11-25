@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Free previews of the TOON kit (characters drawn in code, `method: code`): stills, turntables, clips, lookbook.
 
-  python3 tools/toon/toon.py still <style|look> [--character C.json] [--t 1.5] [--size 1920x1080] --out still.png
-  python3 tools/toon/toon.py turntable [--character C.json] [--style hoat-hinh-phang] --out turntable.png
-  python3 tools/toon/toon.py clip <style|look> [--character C.json] [--seconds 4.5] [--draft] --out clip.mp4
+  python3 tools/toon/toon.py still <style|look> [--character C.json | --creature P] [--t 1.5] [--size 1920x1080] --out still.png
+  python3 tools/toon/toon.py turntable [--character C.json | --creature P] [--style hoat-hinh-phang] --out turntable.png
+  python3 tools/toon/toon.py clip <style|look> [--character C.json | --creature P] [--seconds 4.5] [--draft] --out clip.mp4
   python3 tools/toon/toon.py lookbook [--out out/_lab/lookbook] [--seconds 4.5] [--draft] [--only 1,6,10] [--size WxH]
+                                     [--creature P]
   python3 tools/toon/toon.py reel SPEC.json --out reel.mp4 [--draft]
 
 <style> is a style pack with `engine: code` (styles/<id>/style.yaml, its render block); <look> is a look id of
 tools/toon/looks.json (a geometry look, optionally +post: `flat-toon+riso`). The default character is the lab mascot
-tools/toon/demo/giot.json. Rendering runs tools/toon/page.html in headless Chromium (tools/toon/shoot.cjs, Playwright,
+tools/toon/demo/giot.json. --creature takes a beast preset of tools/toon/demo/creatures/ (mac-loc, van-dieu,
+luc-tuc-ngu) or a creature spec .json (tools/toon/creature.js); it plays the preset's demo timeline and camera, and only
+looks with creatures: true in looks.json draw it (ink-wash-3d, clay-3d, lowpoly-90s; the turntable default style is then
+thuy-mac-3d, the lookbook keeps only those styles). Rendering runs tools/toon/page.html in headless Chromium (tools/toon/shoot.cjs, Playwright,
 software WebGL); clips and the lookbook are encoded with ffmpeg (H.264, yuv420p, no audio). No API call, no cost.
 
 Exit codes: 0 ok · 1 render failed · 2 bad arguments.
@@ -27,12 +31,14 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 STYLES = REPO / "styles"
 DEMO = HERE / "demo" / "giot.json"
+CREATURES = HERE / "demo" / "creatures"
 LOOKS = json.loads((HERE / "looks.json").read_text(encoding="utf-8"))
 THREE_DEFAULT = "/opt/film-lab/vendor/three/build/three.module.js"
 
-# The lookbook: the ten code styles in the order of the style index (issue #38), then the pop-up book (11)
+# The lookbook: the ten code styles in the order of the style index (issue #38), then the pop-up book (11) and the
+# ink wash 3D of the creatures (12, issue #35)
 LOOKBOOK = ["dat-nan-3d", "hoat-hinh-phang", "ban-ve-ky-thuat", "in-riso", "pixel-16bit",
-            "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up"]
+            "bong-muc", "ong-cao-su", "chu-ascii", "bia-cat-dan", "low-poly-90", "sach-pop-up", "thuy-mac-3d"]
 
 # One action for every style: walk in, turn to the camera, wave, turn and walk out.
 ACTION = {
@@ -89,11 +95,20 @@ def style_render(name):
     return r, info["name"], info["name_vi"]
 
 
-def scene_for(render, character, timeline=None, camera=None, seed=7):
+def scene_for(render, character, timeline=None, camera=None, seed=7, creature=None):
+    """One segment's scene. With a creature (a spec dict) the cast is that beast, playing its demo timeline in front
+    of its demo camera unless timeline / camera are given; its demo env (water...) is merged over the style's."""
     post = [p if isinstance(p, (str, dict)) else str(p) for p in (render.get("post") or [])]
+    env = dict(render.get("env") or {})
+    if creature is not None:
+        demo = creature.get("demo") or {}
+        env.update(demo.get("env") or {})
+        cast = [{"creature": creature, "timeline": timeline or demo.get("timeline") or {}}]
+        camera = camera or demo.get("camera") or CREATURE_CAMERA
+    else:
+        cast = [{"character": character, "timeline": timeline or ACTION}]
     return {"look": render["look"], "post": post, "hold": render.get("hold"), "seed": render.get("seed", seed),
-            "cast": [{"character": character, "timeline": timeline or ACTION}],
-            "camera": camera or render.get("camera") or CAMERA, "env": render.get("env") or {},
+            "cast": cast, "camera": camera or render.get("camera") or CAMERA, "env": env,
             "pal": render.get("palette") or {}, "opts": render.get("opts") or {}}
 
 
@@ -105,9 +120,48 @@ def character_of(path):
         fail(f"character {p}: {e}", 2)
 
 
+CREATURE_CAMERA = {"pos": [0, 1.1, 5.2], "target": [0, 0.7, 0], "fov": 34}
+
+
+def creature_presets():
+    return sorted(p.stem for p in CREATURES.glob("*.json"))
+
+
+def creature_of(name):
+    """--creature: a preset id of tools/toon/demo/creatures/ or a path to a creature spec .json -> the spec dict."""
+    p = Path(name)
+    if not (p.suffix == ".json" and p.is_file()):
+        p = CREATURES / f"{name}.json"
+        if not p.is_file():
+            fail(f"--creature {name!r}: neither a spec .json nor a preset ({', '.join(creature_presets())})", 2)
+    try:
+        spec = json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        fail(f"creature {p}: {e}", 2)
+    if not isinstance(spec, dict):
+        fail(f"creature {p}: must be a JSON object", 2)
+    return spec
+
+
+def draws_creatures(render):
+    return bool(LOOKS["looks"].get(render.get("look"), {}).get("creatures"))
+
+
+def need_creature_look(render, name):
+    if not draws_creatures(render):
+        ok = ", ".join(k for k, v in LOOKS["looks"].items() if v.get("creatures"))
+        fail(f"{name}: look {render.get('look')!r} does not draw creatures (looks with creatures: {ok}; style thuy-mac-3d)", 2)
+
+
+def demo_seconds(creature, default):
+    return float((creature.get("demo") or {}).get("seconds") or default) if creature else default
+
+
 def three_url():
     p = os.environ.get("FILM_THREE", THREE_DEFAULT)
-    return "file://" + p if not p.startswith("file://") else p
+    if p.startswith("file://"):
+        return p
+    return "file:///" + p.replace("\\", "/") if len(p) > 1 and p[1] == ":" else "file://" + p   # C:/... (a Windows preview)
 
 
 def shoot(spec, out_dir, frames="all", jpg=False):
@@ -168,7 +222,11 @@ def cmd_still(a):
     out = Path(a.out)
     guard_out(out, a.overwrite)
     render, name, vi = style_render(a.style)
-    spec = {"w": w, "h": h, "fps": 24, "segments": [{"dur": max(a.t + 0.1, 0.5), "scene": scene_for(render, character_of(a.character))}]}
+    cr = creature_of(a.creature) if a.creature else None
+    if cr:
+        need_creature_look(render, a.style)
+    scene = scene_for(render, None if cr else character_of(a.character), creature=cr)
+    spec = {"w": w, "h": h, "fps": 24, "segments": [{"dur": max(a.t + 0.1, 0.5), "scene": scene}]}
     with tempfile.TemporaryDirectory() as d:
         info = shoot(spec, d, frames=str(int(round(a.t * 24))))
         src = next(Path(d).glob("*.png"))
@@ -181,11 +239,21 @@ def cmd_turntable(a):
     w, h = size_of(a.size)
     out = Path(a.out)
     guard_out(out, a.overwrite)
-    render, name, vi = style_render(a.style)
-    ch = character_of(a.character)
-    cam = {"pos": [0, 0.62, 3.0], "target": [0, 0.5, 0], "fov": 30}
-    segs = [{"dur": 0.5, "scene": scene_for(render, ch, {"start": {"at": [0, 0], "face": f}, "blink": False}, cam)}
-            for f in (0, 0.7854, 1.5708, 3.1416)]
+    cr = creature_of(a.creature) if a.creature else None
+    style = a.style or ("thuy-mac-3d" if cr else "hoat-hinh-phang")
+    render, name, vi = style_render(style)
+    if cr:
+        need_creature_look(render, style)
+        ch = cr
+        cam = (cr.get("demo") or {}).get("turntable") or CREATURE_CAMERA
+        segs = [{"dur": 0.5, "scene": scene_for(render, None, {"start": {"at": [0, 0], "face": f}, "blink": False}, cam,
+                                                creature=dict(cr, demo={}))}
+                for f in (0, 0.7854, 1.5708, 3.1416)]
+    else:
+        ch = character_of(a.character)
+        cam = {"pos": [0, 0.62, 3.0], "target": [0, 0.5, 0], "fov": 30}
+        segs = [{"dur": 0.5, "scene": scene_for(render, ch, {"start": {"at": [0, 0], "face": f}, "blink": False}, cam)}
+                for f in (0, 0.7854, 1.5708, 3.1416)]
     spec = {"w": w, "h": h, "fps": 24, "segments": segs}
     with tempfile.TemporaryDirectory() as d:
         info = shoot(spec, d, frames=",".join(str(i * 12) for i in range(4)))
@@ -198,11 +266,16 @@ def cmd_clip(a):
     out = Path(a.out)
     guard_out(out, a.overwrite)
     render, name, vi = style_render(a.style)
-    spec = {"w": w, "h": h, "fps": 24, "segments": [{"dur": a.seconds, "scene": scene_for(render, character_of(a.character))}]}
+    cr = creature_of(a.creature) if a.creature else None
+    if cr:
+        need_creature_look(render, a.style)
+    seconds = a.seconds if a.seconds else demo_seconds(cr, 4.5)
+    scene = scene_for(render, None if cr else character_of(a.character), creature=cr)
+    spec = {"w": w, "h": h, "fps": 24, "segments": [{"dur": seconds, "scene": scene}]}
     with tempfile.TemporaryDirectory() as d:
         info = shoot(spec, d, jpg=True)
         encode(d, 24, out, "jpg")
-    print(f"clip {name} ({vi}) {a.seconds}s {w}x{h} -> {out} · {info['ms_per_frame']} ms/frame")
+    print(f"clip {name} ({vi}) {seconds}s {w}x{h} -> {out} · {info['ms_per_frame']} ms/frame")
 
 
 def cmd_reel(a):
@@ -231,11 +304,20 @@ def cmd_lookbook(a):
             assert all(1 <= n <= len(ids) for n in picks)
         except Exception:
             fail(f"--only takes numbers 1-{len(ids)} (got {a.only!r})", 2)
-    ch = character_of(a.character)
-    segs = []
+    cr = creature_of(a.creature) if a.creature else None
+    ch = None if cr else character_of(a.character)
+    seconds = a.seconds if a.seconds else demo_seconds(cr, 4.5)
+    segs, skipped = [], []
     for n in picks:
         render, name, vi = style_render(ids[n - 1])
-        segs.append({"dur": a.seconds, "scene": scene_for(render, ch), "label": {"n": n, "name": name, "vi": vi}})
+        if cr and not draws_creatures(render):
+            skipped.append(str(n))
+            continue
+        segs.append({"dur": seconds, "scene": scene_for(render, ch, creature=cr), "label": {"n": n, "name": name, "vi": vi}})
+    if skipped:
+        print(f"lookbook: --creature: skipped style(s) {','.join(skipped)} (their look does not draw creatures)")
+    if not segs:
+        fail("lookbook: no style left to show", 2)
     spec = {"w": w, "h": h, "fps": 24, "segments": segs}
     frames = out / "frames"
     if frames.exists():
@@ -244,11 +326,11 @@ def cmd_lookbook(a):
     info = shoot(spec, frames, jpg=True)
     video = out / ("lookbook-draft.mp4" if a.draft else "lookbook.mp4")
     encode(frames, 24, video, "jpg")
-    per = int(round(a.seconds * 24))
+    per = int(round(seconds * 24))
     mids = [frames / f"{i * per + int(per * 0.55):06d}.jpg" for i in range(len(segs))]
     contact_sheet(mids, 5 if len(mids) > 4 else len(mids), out / "sheet.png", cell_w=640)
     shutil.rmtree(frames)
-    print(f"lookbook {len(segs)} style(s) x {a.seconds}s {w}x{h} -> {video}, {out / 'sheet.png'} · {info['ms_per_frame']} ms/frame")
+    print(f"lookbook {len(segs)} style(s) x {seconds}s {w}x{h} -> {video}, {out / 'sheet.png'} · {info['ms_per_frame']} ms/frame")
 
 
 def main(argv=None):
@@ -257,21 +339,26 @@ def main(argv=None):
     sp = p.add_subparsers(dest="cmd", required=True)
 
     def common(q, size="1920x1080"):
-        q.add_argument("--character", default=None, help="character.json (default: tools/toon/demo/giot.json)")
+        g = q.add_mutually_exclusive_group()
+        g.add_argument("--character", default=None, help="character.json (default: tools/toon/demo/giot.json)")
+        g.add_argument("--creature", default=None, help="a beast preset of tools/toon/demo/creatures/ or a creature spec .json")
         q.add_argument("--size", default=size)
         q.add_argument("--out", required=True)
         q.add_argument("--overwrite", action="store_true")
 
     s = sp.add_parser("still"); s.add_argument("style"); s.add_argument("--t", type=float, default=2.6); common(s)
-    s = sp.add_parser("turntable"); s.add_argument("--style", default="hoat-hinh-phang"); common(s, "960x720")
-    s = sp.add_parser("clip"); s.add_argument("style"); s.add_argument("--seconds", type=float, default=4.5)
+    s = sp.add_parser("turntable"); s.add_argument("--style", default=None, help="default hoat-hinh-phang, thuy-mac-3d with --creature")
+    common(s, "960x720")
+    s = sp.add_parser("clip"); s.add_argument("style")
+    s.add_argument("--seconds", type=float, default=None, help="default 4.5, or the creature preset's demo length")
     s.add_argument("--draft", action="store_true"); common(s)
     s = sp.add_parser("reel"); s.add_argument("spec"); s.add_argument("--out", required=True)
     s.add_argument("--draft", action="store_true"); s.add_argument("--overwrite", action="store_true")
     s = sp.add_parser("lookbook"); s.add_argument("--out", default=str(REPO / "out" / "_lab" / "lookbook"))
-    s.add_argument("--seconds", type=float, default=4.5); s.add_argument("--draft", action="store_true")
+    s.add_argument("--seconds", type=float, default=None); s.add_argument("--draft", action="store_true")
     s.add_argument("--only", default=None); s.add_argument("--size", default="1920x1080")
-    s.add_argument("--character", default=None)
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--character", default=None); g.add_argument("--creature", default=None)
     a = p.parse_args(argv)
     {"still": cmd_still, "turntable": cmd_turntable, "clip": cmd_clip, "reel": cmd_reel, "lookbook": cmd_lookbook}[a.cmd](a)
     return 0

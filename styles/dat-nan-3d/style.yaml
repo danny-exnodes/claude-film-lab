@@ -1,0 +1,21 @@
+# Đất nặn 3D (Soft clay 3D) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 1). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip dat-nan-3d --draft --out out/_lab/dat-nan-3d.mp4
+id: dat-nan-3d
+name: Đất nặn 3D
+name_en: Soft clay 3D
+status: draft
+base: cinecode:claymation
+engine: code
+render:
+  engine: three
+  look: clay-3d
+  post: []
+  hold: 2
+palette: {clay_bg: '#F3E3CF', ground: '#D9B98F', tree: '#6FA36A', trunk: '#8C5E3C', rock: '#B9A792', cloud: '#FFF7EC'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: F major pentatonic
+  instruments: [glockenspiel (Web Audio), ukulele gảy, woodblock, bass pizzicato]
+  notes: Nhạc vui, nhẹ; tiếng động foley mềm (bước chân bùn, "bóp" đất khi squash).
+type: {latin: Inter, cjk: Noto Sans CJK TC}

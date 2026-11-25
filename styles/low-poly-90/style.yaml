@@ -1,0 +1,21 @@
+# Low poly thập niên 90 (90s low poly) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 10). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip low-poly-90 --draft --out out/_lab/low-poly-90.mp4
+id: low-poly-90
+name: Low poly thập niên 90
+name_en: 90s low poly
+status: draft
+base: cinecode:lowpoly-island
+engine: code
+render:
+  engine: three
+  look: lowpoly-90s
+  post: []
+  hold: 1
+palette: {sky: '#6FB4F2', sky2: '#CBE7FF', ground: '#5FBF4E', tree: '#58C25A', rock: '#8E9AAB', cloud: '#FFFFFF'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: D major
+  instruments: [synth FM, piano điện, trống máy, bass synth]
+  notes: Nhạc phiêu lưu 110 BPM kiểu soundtrack game thập niên 90.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

@@ -24,13 +24,14 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `docs/MODELS.md` · `docs/RUNBOOK.md` | Model Ark đã kiểm chứng · sự cố đã gặp và cách xử lý |
 | `.claude/skills/` | `film-pipeline`, `film-script`, `film-prompt-layers`, `film-compose-shot` |
 | `.claude/agents/` | 9 agent theo vai: researcher, writer, art-director, plate-maker, animator, compositor, reviewer, publisher, narrator (lồng tiếng, chưa gắn vào khâu nào) |
-| `styles/` | Style pack: `thuy-mac` (ổn định), `moc-ban` (nháp), `_template` |
+| `styles/` | Style pack ảnh: `thuy-mac` (ổn định), `moc-ban` (nháp), `_template`; style vẽ bằng code (`engine: code`, nháp): `dat-nan-3d`, `hoat-hinh-phang`, `ban-ve-ky-thuat`, `in-riso`, `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90`, `sach-pop-up`, `_template-code` |
 | `templates/project/` | Mẫu dự án mới: `PROJECT.md` (manifest ID Drive), `SERIES.md`, `README_CauTruc.md`, `TienDo_SanXuat.csv` |
 | `templates/episode/` | Mẫu `EPISODE.md`, `budget.yaml`, `shots.csv`, `prompts.csv` |
 | `tools/ark.py` | CLI Ark: `ping`, `image`, `video`, có `--budget`/`--ledger`; `lambda-job prepare/finish` (ảnh qua Lambda vào ledger), `ledger-merge` |
 | `tools/check_episode.py` | Kiểm tra tập và style pack (schema, nhịp, tên file) |
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
 | `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, khói, lửa, lá lay, đung đưa, vải bay, đổi tư thế theo khung, nhân vật vẽ bằng nét mực cho cảnh rộng, chớp mắt, thở |
+| `tools/toon/` | Bộ TOON cho `method: code`: nhân vật vẽ bằng code (rig, đi/chạy/nhảy/vẫy, chân không trượt), 8 look (canvas + three.js) và 3 hậu kỳ (riso, pixel, ASCII); `toon.py` xem thử miễn phí, `lookbook` cả 11 style; linh vật `demo/giot.json` |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
 | `tools/audio/` | Âm thanh tổng hợp local: dây gảy (cổ cầm, tỳ bà, koto), tiếng động theo sự kiện, `score.py` xuất stem WAV từ bản nhạc JSON |
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
@@ -52,6 +53,7 @@ python3 -m unittest discover -s tests
 python3 tools/check_episode.py style styles/thuy-mac
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug>   # sau khi kéo dự án từ Drive (hoặc q<NN>-t<NN>-<slug>)
 python3 tools/rename_episode.py ep01 q01t01 --project-dir projects/<project>/ep01-<slug> --media out/<project>/ep01   # đổi mã tập (thêm --apply)
+python3 tools/toon/toon.py lookbook --draft                               # 11 style vẽ bằng code, miễn phí
 tools/doctor.sh
 ```
 Đổi schema → sửa `docs/CONVENTIONS.md` trước. Thay đổi ghi vào `CHANGELOG.md`. Phát hành: `docs/RELEASING.md`

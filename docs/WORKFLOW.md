@@ -50,11 +50,11 @@ Cổng duyệt luôn ở phiên chính. Agent không hỏi người dùng, khôn
 `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe` từ G3; file chỉ được ghi
 khi có `--out`); còn ERROR thì chưa trình duyệt.
 
-### Hai phương pháp dựng
+### Ba phương pháp dựng
 
-Mỗi tập chọn **một** phương pháp ở khâu 0, ghi `method: layers | seedance` trong `EPISODE.md` (không có khóa = `seedance`;
-tập mới từ mẫu = `layers`). Không trộn trong một tập. Cả hai dùng chung khâu 0–5 và 7–11, cổng G1–G4, ledger, quy trình
-sửa theo ghi chú và lưu lịch sử.
+Mỗi tập chọn **một** phương pháp ở khâu 0, ghi `method: layers | seedance | code` trong `EPISODE.md` (không có khóa =
+`seedance`; tập mới từ mẫu = `layers`). Không trộn trong một tập. `layers` và `seedance` dùng chung khâu 0–5 và 7–11;
+`code` bỏ khâu 5–6 (xem bảng dưới). Cả ba dùng chung cổng G1–G4, ledger, quy trình sửa theo ghi chú và lưu lịch sử.
 
 | | `layers` | `seedance` |
 |---|---|---|
@@ -65,6 +65,15 @@ sửa theo ghi chú và lưu lịch sử.
 | `shots.csv` | `ai_motion` trống; plate tư thế = mã lớp `L4b`, `L4c`… | `ai_motion` ở shot cần clip |
 | Nhân vật | giữ tư thế, không trượt, không xoay; thường nhìn từ sau lưng | cử động liên tục được (bước, quay đầu, vỗ cánh) |
 | Chọn khi | cần chi phí thấp; chuyện kể bằng không khí, máy quay, tư thế; phong cách tranh + nhân vật 2D tô phẳng | tập cần cử động thân thể liên tục mà code không làm được (đi, bay, vật lộn) và có ngân sách video |
+
+**`method: code`** (#38): không gọi model tạo ảnh hay video nào. Nhân vật là `character.json` (rig vẽ bằng code: thân,
+mắt, tay chân ống, chỏm), chuyển động là timeline hành động (`walk`, `turn`, `wave`, `jump`… chân không trượt), cảnh là
+đạo cụ thủ tục theo seed, và một style `engine: code` quyết định cách vẽ: 11 style sẵn (đất nặn 3D, hoạt hình phẳng,
+bản vẽ kỹ thuật, in riso, pixel 16-bit, bóng mực, tay ống cao su, chữ ASCII, bìa cắt dán, low poly thập niên 90, sách pop-up giấy).
+Trả tiền: không. Khâu 3 = `character.json` + `CHARACTER.md` (Thông số model); khâu 4 = turntable + shot mẫu (G2); khâu
+5–6 bỏ qua; khâu 7–10 như cũ với `inline.py --init --toon`. Chọn khi: phim thiếu nhi, giải thích kiến thức, linh vật,
+intro kênh, cần nhân vật nhất quán tuyệt đối và chi phí 0. Hướng dẫn: `.claude/skills/film-compose-shot/references/code-method.md`;
+xem cả 11 style: `python3 tools/toon/toon.py lookbook`.
 
 Trước G2 đạo diễn đưa người dùng mục `FORECAST` của `python3 tools/status.py <thư mục tập>` (ảnh còn phải tạo, giây
 video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản muốn gì → làm thế nào" và danh sách kiểm trước G3 của

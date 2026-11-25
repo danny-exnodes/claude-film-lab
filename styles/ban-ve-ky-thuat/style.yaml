@@ -1,0 +1,25 @@
+# Bản vẽ kỹ thuật (Blueprint) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 3). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip ban-ve-ky-thuat --draft --out out/_lab/ban-ve-ky-thuat.mp4
+id: ban-ve-ky-thuat
+name: Bản vẽ kỹ thuật
+name_en: Blueprint
+status: draft
+base: cinecode:blueprint
+engine: code
+render:
+  engine: canvas2d
+  look: blueprint
+  post: []
+  hold: 1
+  opts:
+    reveal: [0, 2.4]
+    sheet: ELEVATION
+    title: AI FILM LAB · TOON
+palette: {paper: '#123F7E', line: '#EAF2FF', grid: '#2D5C9C', note: '#FFD27A'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: D dorian
+  instruments: [synth pad mảnh, tiếng bút kỹ thuật (foley), click thước, piano thưa]
+  notes: Tiếng sột soạt của bút theo từng nét vẽ ra; nhạc nền tối giản.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

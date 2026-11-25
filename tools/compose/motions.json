@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Motion ids for style.yaml `motion:` and shots.csv `code_motion` (docs/CONVENTIONS.md §3, §6) -> the compose kit call that makes them. Read by people and checks; the kit itself does not read this file.",
+  "note": "Motion ids for style.yaml `motion:` and shots.csv `code_motion` (docs/CONVENTIONS.md §3, §6) -> the compose kit call that makes them. Read by people and checks; the kit itself does not read this file. Ids marked engine toon are actions of a method: code character (tools/toon/motion.js timeline `do:`), not COMPOSE calls.",
   "motions": {
     "mist-bands": {"module": "mist.js", "call": "COMPOSE.mist.band / bands / open", "needs": []},
     "embers": {"module": "embers.js", "call": "COMPOSE.embers.draw", "needs": []},
@@ -15,6 +15,19 @@
     "eyelid": {"module": "eyelid.js", "call": "PLATES.<id>.rig.eyes", "needs": ["anchors box of the eye"]},
     "breath": {"module": "breath.js", "call": "PLATES.<id>.rig.breath", "needs": ["anchors point for the pivot (or bottom)"]},
     "parallax": {"module": "stage.js", "call": "COMPOSE.stage + PLATES.<id>.depth", "needs": []},
-    "push-in": {"module": "stage.js", "call": "COMPOSE.camera({ zoom, toward, events })", "needs": ["anchors point subject"]}
+    "push-in": {"module": "stage.js", "call": "COMPOSE.camera({ zoom, toward, events })", "needs": ["anchors point subject"]},
+    "walk-cycle": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'walk', t: [a, b], to: [x, z] } (feet never slide)", "needs": [], "engine": "toon"},
+    "run-cycle": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'run', t: [a, b], to: [x, z] }", "needs": [], "engine": "toon"},
+    "jump": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'jump', t: [a, b], height }", "needs": [], "engine": "toon"},
+    "turn": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'turn', t: [a, b], face } (feet re-plant)", "needs": [], "engine": "toon"},
+    "wave": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'wave', t: [a, b], hand }", "needs": [], "engine": "toon"},
+    "cheer": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'cheer', t: [a, b] }", "needs": [], "engine": "toon"},
+    "point": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'point', t: [a, b], hand, at }", "needs": [], "engine": "toon"},
+    "bounce": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'bounce', t: [a, b], bpm }", "needs": [], "engine": "toon"},
+    "look-at": {"module": "toon/motion.js", "call": "TOON timeline clip { do: 'look', t: [a, b], at }", "needs": [], "engine": "toon"},
+    "blink": {"module": "toon/motion.js", "call": "TOON automatic (timeline.blink) or { do: 'blink', t: [a, b] }", "needs": [], "engine": "toon"},
+    "orbit": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, orbit: degrees } } (tools/toon/project.js)", "needs": [], "engine": "toon"},
+    "dolly": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, pos, target } }", "needs": [], "engine": "toon"},
+    "crane": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, pos: [x, y higher, z] } }", "needs": [], "engine": "toon"}
   }
 }

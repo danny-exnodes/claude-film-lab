@@ -22,7 +22,9 @@ ngoại lệ duy nhất: người nhỏ ≤ 25 % khung trong cảnh rộng bằn
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.
 
-**Hai phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.**
+**Ba phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.** `method: code` (nhân vật
+và cảnh vẽ hoàn toàn bằng code, không lớp tranh): đọc `references/code-method.md` thay cho mọi mục về plates của file này;
+khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`.
 
 | `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |
 |---|---|---|---|

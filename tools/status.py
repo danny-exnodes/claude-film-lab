@@ -7,8 +7,8 @@
 Run it at session start and before a gate instead of reading EPISODE.md, budget.yaml, ledger.csv, prompts.csv
 and the media tree by hand. It writes nothing and makes no network call.
 
-Sections: STAGE (stage, gates, BLOCKED lines), METHOD (`method:` of EPISODE.md: layers | seedance, missing =
-seedance), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used against each cap, counted exactly like
+Sections: STAGE (stage, gates, BLOCKED lines), METHOD (`method:` of EPISODE.md: layers | seedance | code,
+missing = seedance; code = characters drawn in code, nothing to pay for), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used against each cap, counted exactly like
 tools/ark.py does, then ATTENTION: OPEN / CUT-502 / FAILED / MISSING requests), SHOTS (state of every layer of
 every shot, clips, orphan plates), FORECAST (what the episode will still cost, from shots.csv and prompts.csv
 alone: images to make, Seedance seconds planned, each against what is left under budget.yaml: `fits` or
@@ -41,7 +41,7 @@ RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 STATUSES = ["ok", "cut-502", "failed", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
-METHODS = ("layers", "seedance")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
+METHODS = ("layers", "seedance", "code")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
 DEFAULT_METHOD = "seedance"
 MIN_CLIP_S = 4                     # shortest clip Seedance accepts (docs/MODELS.md): a shorter shot still bills 4 s
 TO_MAKE = ("no-prompt", "todo", "rejected")   # layer states that still need a paid image
@@ -78,13 +78,13 @@ def load_episode(ep_dir):
 
 def read_method(meta, notes):
     """The production method of the episode: {name: the method the forecast uses, source: episode | default |
-    invalid, raw: the value as written}. Only the exact words layers / seedance are a method."""
+    invalid, raw: the value as written}. Only the exact words layers / seedance / code are a method."""
     raw = meta.get("method")
     if "method" not in meta:
         return {"name": DEFAULT_METHOD, "source": "default", "raw": None}
     if isinstance(raw, str) and raw.strip() in METHODS:
         return {"name": raw.strip(), "source": "episode", "raw": raw}
-    notes.append(f"EPISODE.md: method = {raw!r} is not layers | seedance: the forecast counts the episode as "
+    notes.append(f"EPISODE.md: method = {raw!r} is not layers | seedance | code: the forecast counts the episode as "
                  f"{DEFAULT_METHOD}")
     return {"name": DEFAULT_METHOD, "source": "invalid", "raw": raw}
 
@@ -318,9 +318,10 @@ def layer_state(rows, plates, on_disk):
     return out
 
 
-def shots_section(ep_dir, media, notes):
+def shots_section(ep_dir, media, notes, method=None):
     shots = read_table(os.path.join(ep_dir, "shots.csv"), notes, "no shot table")
-    prompts = read_table(os.path.join(ep_dir, "prompts.csv"), notes, "every layer shows as no-prompt")
+    code = method == "code"                         # layers drawn in code: nothing to generate, no prompts.csv
+    prompts = None if code else read_table(os.path.join(ep_dir, "prompts.csv"), notes, "every layer shows as no-prompt")
     plates = listdir_files(os.path.join(media, "plates")) if media else []
     on_disk = set(plates)
     clip_shots = set()
@@ -336,6 +337,9 @@ def shots_section(ep_dir, media, notes):
             continue
         layers = []
         for code in [c.strip() for c in s.get("layers", "").split(";") if c.strip()]:
+            if method == "code":
+                layers.append({"layer": code, "state": "drawn"})
+                continue
             rows = [r for r in prompts or [] if r.get("shot") == shot and r.get("layer") == code]
             layers.append(dict({"layer": code}, **layer_state(rows, plates, on_disk)))
         out.append({"shot": shot, "reuse_of": s.get("reuse_of") or None, "layers": layers,
@@ -372,8 +376,8 @@ def forecast_section(shots, method, caps, notes):
     for s in shots["shots"]:
         if s["clip"] is None:                       # no ai_motion: code motion only
             continue
-        if method == "layers":
-            conflicts.append(f"method layers but {s['shot']} has ai_motion")
+        if method in ("layers", "code"):
+            conflicts.append(f"method {method} but {s['shot']} has ai_motion")
         elif s["clip"] is False:
             seconds, why = clip_seconds(s)
             if seconds is None:
@@ -515,6 +519,23 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
         need(exists("script.md"), "script.md present")
         need(exists("shots.csv"), "shots.csv present")
         need(budget_state == "ok", f"budget.yaml present and loadable ({budget_state})")
+    elif gate == "G2" and d["method"]["name"] == "code":
+        # method code: the locked characters (character.json) and a sample shot seen as a turntable + still
+        chars = []
+        cdir = os.path.join(ep_dir, "characters")
+        for root_, _d, names in os.walk(cdir) if os.path.isdir(cdir) else ():
+            chars += [os.path.relpath(os.path.join(root_, n), ep_dir) for n in names if n == "character.json"]
+        series_chars = os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "characters")
+        for root_, _d, names in os.walk(series_chars) if os.path.isdir(series_chars) else ():
+            chars += [os.path.relpath(os.path.join(root_, n), os.path.dirname(os.path.abspath(ep_dir)))
+                      for n in names if n == "character.json"]
+        need(chars, "a character.json (characters/<slug>/)" + (f" ({', '.join(sorted(chars)[:4])})" if chars else " (none)"))
+        rv = os.path.join(ep_dir, "review")
+        turn = [n for n in listdir_files(rv) if n.startswith("turntable")] if os.path.isdir(rv) else []
+        need(turn, "turntable of the characters in review/ (tools/toon/toon.py turntable)" +
+             (f" ({', '.join(turn[:3])})" if turn else " (none)"))
+        fc = d["forecast"]
+        need(fc and fc["fits"] and not fc["conflicts"], f"nothing to pay for ({forecast_brief(fc)})")
     elif gate == "G2":
         need(exists("prompts.csv"), "prompts.csv present")
         done = [s["shot"] for s in shots
@@ -525,7 +546,7 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
         need(fc and fc["fits"] and not fc["skipped"], f"forecast fits the budget ({forecast_brief(fc)})")
     elif gate == "G3":
         bad = [f"{s['shot']} {l['layer']}:{l['state']}" for s in shots for l in s["layers"]
-               if l["state"] != "approved"]
+               if l["state"] not in ("approved", "drawn")]
         need(shots and not bad, "every layer of every non-reuse shot approved" +
              (f" (not yet: {', '.join(bad[:6])}{f', +{len(bad) - 6} more' if len(bad) > 6 else ''})" if bad
               else "" if shots else " (no shots)"))
@@ -678,7 +699,7 @@ def main(argv=None):
     led, budget_state = collect_ledger(ledger, a.budget or os.path.join(a.episode, "budget.yaml"), media, bundled,
                                        notes["budget"])
     d.update(led)
-    d["shots"] = shots_section(a.episode, media, notes["shots"])
+    d["shots"] = shots_section(a.episode, media, notes["shots"], d["method"]["name"])
     d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"])
     d["media"] = media_section(media, bundled, notes["media"])
     gate = a.gate or next((g for g in GATES if not d["gates"][g]), None)

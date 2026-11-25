@@ -81,7 +81,8 @@ class TestFigureRegistration(unittest.TestCase):
         self.assertEqual(len(order), 16)
         r = subprocess.run([sys.executable, str(INLINE), "--lint"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertRegex(r.stdout, r"^compose kit v1\.[2-9]\d*\.\d+: 16 files, lint ok$")
+        # the TOON kit (method: code) is linted on the same line, counted apart
+        self.assertRegex(r.stdout, r"^compose kit v1\.[2-9]\d*\.\d+: 16 files, lint ok(; toon v\S+: \d+ files, lint ok)?$")
 
     def test_motion_id_and_style(self):
         motions = json.loads((KIT / "motions.json").read_text(encoding="utf-8"))["motions"]

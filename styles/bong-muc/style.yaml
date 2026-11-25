@@ -1,0 +1,31 @@
+# Bóng mực (Ink silhouette) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 6). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip bong-muc --draft --out out/_lab/bong-muc.mp4
+id: bong-muc
+name: Bóng mực
+name_en: Ink silhouette
+status: draft
+base: cinecode:shadow-puppet
+engine: code
+render:
+  engine: canvas2d
+  look: ink-silhouette
+  post: []
+  hold: 1
+  opts: {rim: true}
+  camera:
+    pos: [0, 0.12, 4.6]
+    target: [0, 1.05, 0]
+    fov: 36
+    move:
+      t: [0, 4.5]
+      pos: [0.3, 0.12, 4.2]
+      target: [0.15, 1.02, 0]
+  env: {trees: 7, rocks: 3, clear: 1.8}
+palette: {ink: '#141218', sky: '#F7DDB0', sky2: '#F2A06E', sky3: '#B9506A', sun: '#FFF3D6', rim: '#FFD9A0'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: D minor pentatonic
+  instruments: [sáo trúc, đàn tranh, trống trầm, drone]
+  notes: Thưa và chậm; khoảng lặng trước hành động chính.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

@@ -1,0 +1,28 @@
+# In riso (Riso print) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 4). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip in-riso --draft --out out/_lab/in-riso.mp4
+id: in-riso
+name: In riso
+name_en: Riso print
+status: draft
+base: cinecode:risograph
+engine: code
+render:
+  engine: canvas2d
+  look: flat-toon
+  post:
+  - id: riso
+    paper: '#F4EEDF'
+    inks: ['#0078BF', '#FF48B0', '#FFE800']
+    cell: 7
+    misreg: 2.5
+  hold: 2
+  palette: {sky: '#F4EEDF', sky2: '#F4EEDF', sun: '#FFE800', hill: '#9CC3E6', hill2: '#F7A8D3', ground: '#FFF2B3', ground2: '#FFE98A',
+    tree: '#5A9FD6', tree2: '#3C7DB8', trunk: '#E2589F', rock: '#F2A2CB', rock2: '#E07DB2', cloud: '#F4EEDF', shadow: 'rgba(0,120,191,0.25)'}
+palette: {paper: '#F4EEDF', blue: '#0078BF', pink: '#FF48B0', yellow: '#FFE800'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: A minor
+  instruments: [drum machine lo-fi, synth bass, guitar điện sạch, vinyl crackle]
+  notes: Lo-fi 85–95 BPM; nhịp in (tiếng máy cuộn giấy) có thể làm cue chuyển cảnh.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

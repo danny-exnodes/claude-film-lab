@@ -133,6 +133,20 @@ vẫn là tên gốc, không kèm `matte/`.
 Prompt mẫu trong `styles/<id>/prompts/*.txt` dùng chỗ trống `{style_block}`, `{subject}`, `{constraints}`, `{light}`.
 Thêm trường phái mới = chép `styles/_template/`, không sửa skill.
 
+**Style vẽ bằng code (`engine: code`, cho tập `method: code`).** Không model tạo ảnh nào: bắt buộc `id, name, status,
+base, engine: code, render, palette`; không `style_block, negative, light, matte, layers, models, prompts/` (có thì WARN).
+```yaml
+engine: code
+render:
+  engine: canvas2d          # canvas2d | three, phải khớp look trong tools/toon/looks.json
+  look: flat-toon           # flat-toon | ink-silhouette | rubber-hose | blueprint | clay-3d | lowpoly-90s | cardboard | popup-paper
+  post: [riso]              # hậu kỳ theo thứ tự: riso | pixel-16 | ascii; một mục có thể là {id: riso, cell: 7, ...}
+  hold: 2                   # 1 = 24 hình/s, 2 = bước đôi, 3–4 = stop-motion
+  palette: {sky: "#F4EEDF"} # ghi đè màu của look: "#RRGGBB" hoặc "rgba(...)"
+  opts: {}                  # tuỳ chọn của look (bpm, reveal, rim...); camera: {...}; env: {...} (tools/toon/project.js)
+```
+Mười pack có sẵn và cách dùng: `.claude/skills/film-compose-shot/references/code-method.md`. Thêm pack = chép `styles/_template-code/`.
+
 ## 4. Dự án (series) và tập
 
 Đường dẫn dưới đây là của bản làm việc `projects/<project>/`; nơi lưu thật trên Drive xem bảng ánh xạ §11.3.
@@ -181,7 +195,7 @@ episode: 1               # số tập (trong quyển nếu có book)
 slug: bac-thi
 style: thuy-mac
 length_s: 60
-method: layers           # cách dựng: layers | seedance (xem dưới)
+method: layers           # cách dựng: layers | seedance | code (xem dưới)
 stage: 2                 # 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/q01t01
@@ -194,10 +208,13 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 `book`/`episode` lệch tên thư mục tập, hoặc thư mục media/tiền tố file khác mã tập → ERROR.
 `method` = cách dựng của tập, chọn cùng người dùng ở khâu 0, sau G1 không tự đổi (phải hỏi người dùng):
 `layers` = chỉ dùng model ảnh, tách lớp, ghép lớp và làm chuyển động từng thành phần bằng code, không gọi Seedance;
-`seedance` = cử động nhân vật bằng clip Seedance. Không phân biệt hoa thường; giá trị khác → ERROR
-`method must be layers or seedance`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
+`seedance` = cử động nhân vật bằng clip Seedance; `code` = nhân vật và cảnh vẽ hoàn toàn bằng code (`tools/toon/`), không
+gọi model nào. Không phân biệt hoa thường; giá trị khác → ERROR `method must be layers, seedance or code`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
 mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
-hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7).
+hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7). Với `code`: ERROR khi `images`, `video_seconds` hoặc
+bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
+style của tập không phải `engine: code` (và ngược lại: style `engine: code` chỉ cho tập `code`); không cần `prompts.csv`
+(có thì WARN). Nhân vật khóa ở G2 là `characters/<slug>/character.json` + `review/turntable-<slug>.png`.
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
 
@@ -212,6 +229,9 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
   Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
+  Tập `method: code`: `layers` = `C-<nhân vật>`, `E-<bối cảnh>`, `FX` hoặc `FX-<hiệu ứng>`, `T` (chữ trên hình);
+  `camera` nhận thêm `orbit, dolly, crane, track`; `code_motion` dùng id `engine: toon` của `motions.json` (`walk-cycle`,
+  `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`); `ai_motion` trống.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp

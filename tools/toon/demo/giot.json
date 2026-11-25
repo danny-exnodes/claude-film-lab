@@ -1,0 +1,19 @@
+{
+  "id": "giot",
+  "name": "Giọt",
+  "seed": 11,
+  "body": "drop",
+  "eyes": 2,
+  "proportions": {
+    "height": 1.0, "body_w": 0.6, "body_d": 0.5, "leg": 0.26, "arm": 0.3, "limb_r": 0.045,
+    "hip_w": 0.22, "shoulder_y": 0.46, "eye_y": 0.55, "eye_gap": 0.2, "eye_r": 0.062, "foot": 0.07
+  },
+  "tuft": {"len": 0.16, "curl": 0.7},
+  "cheeks": true,
+  "mouth": true,
+  "palette": {
+    "body": "#2F6FB5", "shade": "#1F4E86", "light": "#7FB0E3", "limb": "#2F6FB5", "eye": "#FFFFFF",
+    "pupil": "#14161C", "cheek": "#F28B82", "mouth": "#14161C", "outline": "#14161C", "accent": "#F2B84B",
+    "glove": "#FFFFFF", "shoe": "#1B2A44"
+  }
+}

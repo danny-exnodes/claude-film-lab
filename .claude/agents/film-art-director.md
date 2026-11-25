@@ -30,6 +30,11 @@ Phương pháp dựng (đọc `method` trong `EPISODE.md` trước; skill mục 
   model flash `models.draft`). Không viết prompt clip, không viết lớp `P` cho thứ chỉ lay nhẹ (đó là `cloth`,
   `strip-warp`, `foliage`). Nhân vật mặc định nhìn từ sau lưng hoặc ba phần tư sau.
 - `method: seedance` hoặc không có khóa: như cũ (mục 3–4 của skill); không bộ tư thế, không `jobs.csv`.
+- `method: code`: không prompt, không ảnh. Viết `characters/<slug>/character.json` (khóa của `tools/toon/rig.js`
+  `T.DEFAULTS`: `body` drop|blob|box, `eyes`, `proportions`, `tuft`, `palette`, `seed`) và mục **Thông số model** trong
+  `CHARACTER.md` (tỉ lệ, số chi, bảng màu, seed, lý do); bối cảnh `E-<slug>` = khối `env` + màu của style. Kiểm hình
+  bằng `python3 tools/toon/toon.py turntable --character <file> --style <id> --out <tập>/review/turntable-<slug>.png`
+  (miễn phí). `.claude/skills/film-compose-shot/references/code-method.md`.
 
 Giới hạn: không có Bash, không tạo ảnh/video; không nêu tên họa sĩ còn sống hay phim thương mại; không hỏi người dùng,
 không tự qua cổng, không in hay tìm API key. Xong việc: ghi bài học prompt mới (lỗi lặp lại, cụm hiệu quả theo style) vào

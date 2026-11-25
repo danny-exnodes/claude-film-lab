@@ -1,0 +1,22 @@
+# Pixel 16-bit (16-bit pixel) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 5). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip pixel-16bit --draft --out out/_lab/pixel-16bit.mp4
+id: pixel-16bit
+name: Pixel 16-bit
+name_en: 16-bit pixel
+status: draft
+base: cinecode:pixel-rpg
+engine: code
+render:
+  engine: canvas2d
+  look: flat-toon
+  post:
+  - {id: pixel-16, rows: 180, dither: 0.6}
+  hold: 2
+palette: {c0: '#140C1C', c1: '#30346D', c2: '#597DCE', c3: '#6DAA2C', c4: '#DAD45E', c5: '#DEEED6'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: E minor
+  instruments: [chip square wave, chip triangle bass, noise drum, arpeggio]
+  notes: Chiptune 120–140 BPM; tiếng "blip" khi chọn, "coin" khi đạt.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

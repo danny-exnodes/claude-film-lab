@@ -105,6 +105,12 @@ Mốc tăng dần, nằm trong `length_s`. Không dùng dấu gạch ngang ở b
 `method` trong `EPISODE.md` do người dùng chọn ở khâu 0. Cả tập theo **một** nhánh; không trộn, không tự đổi. Thấy kịch
 bản cần thứ nhánh đang dùng không làm được: ghi vào báo cáo cho đạo diễn, không lén dùng nhánh kia.
 
+**`method: code`** (vẽ hoàn toàn bằng code, `.claude/skills/film-compose-shot/references/code-method.md` §4–§5):
+`ai_motion` trống; `layers` = `C-<nhân vật>;E-<bối cảnh>[;FX-<hiệu ứng>][;T]`; `code_motion` = hành động của rig
+(`walk-cycle`, `run-cycle`, `turn`, `wave`, `cheer`, `point`, `jump`, `bounce`, `look-at`); `camera` có thêm `orbit`,
+`dolly`, `crane`, `track`. Hành động liên tục được (đi, chạy, nhảy, quay người) vì chân không trượt; một hành động chính
+mỗi shot. Không viết thứ rig không có (cầm nắm đồ vật, nhiều nhân vật chạm nhau, nước chảy): ghi vào báo cáo.
+
 **`method: layers`** (chỉ ảnh + code, không Seedance; bảng tra đầy đủ:
 `.claude/skills/film-compose-shot/references/layers-method.md` §1–§2):
 - Cột `ai_motion` **để trống ở mọi shot** (`check_episode.py` báo ERROR nếu có).

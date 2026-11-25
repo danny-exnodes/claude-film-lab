@@ -4,7 +4,54 @@
 
 ## [Unreleased]
 
-### Thêm
+## [1.2.0] - 2026-11-25
+
+### Phương pháp dựng thứ ba `code` và bộ 11 phong cách vẽ bằng code (#38–#43, 2026-11-19 / 24)
+Nhân vật và cảnh vẽ hoàn toàn bằng code, không gọi model tạo ảnh hay video nào (0 ảnh, 0 giây). Một nhân vật định nghĩa
+một lần, đổi phong cách chỉ là đổi cách vẽ. Ý tưởng từ một bài đăng "10 animation styles" chủ dự án gửi; linh vật,
+tên và bố cục là của lab.
+
+- **Bộ TOON `tools/toon/`** (v1.0.0, script thuần như bộ COMPOSE, hàm thuần của `t` và `SEED`): `rig.js` (nhân vật =
+  `character.json`: thân `drop`/`blob`/`box`, 1–2 mắt, chỏm, má, miệng, tay chân ống; khung xương, IK hai đoạn),
+  `motion.js` (timeline `walk`, `run`, `turn`, `jump`, `wave`, `cheer`, `point`, `bounce`, `look`, `blink`, `idle`;
+  bước chân tính theo quãng đường nên **chân không trượt** ở mọi tốc độ; quay người đặt lại chân; nhảy có nén – bật –
+  bay – tiếp đất; chớp mắt và thở tự động theo seed), `project.js` (máy quay có `move`/`orbit`/`follow`/`shake`, phép
+  chiếu, danh sách hình 2D theo độ sâu, đạo cụ cảnh theo seed), `look2d.js` (`flat-toon`, `ink-silhouette`,
+  `rubber-hose`, `blueprint` vẽ dần từng nét), `look3d.js` (three.js: `clay-3d` có bề mặt "sôi" mỗi hình, `lowpoly-90s`
+  flat shading, `cardboard` mảnh bìa có độ dày, ghim đồng, đèn bàn đổ bóng), `post.js` (`riso` 2–3 mực chồng, halftone,
+  lệch bản; `pixel-16` 320×180, 16 màu, dither Bayer; `ascii` lưới ký tự theo độ sáng và hướng biên, quầng phosphor),
+  `toon.js` (`TOON.ready`, `TOON.render`), `looks.json` (sổ đăng ký).
+- **Mười style pack `engine: code`** (`status: draft`): `dat-nan-3d`, `hoat-hinh-phang`, `ban-ve-ky-thuat`, `in-riso`,
+  `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90` (+ `sach-pop-up`, xem dưới), và mẫu `styles/_template-code/`.
+  Style pack có khóa mới `engine: image | code` (thiếu = `image`); với `code`: khối `render` (look, post, hold, palette,
+  opts, camera, env) thay cho `style_block`/`matte`/`layers`/`models`/`prompts/`.
+- **`method: code`** trong `EPISODE.md` (gộp `code3d` của #35): `check_episode.py` báo ERROR khi `images`,
+  `video_seconds` hay `models.*` > 0, khi shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`E-<slug>`/`FX[-…]`/`T`,
+  khi style không khớp phương pháp; `camera` nhận thêm `orbit`, `dolly`, `crane`, `track`; không cần `prompts.csv`.
+  `status.py`: METHOD `code`, FORECAST 0/0, cổng G2 kiểm `character.json`, turntable trong `review/` và chi phí 0.
+  `motions.json` thêm 13 id (`engine: toon`).
+- **`tools/toon/toon.py`** (miễn phí, Chromium headless qua Playwright, WebGL phần mềm): `still`, `turntable`, `clip`,
+  `reel`, `lookbook` (cả 10 style cùng một hành động, `sheet.png` + `lookbook.mp4`; bản nháp 960×540 ~2 phút).
+- **`inline.py --toon`**: chèn bộ TOON sau bộ COMPOSE, `READY` chờ `loadToon` (three.js nạp trước khung đầu), cảnh báo
+  `toon:` vào `qc` của READY; `--init --toon` đặt mẫu `templates/toon-film-section.js` (CHARS, STYLE, SHOTS) và look
+  `toon`. Film đã có bộ TOON giữ nó khi làm mới không có `--toon`. Đã chạy qua `make.py stills` và `draft` của cinecode
+  với cả look 2D và 3D.
+- **three.js 0.186.1 ghim cục bộ** (`tools/toon/three.lock`, `install_three.sh`, `FILM_THREE`): setup script bước 6,
+  hook khởi động cài khi thiếu; `doctor.sh` dòng `three` (thiếu = WARN, sai băm = FAIL) và, ở bản đầy đủ, `webgl`.
+  `chrome-root.sh` bật SwiftShader (`FILM_WEBGL=gpu` để tắt). Render không tải CDN.
+- **Phong cách thứ 11 `sach-pop-up`** (look `popup-paper`, TOON v1.1.0, 2026-11-24), sau khi nghiên cứu Papertrails
+  (xikhar/papertrails, MIT; chỉ học kỹ thuật, không dùng mã hay tranh của họ): cuốn sách pop-up nhìn từ trên cao qua
+  ống kính dài; trang in nền và đường kraft mép xé; cây hai tấm bìa cài chéo, thông, dải bụi in hoa, đá gấp; mặt bìa in
+  hoạ tiết vẽ bằng code, mép cắt kem; bìa bật dậy theo lò xo bản lề (`opts.rise`, vượt ~15 % rồi rung) và lắc trong gió;
+  ánh ấm, bóng mềm, tilt-shift, grade ấm; ban đêm có đèn lồng (`opts.night`). Ghi chép nghiên cứu: `styles/sach-pop-up/STYLE.md`.
+- Bộ COMPOSE lên v1.3.0 (1.2.0 là bản có `ink.js`, `figure.js` ở mục dưới; 1.3.0 vì `inline.py --toon`). Tài liệu: `references/code-method.md` (mới), `film-pipeline` §2.1,
+  `film-script` §4a, `film-compose-shot`, agent `film-writer`, `film-art-director`, `film-compositor`,
+  `film-reviewer`, `film-animator`, `docs/WORKFLOW.md` (ba phương pháp), `docs/CONVENTIONS.md` §3/§5/§6, RUNBOOK, BACKLOG.
+- Test: `tests/js/toon.test.cjs` (16 test node: chân không trượt, độ dài xương, nhảy đúng độ cao, chớp mắt theo seed,
+  hậu kỳ chỉ ra màu hợp lệ…), `tests/test_toon.py` (render thật cả 10 style, cùng khung hai lần ra cùng byte cả 2D lẫn
+  3D), `tests/test_method_code.py` (13 test: `check_episode`, style, `status.py` G2, `inline.py --toon`).
+
+### Âm thanh tổng hợp và hình người vẽ bằng nét mực (#32, #33, 2026-11-24)
 - **Âm thanh tổng hợp tại chỗ `tools/audio/` (#33, #32)**: `pluck.py` (guqin, pipa, koto bằng mô hình dây Karplus-Strong mở rộng: trượt dây, rung, bồi âm, tremolo, rải dây), `sfx.py` (15 foley theo bảng của `styles/thuy-mac/sound.md`: `wind`, `fire`, `drone`, `brush_air`, `whoosh`, `hoof`, `ink_drop`, `gong`, `drum`, `drum_roll`, `ember`, `thump`, `footstep`, `cloth_flap`, `water_ring`) và `score.py` dựng `score.json` của tập thành stem `music.wav` / `foley.wav` / `ambience.wav` + `preview.wav` + `score-log.json` + `mix-snippet.json` cho `audio/mix.json` của cinecode. Chạy local, miễn phí, chỉ numpy + scipy, không sample, không API; cùng điểm nhạc + cùng seed cho file giống hệt từng byte; khoảng lặng (`silence`) là số 0 tuyệt đối; kiểm tra trước khi dựng (mã thoát 2, in mọi lỗi, không ghi gì); file đầu ra đã có thì từ chối (`--overwrite`). Nhạc vẫn do người dùng chọn: tool không tự bật. Không có sáo/tiêu và không có sampler; `drone` và `gong` là xấp xỉ tổng hợp.
 - `templates/episode/score.json`: mẫu điểm nhạc 24 s; `THIRD_PARTY.md`: mã phỏng theo lemomo-ai/lemo-opuscar (MIT, Copyright (c) 2026 LemoLab).
 - `styles/thuy-mac/sound.md`: sửa tham chiếu chết `core/audio/pluck.py` thành `tools/audio/pluck.py`, ghi tên hàm foley cạnh từng dòng.
@@ -301,6 +348,7 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/danny-exnodes/claude-film-lab/releases/tag/v1.0.0

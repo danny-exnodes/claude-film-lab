@@ -10,4 +10,9 @@ if [ -z "$real" ]; then
   done
 fi
 [ -n "$real" ] || { echo "chrome-root.sh: no Chrome/Chromium found; set CHROME_REAL" >&2; exit 127; }
+# Software WebGL (SwiftShader) for the three.js looks of method: code (tools/toon/look3d.js): the container has no GPU.
+# FILM_WEBGL=gpu leaves Chrome's own GL choice alone (a machine with a GPU).
+if [ "${FILM_WEBGL:-swiftshader}" = "swiftshader" ]; then
+  exec "$real" --no-sandbox --use-gl=angle --use-angle=swiftshader --enable-unsafe-swiftshader "$@"
+fi
 exec "$real" --no-sandbox "$@"

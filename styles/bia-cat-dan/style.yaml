@@ -1,0 +1,29 @@
+# Bìa cắt dán (Cardboard cutout) – style pack vẽ hoàn toàn bằng code (engine: code), schema: docs/CONVENTIONS.md §3.
+# Thuộc bộ 10 phong cách #38 (số 9). Không tạo ảnh/video: render.look là id trong tools/toon/looks.json.
+# Xem thử miễn phí: python3 tools/toon/toon.py clip bia-cat-dan --draft --out out/_lab/bia-cat-dan.mp4
+id: bia-cat-dan
+name: Bìa cắt dán
+name_en: Cardboard cutout
+status: draft
+base: cinecode:paper-popup
+engine: code
+render:
+  engine: three
+  look: cardboard
+  post: []
+  hold: 2
+  camera:
+    pos: [0, 0.8, 4.4]
+    target: [0, 0.6, 0]
+    fov: 32
+    move:
+      t: [0, 4.5]
+      pos: [0.2, 0.78, 4.0]
+      target: [0.1, 0.6, 0]
+palette: {back: '#C9B48F', sky: '#BFD9E8', hill: '#7FAE6E', ground: '#B89A6E', edge: '#9C7F5A', pin: '#C8A04A'}
+motion: [walk-cycle, run-cycle, jump, turn, wave, cheer, point, bounce, look-at, blink, breath]
+sound:
+  scale: G major
+  instruments: [guitar mộc, glockenspiel, kazoo, bộ gõ gỗ]
+  notes: Tiếng giấy sột soạt khi mảnh đổi tư thế; nhạc mộc mạc.
+type: {latin: Inter, cjk: Noto Sans CJK TC}

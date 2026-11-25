@@ -111,5 +111,23 @@ PY
 chmod +x "$ARK_DIR/ark.py"
 log "ark.py shim: ok"
 
+# 6. three.js for the TOON 3D looks of method: code (tools/toon/look3d.js), pinned and verified against the
+#    repo's tools/toon/three.lock when the repo is there (the session hook re-runs it). Same version as cinecode's
+#    starter. Renders never load three.js from a CDN.
+THREE_VER="${THREE_VER:-0.186.1}"
+THREE_DIR=/opt/film-lab/vendor/three
+if [ -f "$THREE_DIR/build/three.module.js" ] && grep -q "\"version\": \"$THREE_VER\"" "$THREE_DIR/package.json" 2>/dev/null; then
+  log "three.js: already $THREE_VER"
+else
+  tmp3=$(mktemp -d)
+  if ( cd "$tmp3" && timeout 120 npm pack "three@$THREE_VER" --silent >/tmp/setup-three.log 2>&1 ) \
+     && mkdir -p "$THREE_DIR.new" && tar xzf "$tmp3/three-$THREE_VER.tgz" -C "$THREE_DIR.new" --strip-components=1; then
+    rm -rf "$THREE_DIR" && mv "$THREE_DIR.new" "$THREE_DIR" && log "three.js: ok ($THREE_VER)"
+  else
+    rm -rf "$THREE_DIR.new"; log "three.js: FAILED (see /tmp/setup-three.log; the session hook retries)"
+  fi
+  rm -rf "$tmp3"
+fi
+
 log "done"
 exit 0

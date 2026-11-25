@@ -317,3 +317,21 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - **#8** Still open. The render tool stops producing silently wrong audio (dropped lines, stale takes, empty takes, unread tokens are errors or warnings), the film-narrator agent exists and the compositor is told not to use cinecode's keyed TTS. Remaining: owner decision on the narration sub-stages and the model comparison, then the number-reading rules, the hand-off to cinecode, the voice block in SERIES.md, vo/ bundling, licence rows and docs/TTS.md.
 - **#13** Still open. Pro 2K through the Lambda is measured (77 s, 1664x2496; the integrator records it). The worker and deploy program are hardened in the repo, and explicit 4K pixel sizes and pro model variants can no longer reach the proxy through `ark.py image`. Remaining: one free redeploy (the hardened worker is not live until then), the paid L1 4K test with an explicit landscape size, optionally a Pro 2K with --ref; `lambda-job wait`, the free ping, stale-job handling and unsent-job slot release are deferred.
 - **#15** Not closed by this plan. Done: ledger-merge keeps the rows of --out (commit 2740dac), budget.yaml typos are refused by ark.py and flagged by the checker, a foreign ledger header is refused, and the push plan prints the merge-first steps for ledger.csv. Still open: the 'never bill less' merge invariant with multiset dedupe and malformed-row errors (deferred to the next ark.py round) and verified ledger placement on pull (deferred with the pull-side tools); close after the production session has done one pull, merge and push with the new tools.
+
+## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
+
+- Cần người xem: duyệt linh vật "Giọt" (turntable) và lookbook 11 style; chọn style nào lên `status: stable` (mỗi pack
+  ghi ở `examples.md`). Chưa có tập thật nào dựng bằng `method: code` (#43 mục 3: tập thử 30–60 s qua G1–G4).
+- Rig chỉ có một mẫu thân (drop/blob/box + tay chân ống): chưa có tai, đuôi, cánh, nhiều nhân vật chạm nhau, cầm đồ vật,
+  khẩu hình theo lời. Nhân vật bốn chân / dị thú cho thủy mặc thuộc #35 (bộ dựng 3D cho `code3d`).
+- `cardboard` dựng lại toàn bộ mảnh nhân vật mỗi hình giữ (~600 ms/khung 1080p trong container): đủ cho bản nháp, bản
+  cuối 1 phút ≈ 15 phút máy. Có thể giữ hình học và chỉ đổi biến đổi nếu cần nhanh hơn.
+- Hậu kỳ `riso` / `pixel-16` / `ascii` chạy trên CPU (JS, getImageData); chưa có bản WebGL như #42 gợi ý. Đo ở 1080p:
+  riso ~170 ms, pixel ~30 ms, ascii ~80 ms mỗi khung.
+- Font pixel có dấu tiếng Việt cho chữ trên hình của `pixel-16bit` chưa chọn (chữ hiện dùng font hệ thống).
+- Id shot ba chữ số (`s<NNN>`, #35 mục 2) chưa làm: tập `code` vẫn trần 99 shot.
+- Lookbook chưa có âm thanh (chờ #33 `tools/audio/`); bản dọc 1080×1920 chạy được bằng `--size 1080x1920` nhưng máy quay
+  mặc định canh cho 16:9.
+- `sach-pop-up` (popup-paper) so với tham chiếu Papertrails còn thiếu: nhà, hàng rào, cầu, sông in trên trang có nước
+  chạy, động vật giấy, lá rơi, bokeh thật theo độ sâu, AO, cửa sổ sáng ban đêm, con đường uốn theo lối đi (hiện thẳng
+  theo trục x). ~250 ms/khung ở 960×540, ~500 ms ở 1080p (đêm chậm hơn vì bóng đèn lồng).

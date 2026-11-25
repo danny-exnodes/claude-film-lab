@@ -29,6 +29,9 @@ Phương pháp dựng: đọc `method` trong `EPISODE.md` trước khi dựng sh
   vật không trượt, không xoay; không bộ phận nào hiện rời; mỗi shot giữ có ≥ 2 chuyển động độc lập + máy quay. Trước khi
   trả bản nháp: chạy danh sách kiểm §5 của file đó và ghi kết quả vào báo cáo.
 - **`method: seedance`** hoặc không có khóa: clip Seedance cho cử động lớn theo `references/seedance-layer.md` (như cũ).
+- **`method: code`**: không plate, không clip. `python3 tools/compose/inline.py <film>/film.html --init --toon`, rồi điền
+  `CHARS` (character.json đã khóa), `STYLE` (khối `render` của style pack), mỗi shot một hàng `SHOTS` (timeline +
+  camera); `references/code-method.md`. Chân không trượt, đổi hướng bằng `turn`.
 
 Âm thanh bằng code: khi hợp đồng ghi người dùng đã chọn nhạc **code**, hoặc khi foley phải rơi đúng khung hình, viết
 `score.json` trong thư mục tập và dựng bằng `python3 tools/audio/score.py <tập>/score.json --dry-run` rồi

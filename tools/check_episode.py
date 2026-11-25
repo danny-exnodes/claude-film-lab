@@ -54,6 +54,8 @@ RE_START_FRAME = re.compile(rf"^{ID}_s\d{{2}}_start_v\d{{2}}\.png$")
 RE_CLIP_STEM = re.compile(rf"^{ID}_s\d{{2}}_[a-z0-9]+_v\d{{2}}$")
 RE_FRAME = re.compile(r"^\d{6}\.png$")
 RE_LAYER_CODE = re.compile(r"^(L[1-4]|P\d+-[a-z0-9-]+|FX)$")
+# method: code (characters drawn in code, tools/toon/): C-<character>, E-<setting>, FX or FX-<effect>, T (on-screen text)
+RE_CODE_LAYER = re.compile(r"^(C-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RE_EP_DIR = eid_mod.RE_DIR
 RE_SHOT = re.compile(r"^s(\d{2})$")
@@ -64,7 +66,7 @@ MEDIA_RULES = {"plates": RE_LAYER_FILE, "clips": RE_CLIP_FILE, "renders": RE_REN
 # --- §5 / §6 schema --------------------------------------------------------------
 EPISODE_KEYS = ["series", "episode", "slug", "style", "length_s", "stage", "gates", "media", "drive"]
 EPISODE_OPTIONAL = ["book", "method"]   # book set = project split into books: id q<book>t<episode>
-METHODS = ("layers", "seedance")        # layers: image models + code motion only; seedance: clips for character motion
+METHODS = ("layers", "seedance", "code")  # layers: image models + code motion; seedance: clips; code: no AI, all drawn in code
 EPISODE_SECTIONS = ["## Ghi chú người dùng (nguyên văn)", "## Đã khóa (không làm lại)", "## Việc tiếp theo", "## Nhật ký"]
 GATES = ["G1", "G2", "G3", "G4"]
 SHOTS_HEADER = ["shot", "from_s", "to_s", "shot_size", "camera", "action", "layers", "code_motion", "ai_motion", "sound", "reuse_of"]
@@ -72,6 +74,7 @@ PROMPTS_HEADER = ["file", "shot", "layer", "model", "size", "prompt_file", "refs
 LEDGER_HEADER = ["ts", "kind", "model", "size", "seconds", "count", "status", "out", "task_id", "usage", "agent", "note"]
 SHOT_SIZES = {"extreme-wide", "wide", "medium", "close", "extreme-close", "insert"}
 CAMERAS = {"static", "push-in", "pull-out", "pan-left", "pan-right", "tilt-up", "tilt-down", "drift", "handheld"}
+CAMERAS_CODE = CAMERAS | {"orbit", "dolly", "crane", "track"}   # a 3D camera moves in method: code (tools/toon/project.js)
 SHOT_MIN_S, SHOT_MAX_S = 3, 13
 LINE_GAP_S = 3
 # --probe (docs/WORKFLOW.md stages 8-10): 16:9 frames, final master at -14 LUFS integrated.
@@ -90,6 +93,12 @@ EPS = 1e-6
 # --- §3 style pack ---------------------------------------------------------------
 STYLE_REQUIRED = ["id", "name", "status", "base", "style_block", "negative", "palette", "light", "matte", "layers", "models"]
 STYLE_OPTIONAL = ["motion", "sound", "type"]   # may come from the cinecode recipe named in base:
+# engine: code (a style drawn by tools/toon/, no image model): no prompt, matte, layers or models keys
+STYLE_REQUIRED_CODE = ["id", "name", "status", "base", "engine", "render", "palette"]
+STYLE_OPTIONAL_CODE = STYLE_OPTIONAL + ["name_en"]
+STYLE_ENGINES = {"image", "code"}
+RENDER_ENGINES = {"canvas2d", "three"}
+RENDER_KEYS = {"engine", "look", "post", "hold", "palette", "opts", "camera", "env", "seed"}
 STYLE_STATUS = {"stable", "draft"}
 MATTE_METHODS = {"none", "luminance", "chroma", "rembg"}
 STYLE_LAYER_KEY = re.compile(r"^(L[1-4]|P|P\d+-[a-z0-9-]+|FX)$")
@@ -227,9 +236,9 @@ def check_front_matter(ep_dir, rep):
             rep.warn(W, f"unknown front matter key '{k}'")
     method, explicit = episode_method(meta)
     if method is None:
-        rep.error(W, f"method must be layers or seedance (got {meta['method']!r})")
+        rep.error(W, f"method must be layers, seedance or code (got {meta['method']!r})")
     elif not explicit:
-        rep.warn(W, "EPISODE.md has no method: (treated as seedance); add method: layers or method: seedance")
+        rep.warn(W, "EPISODE.md has no method: (treated as seedance); add method: layers, seedance or code")
 
     ep_abs = os.path.abspath(ep_dir)   # abspath first: `episode .` must see the real folder name, not '.'
     folder = os.path.basename(ep_abs)
@@ -277,6 +286,12 @@ def check_front_matter(ep_dir, rep):
             rep.error(W, f"style {st!r} is not a style id")
         elif not os.path.isdir(os.path.join(LAB, "styles", st)):
             rep.warn(W, f"style '{st}' has no folder styles/{st}/")
+        elif method is not None:                 # the style's engine must suit the method
+            eng = style_engine(os.path.join(LAB, "styles", st))
+            if method == "code" and eng not in (None, "code"):
+                rep.error(W, f"method code needs an engine: code style pack; styles/{st} is engine: {eng}")
+            elif method != "code" and eng == "code":
+                rep.error(W, f"styles/{st} is engine: code (drawn by tools/toon/); set method: code or pick an image style")
     length = meta.get("length_s")
     if "length_s" in meta and (isinstance(length, bool) or not isinstance(length, (int, float)) or length <= 0):
         rep.error(W, f"length_s {length!r} must be a positive number of seconds")
@@ -412,13 +427,21 @@ def check_budget(ep_dir, meta, rep):
             for mid, cap in models.items():
                 if not is_cap(cap):
                     rep.error(W, f"models.{mid} = {cap!r} must be a number >= 0")
-    if episode_method(meta)[0] == "layers":      # layers never calls Seedance: no video cap may be open
+    method = episode_method(meta)[0]
+    if method == "layers":      # layers never calls Seedance: no video cap may be open
         caps = [("video_seconds", b.get("video_seconds"))]
         if isinstance(models, dict):
             caps += [(f"models.{mid}", cap) for mid, cap in models.items() if "seedance" in str(mid).lower()]
         for name, cap in caps:
             if is_cap(cap) and cap > 0:
                 rep.error(W, f"method layers: {name} = {cap!r} must be 0 (no Seedance), or set method: seedance")
+    elif method == "code":      # code calls no model at all: every cap is 0
+        caps = [("images", b.get("images")), ("video_seconds", b.get("video_seconds"))]
+        if isinstance(models, dict):
+            caps += [(f"models.{mid}", cap) for mid, cap in models.items()]
+        for name, cap in caps:
+            if is_cap(cap) and cap > 0:
+                rep.error(W, f"method code: {name} = {cap!r} must be 0 (no image or video model is called)")
     required = b.get("ledger_required")
     if "ledger_required" in b and not isinstance(required, bool):
         rep.error(W, f"ledger_required = {required!r} must be true or false")
@@ -453,7 +476,10 @@ def check_shots(ep_dir, meta, rep):
         return {}
     shots, prev, prev_num, prev_to = {}, None, None, None
     length = meta.get("length_s") if meta else None
-    layers_only = episode_method(meta)[0] == "layers"
+    method = episode_method(meta)[0]
+    layers_only = method == "layers"
+    code = method == "code"
+    cameras = CAMERAS_CODE if code else CAMERAS
     for n, r in rows:
         W = f"shots.csv:{n}"
         sid = r["shot"]
@@ -488,15 +514,18 @@ def check_shots(ep_dir, meta, rep):
             prev_to = b
         if r["shot_size"] not in SHOT_SIZES:
             rep.error(W, f"shot_size '{r['shot_size']}' not in {', '.join(sorted(SHOT_SIZES))}")
-        if r["camera"] not in CAMERAS:
-            rep.error(W, f"camera '{r['camera']}' is not one move from {', '.join(sorted(CAMERAS))}")
+        if r["camera"] not in cameras:
+            rep.error(W, f"camera '{r['camera']}' is not one move from {', '.join(sorted(cameras))}")
         if prev and prev["shot_size"] == r["shot_size"] and prev["camera"] == r["camera"]:
             rep.error(W, f"{sid} repeats both shot_size '{r['shot_size']}' and camera '{r['camera']}' of {prev['shot']}")
         codes = [c.strip() for c in r["layers"].split(";") if c.strip()]
         if not codes and not r["reuse_of"]:
             rep.warn(W, f"{sid} has no layers")
         for c in codes:
-            if not RE_LAYER_CODE.match(c):
+            if code:
+                if not RE_CODE_LAYER.match(c):
+                    rep.error(W, f"method code: layer code '{c}' invalid (C-<character>, E-<setting>, FX[-<effect>], T)")
+            elif not RE_LAYER_CODE.match(c):
                 rep.error(W, f"layer code '{c}' invalid (L1-L4, P<n>-<part>, FX)")
         if len(codes) != len(set(codes)):
             rep.error(W, f"duplicate layer codes in '{r['layers']}'")
@@ -507,6 +536,8 @@ def check_shots(ep_dir, meta, rep):
                     rep.warn(W, f"{sid} code_motion '{m}' is not in tools/compose/motions.json")
         if layers_only and r["ai_motion"].strip():
             rep.error(W, f"method layers: shot {sid} has ai_motion; use code_motion or pose-cycle, or set method: seedance")
+        if code and r["ai_motion"].strip():
+            rep.error(W, f"method code: shot {sid} has ai_motion; every motion is a TOON action (code_motion)")
         r["_codes"] = codes
         r["_line"] = n
         shots[sid] = r
@@ -631,6 +662,10 @@ def check_script(ep_dir, meta, rep):
 
 def check_prompts(ep_dir, meta, shots, rep):
     path = os.path.join(ep_dir, "prompts.csv")
+    if episode_method(meta)[0] == "code":       # nothing is generated: no prompts.csv needed
+        if os.path.isfile(path):
+            rep.warn("prompts.csv", "method code generates no image or clip; prompts.csv is not used")
+        return None
     if not os.path.isfile(path):
         missing_file(rep, meta, "prompts.csv")
         return None
@@ -986,15 +1021,21 @@ def check_style(style_dir, rep):
         rep.error("style.yaml", "must be a mapping")
         return
     W = "style.yaml"
-    for k in STYLE_REQUIRED:
+    engine = y.get("engine", "image")
+    if engine not in STYLE_ENGINES:
+        rep.error(W, f"engine {engine!r} must be image or code")
+        engine = "image"
+    required = STYLE_REQUIRED_CODE if engine == "code" else STYLE_REQUIRED
+    optional = STYLE_OPTIONAL_CODE if engine == "code" else STYLE_OPTIONAL + ["engine"]
+    for k in required:
         if k not in y:
             rep.error(W, f"required key '{k}' missing")
-    for k in STYLE_OPTIONAL:
-        if k not in y:
+    for k in optional:
+        if k not in y and k not in ("engine", "name_en"):
             rep.warn(W, f"optional key '{k}' missing (inherited from base recipe?)")
     for k in y:
-        if k not in STYLE_REQUIRED and k not in STYLE_OPTIONAL:
-            rep.warn(W, f"unknown key '{k}'")
+        if k not in required and k not in optional:
+            rep.warn(W, f"unknown key '{k}'" + (" (not used by an engine: code style)" if engine == "code" else ""))
     if "id" in y:
         if y["id"] != sid:
             rep.error(W, f"id '{y['id']}' != folder name '{sid}'")
@@ -1012,6 +1053,8 @@ def check_style(style_dir, rep):
             rep.error(W, f"{k} must be a non-empty string")
     if "negative" in y and (not isinstance(y["negative"], list) or not all(isinstance(x, str) for x in y["negative"])):
         rep.error(W, "negative must be a list of strings")
+    if engine == "code" and "render" in y:
+        check_render(y["render"], rep)
     if "palette" in y:
         pal = y["palette"]
         if not isinstance(pal, dict) or not pal:
@@ -1046,9 +1089,76 @@ def check_style(style_dir, rep):
                 rep.error(W, f"motion entry {m!r} must be a module id string")
             elif m not in known_motions():
                 rep.warn(W, f"motion id '{m}' is not in tools/compose/motions.json")
-    check_style_prompts(style_dir, rep)
+    if engine != "code":
+        check_style_prompts(style_dir, rep)
     if not os.path.isfile(os.path.join(style_dir, "STYLE.md")):
         rep.warn("STYLE.md", "missing")
+
+
+def style_engine(style_dir):
+    """engine of a style pack ('image' when the key is missing), or None when style.yaml cannot be read."""
+    import yaml
+    try:
+        y = yaml.safe_load(read_text(os.path.join(style_dir, "style.yaml"))) or {}
+    except Exception:
+        return None
+    return y.get("engine", "image") if isinstance(y, dict) else None
+
+
+def known_looks():
+    """(geometry looks {id: engine}, post ids) from tools/toon/looks.json, or None when it is missing."""
+    try:
+        with open(os.path.join(LAB, "tools", "toon", "looks.json"), encoding="utf-8") as f:
+            d = json.load(f)
+        return {k: v.get("engine") for k, v in d["looks"].items()}, set(d["posts"])
+    except (OSError, ValueError, KeyError, AttributeError):
+        return None
+
+
+RE_COLOR = re.compile(r"^(#[0-9A-Fa-f]{6}|rgba?\([\d.,\s]+\))$")
+
+
+def check_render(r, rep):
+    """The render block of an engine: code style pack (docs/CONVENTIONS.md §3)."""
+    W = "style.yaml"
+    if not isinstance(r, dict):
+        rep.error(W, "render must be a mapping {engine, look, post, hold, ...}")
+        return
+    for k in r:
+        if k not in RENDER_KEYS:
+            rep.warn(W, f"render: unknown key '{k}'")
+    eng, look = r.get("engine"), r.get("look")
+    if eng not in RENDER_ENGINES:
+        rep.error(W, f"render.engine {eng!r} must be canvas2d or three")
+    known = known_looks()
+    if known:
+        looks, posts = known
+        if look not in looks:
+            rep.error(W, f"render.look {look!r} is not a geometry look of tools/toon/looks.json ({', '.join(sorted(looks))})")
+        elif eng in RENDER_ENGINES and looks[look] != eng:
+            rep.error(W, f"render.engine {eng} does not match look {look} (engine {looks[look]})")
+        post = r.get("post", [])
+        if not isinstance(post, list):
+            rep.error(W, "render.post must be a list of post ids or {id: ..., options}")
+        else:
+            for q in post:
+                pid = q.get("id") if isinstance(q, dict) else q
+                if pid not in posts:
+                    rep.error(W, f"render.post {pid!r} is not a post of tools/toon/looks.json ({', '.join(sorted(posts))})")
+    hold = r.get("hold")
+    if hold is not None and (isinstance(hold, bool) or not isinstance(hold, int) or not 1 <= hold <= 4):
+        rep.error(W, f"render.hold {hold!r} must be 1 (24 drawings/s), 2 (on twos), 3 or 4")
+    pal = r.get("palette")
+    if pal is not None:
+        if not isinstance(pal, dict):
+            rep.error(W, "render.palette must be a mapping name -> colour")
+        else:
+            for name, c in pal.items():
+                if not isinstance(c, str) or not RE_COLOR.match(c):
+                    rep.error(W, f"render.palette.{name} = {c!r} is not #RRGGBB or rgba(...)")
+    for k in ("opts", "camera", "env"):
+        if k in r and not isinstance(r[k], dict):
+            rep.error(W, f"render.{k} must be a mapping")
 
 
 def check_matte(matte, rep):

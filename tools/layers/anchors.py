@@ -15,7 +15,10 @@ import argparse, contextlib, fcntl, json, math, os, re, sys, tempfile
 
 from PIL import Image, ImageDraw, ImageFont
 
-RE_LAYER_FILE = re.compile(r"^(?:ep\d{2}|q\d{2}t\d{2})_s\d{2}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{2}\.(png|jpg)$")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import episode_id  # noqa: E402  (tools/episode_id.py: episode ids, shot ids and layer codes, CONVENTIONS §2)
+
+RE_LAYER_FILE = episode_id.RE_LAYER_FILE   # pose plates (L4b...) and s<NNN> shots included
 
 
 def load(path):

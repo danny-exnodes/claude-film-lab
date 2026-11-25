@@ -15,7 +15,7 @@ front matter is used (relative to the repo root).
 
 --probe measures every clip and render mp4 with ffprobe (size, fps, duration, audio) and, for
 renders/<id>_final_v<NN>.mp4, integrated loudness with ffmpeg ebur128 (target -14 +-1 LUFS); the
-numbers go into the report, so `--probe --out review/check-<v>.txt` is what film-reviewer reads.
+numbers go into the report, so `--probe --out review/check-v<N>.txt` is what film-reviewer reads.
 
 script.md rules: every narration line starts with a [mm:ss] mark (an optional "- " bullet before it is
 allowed). Lines that are not narration: blank lines, headings (#), blockquotes (>), HTML comments,
@@ -24,6 +24,13 @@ fenced code blocks, a YAML front matter block and horizontal rules.
 Also checked: budget.yaml (the four keys of docs/CONVENTIONS.md §7, both totals required), `stage` against
 the gate dates, and with --probe only the newest draft and the newest final render (older versions get one
 INFO line). A file that cannot be read gives an ERROR line; the report is written even then.
+
+Shot ids are s<NN> or s<NNN> (one width per episode); layer codes include pose plates L4b..L4z; method code
+layers are C-/M-<slug>, E-<slug>, FX[-<name>], T. code_motion ids come from tools/compose/motions.json (entries
+with engine: toon are method code actions; their project.js moves are camera values there too). Coverage:
+two approved images (or clips) of one shot layer = ERROR; files in plates/ without a prompts.csv row = WARN;
+from stage 8 (G3) a seedance shot with ai_motion and no clip in clips/ = ERROR. A key given twice in the
+EPISODE.md front matter or in budget.yaml = ERROR.
 """
 import argparse, csv, datetime, io, json, math, os, re, shutil, subprocess, sys, unicodedata
 
@@ -32,33 +39,57 @@ sys.path.insert(0, os.path.join(LAB, "tools"))
 import episode_id as eid_mod  # noqa: E402
 
 
-def known_motions():
-    """Motion ids from tools/compose/motions.json (None if the registry is missing)."""
+def motion_registry():
+    """{motion id: entry} from tools/compose/motions.json, the one source of truth for code_motion ids (compose kit
+    calls and, with `engine: toon`, method: code actions and camera moves); None if the registry is missing."""
     try:
         with open(os.path.join(LAB, "tools", "compose", "motions.json"), encoding="utf-8") as f:
-            return set(json.load(f)["motions"])
-    except (OSError, ValueError, KeyError):
+            reg = json.load(f)["motions"]
+        return {k: (v if isinstance(v, dict) else {}) for k, v in reg.items()}
+    except (OSError, ValueError, KeyError, AttributeError):
         return None
 
+
+def known_motions():
+    """Motion ids from tools/compose/motions.json (None if the registry is missing)."""
+    reg = motion_registry()
+    return None if reg is None else set(reg)
+
+
+def is_toon_motion(entry):
+    return entry.get("engine") == "toon"
+
+
+def is_toon_camera(entry):
+    """A toon camera move (tools/toon/project.js): also a valid `camera` value in a method: code episode."""
+    return is_toon_motion(entry) and str(entry.get("module", "")).endswith("project.js")
+
+
+def needs_plate(entry):
+    """A compose motion that rigs a painted plate (PLATES.<id>.rig...): nothing to rig in a method: code episode."""
+    return str(entry.get("call", "")).startswith("PLATES.")
+
 # --- §2 naming -----------------------------------------------------------------
-# <id> = ep<NN> or q<NN>t<NN> (tools/episode_id.py)
+# <id> = ep<NN> or q<NN>t<NN>, <shot> = s<NN> or s<NNN>, layer codes incl. pose plates L4b.. (tools/episode_id.py)
 ID = eid_mod.ID
-RE_LAYER_FILE = re.compile(rf"^{ID}_s\d{{2}}_(L[1-4]|P\d+-[a-z0-9-]+|FX)_[a-z0-9-]+_v\d{{2}}\.(png|jpg)$")
-RE_CLIP_FILE = re.compile(rf"^{ID}_s\d{{2}}_[a-z0-9]+_v\d{{2}}\.mp4$")
+SHOT = eid_mod.SHOT
+RE_LAYER_FILE = re.compile(rf"^{ID}_{SHOT}_({eid_mod.LAYER})_[a-z0-9-]+_v\d{{2}}\.(png|jpg)$")   # group 1 = layer
+RE_CLIP_FILE = re.compile(rf"^{ID}_{SHOT}_[a-z0-9]+_v\d{{2}}\.mp4$")
 RE_RENDER_FILE = re.compile(rf"^{ID}_(draft|final)_v\d{{2}}\.mp4$")
 # Other files under clips/ (film-compose-shot/references/seedance-layer.md):
 #   clips/<id>_s<NN>_start_v<NN>.png            start frame for Seedance (tools/compose/keyframe.py)
-#   clips/<clip stem>/000001.png ...            keyed RGBA frames (matte.py chroma), read by a `seq` layer
+#   clips/<clip stem>/000001.png ...            keyed RGBA frames (tools/layers/matte_seq.py), read by a `seq` layer
 #   clips/<clip stem>/raw/000001.png ...        raw frames extracted with ffmpeg before keying
-RE_START_FRAME = re.compile(rf"^{ID}_s\d{{2}}_start_v\d{{2}}\.png$")
-RE_CLIP_STEM = re.compile(rf"^{ID}_s\d{{2}}_[a-z0-9]+_v\d{{2}}$")
+RE_START_FRAME = re.compile(rf"^{ID}_{SHOT}_start_v\d{{2}}\.png$")
+RE_CLIP_STEM = re.compile(rf"^{ID}_{SHOT}_[a-z0-9]+_v\d{{2}}$")
 RE_FRAME = re.compile(r"^\d{6}\.png$")
-RE_LAYER_CODE = re.compile(r"^(L[1-4]|P\d+-[a-z0-9-]+|FX)$")
-# method: code (characters drawn in code, tools/toon/): C-<character>, E-<setting>, FX or FX-<effect>, T (on-screen text)
-RE_CODE_LAYER = re.compile(r"^(C-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
+RE_LAYER_CODE = eid_mod.RE_LAYER
+# method: code (drawn in code, tools/toon/, code-method.md §4): C-<character> or M-<model>, E-<setting>,
+# FX or FX-<effect>, T (on-screen text)
+RE_CODE_LAYER = re.compile(r"^([CM]-[a-z0-9-]+|E-[a-z0-9-]+|FX(-[a-z0-9-]+)?|T)$")
 RE_SLUG = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 RE_EP_DIR = eid_mod.RE_DIR
-RE_SHOT = re.compile(r"^s(\d{2})$")
+RE_SHOT = eid_mod.RE_SHOT
 RE_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 RE_HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 MEDIA_RULES = {"plates": RE_LAYER_FILE, "clips": RE_CLIP_FILE, "renders": RE_RENDER_FILE}
@@ -101,7 +132,7 @@ RENDER_ENGINES = {"canvas2d", "three"}
 RENDER_KEYS = {"engine", "look", "post", "hold", "palette", "opts", "camera", "env", "seed"}
 STYLE_STATUS = {"stable", "draft"}
 MATTE_METHODS = {"none", "luminance", "chroma", "rembg"}
-STYLE_LAYER_KEY = re.compile(r"^(L[1-4]|P|P\d+-[a-z0-9-]+|FX)$")
+STYLE_LAYER_KEY = re.compile(rf"^(P|{eid_mod.LAYER})$")
 PLACEHOLDERS = {"style_block", "subject", "constraints", "light"}
 
 
@@ -142,6 +173,41 @@ def read_text(path):
             return nfc(f.read())
     except UnicodeDecodeError as e:
         raise CheckError(path, f"not valid UTF-8 (byte {e.start}); save the file as UTF-8") from None
+
+
+def yaml_load_dups(text):
+    """yaml.safe_load(text) plus the keys given twice in one mapping: (data, [(key, line), ...]).
+
+    PyYAML keeps the last value of a repeated key without a word, so `method: layers` followed later by
+    `method: seedance` would silently change the episode's method. Merge keys (<<) are not counted."""
+    import yaml
+    dups = []
+
+    class Loader(yaml.SafeLoader):
+        pass
+
+    def mapping(loader, node):
+        seen = set()
+        for kn, _vn in node.value:
+            if kn.tag == "tag:yaml.org,2002:merge":
+                continue
+            k = loader.construct_object(kn, deep=True)
+            try:
+                if k in seen:
+                    dups.append((k, kn.start_mark.line + 1))
+                seen.add(k)
+            except TypeError:                    # an unhashable key: construct_mapping reports it
+                pass
+        return yaml.SafeLoader.construct_mapping(loader, node, deep=True)
+
+    Loader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, mapping)
+    return yaml.load(text, Loader=Loader), dups
+
+
+def report_dups(rep, where, dups, line_offset=0, what="key"):
+    for k, line in dups:
+        rep.error(where, f"{what} '{k}' given twice (line {line + line_offset}): YAML silently keeps the last value; "
+                         f"keep one")
 
 
 def split_front_matter(text):
@@ -220,7 +286,8 @@ def check_front_matter(ep_dir, rep):
         rep.error("EPISODE.md", "no YAML front matter (--- ... --- at the top)")
         return None
     try:
-        meta = yaml.safe_load(fm) or {}
+        meta, dups = yaml_load_dups(fm)
+        meta = meta or {}
     except (yaml.YAMLError, ValueError) as e:   # ValueError: an impossible date such as 2026-11-31
         rep.error("EPISODE.md", f"front matter is not valid YAML: {str(e).splitlines()[0]}")
         return None
@@ -228,6 +295,7 @@ def check_front_matter(ep_dir, rep):
         rep.error("EPISODE.md", "front matter must be a mapping")
         return None
     W = "EPISODE.md"
+    report_dups(rep, W, dups, line_offset=1, what="front matter key")   # +1: the opening '---' line
     for k in EPISODE_KEYS:
         if k not in meta:
             rep.error(W, f"front matter key '{k}' missing")
@@ -399,7 +467,8 @@ def check_budget(ep_dir, meta, rep):
         rep.error(W, "missing (written at stage 0: no paid call without a budget; copy templates/episode/budget.yaml)")
         return
     try:
-        b = yaml.safe_load(read_text(path))
+        b, dups = yaml_load_dups(read_text(path))
+        report_dups(rep, W, dups)
     except CheckError as e:
         rep.error(W, e.msg)
         return
@@ -479,22 +548,31 @@ def check_shots(ep_dir, meta, rep):
     method = episode_method(meta)[0]
     layers_only = method == "layers"
     code = method == "code"
+    registry = motion_registry()
     cameras = CAMERAS_CODE if code else CAMERAS
+    if code and registry:                        # toon camera moves of motions.json are camera values too
+        cameras = cameras | {k for k, v in registry.items() if is_toon_camera(v)}
+    width = None                                 # digits of the first valid shot id: 2 (s01) or 3 (s001)
     for n, r in rows:
         W = f"shots.csv:{n}"
         sid = r["shot"]
-        m = RE_SHOT.match(sid)
-        if not m:
-            rep.error(W, f"shot id '{sid}' must be s<NN> (two digits)")
+        sn = eid_mod.shot_number(sid)
+        if not sn:
+            rep.error(W, f"shot id '{sid}' must be s<NN> (s01-s99) or s<NNN> (s001-s999)")
         else:
-            num = int(m.group(1))
+            num, w = sn
+            if width is None:
+                width = w
+            elif w != width:
+                rep.error(W, f"shot id '{sid}' has {w} digits but the first shot has {width}: one episode uses one "
+                             f"width (all s<NN> or all s<NNN>; more than 99 shots need s001...)")
             if prev_num is None and num != 1:
-                rep.warn(W, f"first shot is {sid}, expected s01")
+                rep.warn(W, f"first shot is {sid}, expected {eid_mod.make_shot(1, w)}")
             if prev_num is not None:
                 if num <= prev_num:
-                    rep.error(W, f"shot ids must increase: {sid} after s{prev_num:02d}")
+                    rep.error(W, f"shot ids must increase: {sid} after {eid_mod.make_shot(prev_num, width)}")
                 elif num != prev_num + 1:
-                    rep.warn(W, f"gap in shot ids: {sid} after s{prev_num:02d}")
+                    rep.warn(W, f"gap in shot ids: {sid} after {eid_mod.make_shot(prev_num, width)}")
             prev_num = num if prev_num is None or num > prev_num else prev_num
         if sid in shots:
             rep.error(W, f"duplicate shot id {sid}")
@@ -524,16 +602,27 @@ def check_shots(ep_dir, meta, rep):
         for c in codes:
             if code:
                 if not RE_CODE_LAYER.match(c):
-                    rep.error(W, f"method code: layer code '{c}' invalid (C-<character>, E-<setting>, FX[-<effect>], T)")
+                    rep.error(W, f"method code: layer code '{c}' invalid "
+                                 f"(C-<character> or M-<model>, E-<setting>, FX[-<effect>], T)")
             elif not RE_LAYER_CODE.match(c):
-                rep.error(W, f"layer code '{c}' invalid (L1-L4, P<n>-<part>, FX)")
+                rep.error(W, f"layer code '{c}' invalid (L1-L4, pose plates L4b-L4z, P<n>-<part>, FX)")
+            elif eid_mod.RE_POSE.match(c) and method == "seedance":
+                rep.warn(W, f"{sid}: pose plate {c} belongs to method layers (pose-cycle); a seedance episode moves "
+                            f"the character with a clip")
         if len(codes) != len(set(codes)):
             rep.error(W, f"duplicate layer codes in '{r['layers']}'")
-        motions = known_motions()
-        if motions is not None:
+        if registry is not None:
             for m in (x.strip() for x in r["code_motion"].split(";")):
-                if m and m not in motions:
+                if not m:
+                    continue
+                if m not in registry:
                     rep.warn(W, f"{sid} code_motion '{m}' is not in tools/compose/motions.json")
+                elif is_toon_motion(registry[m]) and not code:
+                    rep.warn(W, f"{sid} code_motion '{m}' is a method code (TOON) action; a {method or 'seedance'} "
+                                f"episode has no TOON character")
+                elif code and not is_toon_motion(registry[m]) and needs_plate(registry[m]):
+                    rep.warn(W, f"{sid} code_motion '{m}' rigs a painted plate ({registry[m].get('call')}); "
+                                f"a method code episode has none")
         if layers_only and r["ai_motion"].strip():
             rep.error(W, f"method layers: shot {sid} has ai_motion; use code_motion or pose-cycle, or set method: seedance")
         if code and r["ai_motion"].strip():
@@ -572,17 +661,17 @@ def narration_lines(text):
     fence = comment = False
     for k in range(i, n):
         raw = lines[k]
+        if comment:                              # inside a multi-line comment: keep what follows its end
+            if "-->" not in raw:                 # (a ``` line in a comment is part of the comment, not a fence)
+                continue
+            comment = False
+            raw = raw.split("-->", 1)[1].strip()
         s = raw.strip()
         if s.startswith("```") or s.startswith("~~~"):
             fence = not fence
             continue
         if fence:
             continue
-        if comment:                              # inside a multi-line comment: keep what follows its end
-            if "-->" not in raw:
-                continue
-            comment = False
-            raw = raw.split("-->", 1)[1].strip()
         if "<!--" in raw:
             raw = RE_INLINE_COMMENT.sub("", raw)
             if "<!--" in raw:                    # a comment that continues on the next lines
@@ -698,7 +787,7 @@ def check_prompts(ep_dir, meta, shots, rep):
             if m and m.group(1) != r["layer"]:
                 rep.error(W, f"file '{f}' has layer {m.group(1)} but layer column is '{r['layer']}'")
         if not RE_SHOT.match(r["shot"]):
-            rep.error(W, f"shot '{r['shot']}' must be s<NN>")
+            rep.error(W, f"shot '{r['shot']}' must be s<NN> or s<NNN>")
         elif shots is not None and r["shot"] not in shots:
             rep.error(W, f"shot '{r['shot']}' is not in shots.csv")
         elif shots and RE_LAYER_CODE.match(r["layer"]) and r["layer"] not in shots[r["shot"]]["_codes"]:
@@ -716,7 +805,22 @@ def check_prompts(ep_dir, meta, shots, rep):
                 json.loads(r["usage"])
             except ValueError:
                 rep.warn(W, "usage is not valid JSON (store the Ark usage object verbatim)")
+    check_approved_once(files, rep)
     return files
+
+
+def check_approved_once(rows, rep):
+    """One approved image per (shot, layer) and one approved clip per (shot, layer): with two, nobody knows which
+    one the film uses (a clip row names the layer it replaces, so an approved L4 plate plus its clip is fine)."""
+    approved = {}
+    for r in rows:
+        if r["approved"] == "yes":
+            kind = "clip" if RE_CLIP_FILE.match(r["file"]) else "image"
+            approved.setdefault((r["shot"], r["layer"], kind), []).append(r["file"])
+    for (shot, layer, kind), names in approved.items():
+        if len(names) > 1:
+            rep.error("prompts.csv", f"{shot} {layer}: {len(names)} approved {kind}s ({', '.join(names)}); "
+                                     f"keep approved=yes on the one the film uses, set the others to no")
 
 
 def check_media_name(rel, name, sub, rx, eid, rep):
@@ -745,7 +849,7 @@ def check_media_name(rel, name, sub, rx, eid, rep):
         rep.error(where, f"file is not for episode {eid}")
 
 
-def check_media(media, meta, prompt_rows, rep):
+def check_media(media, meta, prompt_rows, rep, shots=None):
     if not media or not os.path.isdir(media):
         rep.warn("media", f"media folder {media or '(none)'} not found: plates/clips/renders not checked")
         return False
@@ -762,12 +866,55 @@ def check_media(media, meta, prompt_rows, rep):
             for name in sorted(names):
                 check_media_name(os.path.relpath(os.path.join(root, name), media), name, sub, rx, eid, rep)
     check_listed_files(media, meta, prompt_rows, rep)
+    check_orphan_plates(media, prompt_rows, rep)
+    check_clips(media, meta, shots, prompt_rows, rep)
     led = os.path.join(media, "ledger.csv")
     if os.path.isfile(led):
         head = ledger_head(led, rep)
         if head is not None and head != ",".join(LEDGER_HEADER):
             rep.error("media/ledger.csv", f"header is {head!r}, expected {','.join(LEDGER_HEADER)!r}")
     return True
+
+
+def check_orphan_plates(media, prompt_rows, rep):
+    """Images in plates/ (not plates/matte/) with no prompts.csv row: a paid image nobody recorded (no prompt,
+    no approval), or a test file. One WARN line lists them. Skipped when prompts.csv could not be read."""
+    if prompt_rows is None:
+        return
+    d = os.path.join(media, "plates")
+    try:
+        names = sorted(n for n in os.listdir(d) if not n.startswith(".") and os.path.isfile(os.path.join(d, n)))
+    except OSError:
+        return
+    listed = {r["file"] for r in prompt_rows}
+    orphans = [n for n in names if n not in listed]
+    if orphans:
+        rep.warn("media/plates", f"{len(orphans)} file(s) with no prompts.csv row (record the prompt, or move test "
+                                 f"files out of plates/): {', '.join(orphans)}")
+
+
+def check_clips(media, meta, shots, prompt_rows, rep):
+    """From G3 (stage 8, the whole-episode draft) every seedance shot with ai_motion has its clip in clips/ (the
+    shot named in reuse_of for a reused shot). A clip rejected in prompts.csv (approved=no) does not count."""
+    stage = meta.get("stage") if meta else None
+    if not shots or episode_method(meta)[0] != "seedance" or not isinstance(stage, int) or stage < GATE_STAGE["G3"]:
+        return
+    rejected = {r["file"] for r in prompt_rows or [] if r["approved"] == "no"}
+    d = os.path.join(media, "clips")
+    try:
+        names = os.listdir(d)
+    except OSError:
+        names = []
+    have = {eid_mod.RE_SHOT_TAG.search(n).group(1) for n in names
+            if RE_CLIP_FILE.match(n) and n not in rejected and os.path.isfile(os.path.join(d, n))}
+    for sid, r in shots.items():
+        if not r["ai_motion"].strip():
+            continue
+        owner = r["reuse_of"] or sid
+        if owner not in have:
+            rep.error(f"shots.csv:{r['_line']}", f"{sid} has ai_motion '{r['ai_motion']}' but no clip "
+                      f"<id>_{owner}_<model>_v<NN>.mp4 in {d} at stage {stage} (G3 needs every clip; "
+                      f"pull the shot bundle from Drive, or empty ai_motion and move it with code_motion)")
 
 
 def ledger_head(path, rep):
@@ -879,18 +1026,30 @@ DEFAULT_FORMAT = (1920, 1080, 24.0)
 FPS_TOL = 0.01
 
 
-def series_format(ep_dir):
+def series_format(ep_dir, rep=None):
     """(width, height, fps) from `format:` in the front matter of SERIES.md in the episode's parent folder
-    (docs/CONVENTIONS.md §4), else 1920x1080 at 24 fps."""
+    (docs/CONVENTIONS.md §4), else 1920x1080 at 24 fps. With rep, one INFO line says which format the renders
+    are judged against and where it came from (a damaged SERIES.md of a vertical series must not stay silent)."""
     import yaml
+    path = os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "SERIES.md")
+    why = "format: missing or not {width, height, fps} with positive numbers"
     try:
-        fm, _ = split_front_matter(read_text(os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "SERIES.md")))
+        fm, _ = split_front_matter(read_text(path))
         f = yaml.safe_load(fm or "")["format"]
         w, h, fps = f["width"], f["height"], f["fps"]
         if all(isinstance(x, int) and not isinstance(x, bool) and x > 0 for x in (w, h)) and is_cap(fps) and fps > 0:
+            if rep:
+                rep.info(f"probe: series format {w}x{h} at {float(fps):g} fps (SERIES.md)")
             return w, h, float(fps)
-    except (OSError, CheckError, yaml.YAMLError, ValueError, TypeError, KeyError):
-        pass
+    except FileNotFoundError:
+        why = "no SERIES.md in the project folder"
+    except (KeyError, TypeError):
+        pass                                     # readable, but no usable format: block
+    except (OSError, CheckError, yaml.YAMLError, ValueError) as e:
+        why = f"SERIES.md unreadable: {getattr(e, 'msg', None) or (str(e).splitlines() or [type(e).__name__])[0]}"
+    if rep:
+        w, h, fps = DEFAULT_FORMAT
+        rep.info(f"probe: series format {w}x{h} at {fps:g} fps (default: {why})")
     return DEFAULT_FORMAT
 
 
@@ -960,6 +1119,9 @@ def probe_media(media, meta, rep, fmt=None):
                     rep.warn(where, "draft render has no audio stream")
             elif not is_16_9(w, h):
                 rep.warn(where, f"{w}x{h} is not 16:9")
+            if final and diff is None:           # the length rule would pass in silence
+                rep.warn(where, "duration not checked: " + ("ffprobe reports no duration" if pr["duration"] is None
+                                                            else "EPISODE.md has no numeric length_s"))
             if diff is not None and abs(diff) > LENGTH_TOL_S:
                 (rep.error if final else rep.warn)(
                     where, f"duration {pr['duration']:.2f} s differs from length_s {fmt_s(length)} s "
@@ -983,8 +1145,8 @@ def cmd_episode(a, rep=None):
     media = a.media
     if media is None and isinstance(meta.get("media"), str):
         media = meta["media"] if os.path.isabs(meta["media"]) else os.path.join(LAB, meta["media"])
-    if check_media(media, meta, files, rep) and a.probe:
-        probe_media(media, meta, rep, series_format(ep_dir))
+    if check_media(media, meta, files, rep, shots) and a.probe:
+        probe_media(media, meta, rep, series_format(ep_dir, rep))
     if not (media and os.path.isdir(media)):
         check_media_missing(media, meta, files, rep)
     if shots:
@@ -1072,7 +1234,7 @@ def check_style(style_dir, rep):
         else:
             for code, spec in lay.items():
                 if not STYLE_LAYER_KEY.match(str(code)):
-                    rep.error(W, f"layers.{code}: invalid layer code (L1-L4, P, FX)")
+                    rep.error(W, f"layers.{code}: invalid layer code (L1-L4, L4b-L4z, P, FX)")
                 if not isinstance(spec, dict) or "size" not in spec:
                     rep.error(W, f"layers.{code}: needs at least size")
     if "models" in y:
@@ -1177,7 +1339,7 @@ def check_matte(matte, rep):
     for code, spec in pl.items():
         where = f"matte.per_layer.{code}"
         if not STYLE_LAYER_KEY.match(str(code)):
-            rep.error(W, f"{where}: invalid layer code (L1-L4, P, FX)")
+            rep.error(W, f"{where}: invalid layer code (L1-L4, L4b-L4z, P, FX)")
         if not isinstance(spec, dict):
             rep.error(W, f"{where} must be a mapping")
             continue

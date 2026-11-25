@@ -31,8 +31,12 @@ python3 tools/audio/score.py .../score.json --out out/<project>/<id>/audio/v02 -
 python3 tools/audio/score.py .../score.json --out ... --seed 11                        # bản khác của mọi chi tiết ngẫu nhiên
 ```
 
-- Mã thoát: **0** xong · **2** lỗi đầu vào hoặc bị từ chối (in **mọi** lỗi, không ghi gì).
+- Mã thoát: **0** xong · **1** ghi file lỗi (đầy đĩa…), không thay file nào · **2** lỗi đầu vào hoặc bị từ chối (in
+  **mọi** lỗi, không ghi gì).
 - File đầu ra đã tồn tại thì bị từ chối (như các tool khác): dựng bản mới vào thư mục mới (`audio/v02`) hoặc `--overwrite`.
+  `stems/*.wav` cũ mà lần dựng này không tạo cũng tính là file đã có; với `--overwrite` chúng bị xoá (in `removed stale`).
+- Mọi file được ghi vào thư mục tạm trong `--out` rồi mới chuyển vào chỗ khi đã ghi xong hết: ghi lỗi giữa chừng thì bộ
+  file cũ giữ nguyên.
 - `--bits 16|24` (mặc định 24). Mọi file: stereo, 48 kHz, PCM, ghi bằng module `wave` chuẩn.
 - Cùng `score.json` + cùng seed → file **giống hệt từng byte**. Không có trạng thái ngẫu nhiên toàn cục: mỗi sự kiện
   lấy seed từ seed của điểm nhạc + vị trí của nó trong danh sách (`"seed": N` trên sự kiện để ghim âm đó khi đổi thứ tự).
@@ -86,7 +90,7 @@ Vang không làm âm dài hơn `dur`: muốn nghe đuôi vang thì cho `dur` đ�
 
 | `inst` | Khóa riêng |
 |---|---|
-| `guqin`, `pipa`, `koto` | `pitch` (`"D3"`, `"F#4"`, `"Bb2"` hoặc số MIDI, C4 = 60) **hoặc** `pitches` (rải dây: cần `dur`; `spread` giây giữa các dây, `up`), `vel` 0..1, `harmonic` (`true`/`2` = cao hơn nốt ghi một quãng tám, `3` = quãng tám + quãng năm, `4` = hai quãng tám), `bend` `[[giây, nửa cung], …]` (giữ giá trị cuối), `vib` `[Hz, độ sâu nửa cung, bắt đầu s]`, `glide` `[nốt đích, giây]`, `trem` (số lần gảy lại mỗi giây, cần `dur`), `release`, và tham số preset `t60`, `damp`, `pos`, `bright`, `bmix`, `noise` |
+| `guqin`, `pipa`, `koto` | `pitch` (`"D3"`, `"F#4"`, `"Bb2"` hoặc số MIDI, C4 = 60) **hoặc** `pitches` (rải dây: cần `dur`, tối đa 16 nốt; `spread` giây giữa các dây, `up`), `vel` 0..1, `harmonic` (`true`/`2` = cao hơn nốt ghi một quãng tám, `3` = quãng tám + quãng năm, `4` = hai quãng tám), `bend` `[[giây, nửa cung], …]` (giữ giá trị cuối), `vib` `[Hz, độ sâu nửa cung, bắt đầu s]`, `glide` `[nốt đích, giây]`, `trem` (số lần gảy lại mỗi giây, cần `dur`), `release`, và tham số preset `t60`, `damp`, `pos`, `bright`, `bmix`, `noise` |
 | `gong`, `drum`, `drum_roll`, `drone` | như foley cùng tên, `vel` thay cho `intensity`; vào stem `music` |
 
 Độ dài một nốt gảy = `dur` + `release` (0,25 s; bồi âm 0,8 s); bỏ `dur` thì nốt ngân theo `t60` của preset

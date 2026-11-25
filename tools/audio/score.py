@@ -25,24 +25,29 @@ SCORE.json
 Output (in --out): music.wav, foley.wav, ambience.wav (stereo, 48 kHz, 24-bit PCM, or --bits 16), preview.wav (the
 three stems summed and peak-limited: a rough listen, NOT the master; cinecode masters to -14 LUFS), score-log.json
 (per file: peak dBFS, RMS, duration, events; seed, tool version, engine, licence note) and mix-snippet.json (layers
-for cinecode's audio/mix.json: file, at, gain_db, bus). Existing output files are refused unless --overwrite.
-The same score and seed give byte-identical files.
+for cinecode's audio/mix.json: file, at, gain_db, bus). Existing output files are refused unless --overwrite; an
+older stems/*.wav this render does not make counts as existing and is removed with --overwrite. Every file is written
+to a staging folder inside --out first and moved into place only when all were written, so a failed write (disk
+full) leaves the previous set as it was. The same score and seed give byte-identical files.
 
-Exit codes: 0 ok · 2 input error or refused output (every problem is listed, nothing is written).
+Exit codes: 0 ok · 1 writing failed, nothing replaced · 2 input error or refused output (every problem is listed,
+nothing is written).
 """
 import argparse
 import hashlib
 import json
 import os
 import re
+import shutil
 import sys
+import tempfile
 import wave
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.1.0"
 LICENCE = "synthesised by tools/audio, no samples"
 MAX_LENGTH_S = 600
 STEMS = ("music", "foley", "ambience")
@@ -54,6 +59,8 @@ COMMON_KEYS = {"t", "beat", "gain", "pan", "shot", "note", "seed", "allow_in_sil
 PLUCK_KEYS = {"inst", "pitches", "vel", "harmonic", "bend", "vib", "glide", "trem", "release", "spread", "up",
               "t60", "damp", "pos", "bright", "bmix", "noise"}
 MUSIC_SOUNDS = ("gong", "drum", "drum_roll", "drone")
+MAX_STRUM_PITCHES = 16                      # a koto has 13 strings; more is a typo or a hostile score (slow, not unsafe)
+STAGE_PREFIX = ".score-tmp-"                 # outputs are written here first, then moved into --out together
 _PC = re.compile(r"\s*([A-Ga-g])([#sb]*)(-?\d+)?\s*")
 
 
@@ -114,6 +121,9 @@ def _check_pluck_options(P, where, ev, pluck):
     pitches = ev.get("pitches", [ev.get("pitch")])
     if not isinstance(pitches, list) or not pitches:
         P.error(where, "pitches must be a non-empty list")
+        return False
+    if len(pitches) > MAX_STRUM_PITCHES:
+        P.error(where, f"a strum takes at most {MAX_STRUM_PITCHES} pitches (got {len(pitches)})")
         return False
     for p in pitches:
         try:
@@ -360,13 +370,13 @@ def validate(score, seed=None):
                 if off:
                     P.warn(where, f"{', '.join(off)} is outside the scale")
             s0 = sfx.nsamp(t)
+            if s0 >= n_total:                            # below length_s but rounds onto its end: one ERROR, no WARN
+                P.error(where, f"starts at {t:g} s, past length_s {length_s:g} (it rounds to the last sample)")
+                continue
             cut = s0 + n > n_total
             if cut:
                 P.warn(where, f"{name} at {t:g} s rings {(s0 + n - n_total) / sfx.SR:.2f} s past length_s: its tail is faded out at the end")
                 n = n_total - s0
-            if n <= 0:
-                P.error(where, f"starts at {t:g} s, past length_s {length_s:g}")
-                continue
             inside = False
             for z0, z1, a, b in windows:
                 if s0 < z1 and s0 + n > z0:
@@ -543,8 +553,12 @@ def main(argv=None):
 
     labels = sorted({f"{c['kind']}-{c['name']}" for c in cues}) if a.stems else []
     names = [f"{s}.wav" for s in STEMS] + ["preview.wav", "score-log.json", "mix-snippet.json"] \
-        + [os.path.join("stems", f"{label}.wav") for label in labels]
-    existing = [n for n in names if os.path.exists(os.path.join(a.out, n))]
+        + [f"stems/{label}.wav" for label in labels]
+    stems_dir = os.path.join(a.out, "stems")
+    old_stems = [f"stems/{n}" for n in sorted(os.listdir(stems_dir)) if n.endswith(".wav")] \
+        if os.path.isdir(stems_dir) else []
+    stale = [n for n in old_stems if n not in names]      # sub-stems of an earlier render that this one does not make
+    existing = [n for n in names if os.path.exists(os.path.join(a.out, n))] + stale
     if existing and not a.overwrite:
         print(f"score: refused, {len(existing)} output file(s) already exist in {a.out}: {', '.join(existing)}\n"
               "  render a new version into a new folder (e.g. audio/v02), or pass --overwrite", file=sys.stderr)
@@ -556,18 +570,64 @@ def main(argv=None):
     except (ValueError, RuntimeError) as e:              # a sound refused its arguments: nothing was written yet
         print(f"ERROR render: {e}\nscore: 1 error(s), nothing written", file=sys.stderr)
         return 2
-    os.makedirs(os.path.join(a.out, "stems") if labels else a.out, exist_ok=True)
-    files = {}
+    # Every file goes to a staging folder inside --out first and is moved into place only when all were written: a
+    # failure (disk full) leaves the previous set as it was.
+    created = not os.path.isdir(a.out)
+    stage = None
+    try:
+        os.makedirs(a.out, exist_ok=True)
+        stage = tempfile.mkdtemp(prefix=STAGE_PREFIX, dir=a.out)
+        if labels:
+            os.makedirs(os.path.join(stage, "stems"))
+        files, log, snippet, windows = write_outputs(stage, a, r, cues, counts, labels, score, raw, seed, n_total, P,
+                                                     moving)
+    except OSError as e:
+        if stage:
+            shutil.rmtree(stage, ignore_errors=True)
+        if created:
+            shutil.rmtree(a.out, ignore_errors=True)
+        print(f"ERROR write: {e}\nscore: nothing replaced in {a.out}", file=sys.stderr)
+        return 1
+    if labels:
+        os.makedirs(stems_dir, exist_ok=True)
+    for n in names:
+        os.replace(os.path.join(stage, n), os.path.join(a.out, n))
+    shutil.rmtree(stage, ignore_errors=True)
+    for n in stale:
+        os.remove(os.path.join(a.out, n))
+        print(f"score: removed stale {n} (this render does not make it)")
+    if os.path.isdir(stems_dir) and not os.listdir(stems_dir):
+        os.rmdir(stems_dir)
     for s in STEMS:
-        write_wav(os.path.join(a.out, f"{s}.wav"), r["stems"][s], a.bits)
-        files[s] = dict(file=f"{s}.wav", **stats(r["stems"][s], counts[s]), gain_db=r["gain_db"][s])
         if r["gain_db"][s]:
             print(f"WARN {s}: the stem peaked above {STEM_CEIL}, lowered by {-r['gain_db'][s]:.2f} dB (lower the event gains)",
                   file=sys.stderr)
-    write_wav(os.path.join(a.out, "preview.wav"), r["preview"], a.bits)
+    for s in STEMS:
+        f = files[s]
+        print(f"  {f['file']:<13} events {f['events']:>3}  peak {f['peak_dbfs'] if f['peak_dbfs'] is not None else '-inf':>7} dBFS  "
+              f"rms {f['rms_dbfs'] if f['rms_dbfs'] is not None else '-inf':>7} dBFS")
+    pv = log["preview"]
+    print(f"  {'preview.wav':<13} events {len(cues):>3}  peak {pv['peak_dbfs'] if pv['peak_dbfs'] is not None else '-inf':>7} dBFS  "
+          f"rms {pv['rms_dbfs'] if pv['rms_dbfs'] is not None else '-inf':>7} dBFS  (rough mix, not the master)")
+    for w in windows:
+        print(f"  silence {w['from']:g}-{w['to']:g} s: {'exact zeros' if w['exact_zero'] else 'holds ' + str(w['allowed_events']) + ' allowed event(s)'}")
+    print(f"score: wrote {len(names)} files to {a.out}; layers for audio/mix.json (cinecode mix.py):")
+    print(json.dumps(snippet["layers"], ensure_ascii=False, indent=1))
+    return 0
+
+
+def write_outputs(stage, a, r, cues, counts, labels, score, raw, seed, n_total, P, moving):
+    """Write every output file into `stage` (the final names relative to it). -> (files, log, snippet, windows).
+    The snippet names the files where they will be after the move: in --out."""
+    np, pluck, sfx = _libs()
+    files = {}
+    for s in STEMS:
+        write_wav(os.path.join(stage, f"{s}.wav"), r["stems"][s], a.bits)
+        files[s] = dict(file=f"{s}.wav", **stats(r["stems"][s], counts[s]), gain_db=r["gain_db"][s])
+    write_wav(os.path.join(stage, "preview.wav"), r["preview"], a.bits)
     sub_files = {}
     for label in labels:
-        write_wav(os.path.join(a.out, "stems", f"{label}.wav"), r["sub"][label], a.bits)
+        write_wav(os.path.join(stage, "stems", f"{label}.wav"), r["sub"][label], a.bits)
         sub_files[label] = dict(file=f"stems/{label}.wav", **stats(r["sub"][label],
                                 sum(1 for c in cues if f"{c['kind']}-{c['name']}" == label)))
     windows = []
@@ -588,25 +648,14 @@ def main(argv=None):
         "cues": [dict(t=round(c["t"], 6), stem=c["stem"], name=c["name"], pitch=c["shown"], length_s=round(c["samples"] / sfx.SR, 6),
                       gain=c["gain"], pan=c["pan"], shot=c["shot"], seed=c["seed"]) for c in cues],
     }
-    with open(os.path.join(a.out, "score-log.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(stage, "score-log.json"), "w", encoding="utf-8") as fh:
         json.dump(log, fh, ensure_ascii=False, indent=1)
         fh.write("\n")
     snippet = mix_snippet(a.out, counts)
-    with open(os.path.join(a.out, "mix-snippet.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(stage, "mix-snippet.json"), "w", encoding="utf-8") as fh:
         json.dump(snippet, fh, ensure_ascii=False, indent=1)
         fh.write("\n")
-    for s in STEMS:
-        f = files[s]
-        print(f"  {f['file']:<13} events {f['events']:>3}  peak {f['peak_dbfs'] if f['peak_dbfs'] is not None else '-inf':>7} dBFS  "
-              f"rms {f['rms_dbfs'] if f['rms_dbfs'] is not None else '-inf':>7} dBFS")
-    pv = log["preview"]
-    print(f"  {'preview.wav':<13} events {len(cues):>3}  peak {pv['peak_dbfs'] if pv['peak_dbfs'] is not None else '-inf':>7} dBFS  "
-          f"rms {pv['rms_dbfs'] if pv['rms_dbfs'] is not None else '-inf':>7} dBFS  (rough mix, not the master)")
-    for w in windows:
-        print(f"  silence {w['from']:g}-{w['to']:g} s: {'exact zeros' if w['exact_zero'] else 'holds ' + str(w['allowed_events']) + ' allowed event(s)'}")
-    print(f"score: wrote {len(names)} files to {a.out}; layers for audio/mix.json (cinecode mix.py):")
-    print(json.dumps(snippet["layers"], ensure_ascii=False, indent=1))
-    return 0
+    return files, log, snippet, windows
 
 
 if __name__ == "__main__":

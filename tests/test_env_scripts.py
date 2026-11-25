@@ -107,6 +107,63 @@ if __name__ == "__main__":
 """
 
 
+def tts_jobs(td):
+    """Doctor scenarios for the narration lines (tts, tts-watermark, --episode). python3 runs with -S, so what is
+    really installed (vieneu, perth, torch in a cloud session) never leaks in: only the stand-ins below exist,
+    plus PyYAML, which --episode needs to read EPISODE.md."""
+    import yaml
+    nosite = td / "nosite"
+    nosite.mkdir()
+    write_exec(nosite / "python3", f'#!/bin/bash\nexec "{sys.executable}" -S "$@"\n')
+    (td / "base").mkdir()
+    os.symlink(Path(yaml.__file__).parent, td / "base" / "yaml")
+
+    def stubs(kind, dists, perth_body=""):
+        d = td / kind
+        mods = {"vieneu": "vieneu", "resemble-perth": "perth", "torch": "torch"}
+        for name, ver in dists:
+            (d / mods[name]).mkdir(parents=True)
+            (d / mods[name] / "__init__.py").write_text(perth_body if name == "resemble-perth" else "")
+            info = d / f"{name.replace('-', '_')}-{ver}.dist-info"
+            info.mkdir()
+            (info / "METADATA").write_text(f"Metadata-Version: 2.1\nName: {name}\nVersion: {ver}\n")
+        return f"{d}{os.pathsep}{td / 'base'}"
+    full = [("vieneu", "3.8.3"), ("resemble-perth", "1.0.1"), ("torch", "2.15.0+cpu")]
+    ok, old = stubs("tts_ok", full), stubs("tts_old", [("vieneu", "3.7.0")])
+    broken = stubs("tts_broken", full, "raise ImportError('perth stubbed out by the test')\n")
+    none = str(td / "base")
+    (td / "hf_cached" / "hub" / "models--pnnbao-ump--VieNeu-TTS-v3-Turbo" / "snapshots" / "abc123").mkdir(parents=True)
+
+    def episode(name, g3, script):
+        d = td / name
+        d.mkdir()
+        (d / "EPISODE.md").write_text("---\nstage: 10\ngates: {G1: 2026-11-01, G2: 2026-11-03, G3: %s, G4: null}\n"
+                                      "---\n# Tập\n" % g3, encoding="utf-8")
+        (d / "script.md").write_text(script, encoding="utf-8")
+        return str(d)
+    past = episode("ep_past", "2026-11-06", "# Lời bình\n[00:00] Một.\n[00:05] Hai.\n")
+    before = episode("ep_before", "null", "# Lời bình\n[00:00] Một.\n")
+    silent = episode("ep_silent", "2026-11-06", "# Không có lời bình\n")
+    path = str(nosite) + os.pathsep + os.environ["PATH"]
+
+    def env(pythonpath, hf="hf_none"):
+        return {"PATH": path, "PYTHONPATH": pythonpath, "HF_HOME": str(td / hf), "HF_HUB_CACHE": ""}
+    return {
+        "tts_none": ([None, "--quick"], env(none)),
+        "tts_ok": ([None, "--quick"], env(ok)),
+        "tts_cached": ([None, "--quick"], env(ok, "hf_cached")),
+        "tts_old": ([None, "--quick"], env(old)),
+        "tts_full": ([None], env(ok)),
+        "tts_full_broken": ([None], env(broken)),
+        "ep_past": ([None, "--quick", "--episode", past], env(none)),
+        "ep_past_ok": ([None, "--episode", past, "--quick"], env(ok)),
+        "ep_before": ([None, "--quick", "--episode", before], env(none)),
+        "ep_silent": ([None, "--quick", "--episode", silent], env(none)),
+        "ep_missing": ([None, "--quick", "--episode", str(td / "nowhere")], env(none)),
+        "ep_noarg": ([None, "--quick", "--episode"], env(none)),
+    }
+
+
 @unittest.skipUnless(BASH and GIT, "needs bash and git")
 class TestDoctor(unittest.TestCase):
     """Every scenario runs once, in parallel, in setUpClass; the tests assert on single lines only
@@ -184,6 +241,7 @@ class TestDoctor(unittest.TestCase):
             "bogus": ([None, "--bogus"], {}),
             "two_args": ([None, "--quick", "extra"], {}),
         }
+        jobs.update(tts_jobs(cls.td))
 
         def go(item):
             name, ((scn, *args), extra) = item
@@ -332,6 +390,45 @@ class TestDoctor(unittest.TestCase):
 
     def test_real_link_untouched(self):
         self.assertTrue(self.link_unchanged)
+
+    # --- narration (#37) ----------------------------------------------------------------------------------------
+    def test_tts_missing_is_a_warning_with_the_install_line(self):
+        rc, out, _ = self.r["tts_none"]
+        self.assertRegex(self.line("tts_none", "tts"), r"WARN .*missing module\(s\) vieneu.*requirements-tts\.txt")
+        self.assertRegex(self.line("tts_none", "tts-watermark"), r"WARN .*missing module\(s\) perth, torch")
+        self.assertEqual(rc, len(re.findall(r"^\s+FAIL\s", out, re.M)), out)
+
+    def test_tts_installed_and_pinned(self):
+        self.assertRegex(self.line("tts_ok", "tts"), r"OK .*vieneu 3\.8\.3, v3 Turbo model not cached")
+        self.assertRegex(self.line("tts_cached", "tts"), r"OK .*vieneu 3\.8\.3, v3 Turbo model cached")
+        self.assertRegex(self.line("tts_ok", "tts-watermark"), r"OK .*resemble-perth 1\.0\.1 \+ torch 2\.15\.0\+cpu")
+
+    def test_tts_other_version_warns(self):
+        self.assertRegex(self.line("tts_old", "tts"), r"WARN .*vieneu 3\.7\.0, pinned 3\.8\.3 in requirements-tts\.txt")
+
+    def test_full_mode_imports_the_tts_modules(self):
+        self.assertRegex(self.line("tts_full", "tts"), r"OK .*vieneu 3\.8\.3 \(imported\)")
+        self.assertRegex(self.line("tts_full", "tts-watermark"), r"OK .*\(imported\)")
+        self.assertRegex(self.line("tts_full_broken", "tts-watermark"), r"WARN .*import fails.*perth stubbed out")
+
+    def test_watermark_fails_only_for_an_episode_past_g3_with_narration(self):
+        rc, out, err = self.r["ep_past"]
+        self.assertRegex(self.line("ep_past", "tts-watermark"), r"FAIL .*passed G3 \(2026-11-06\) with narration")
+        self.assertEqual(rc, len(re.findall(r"^\s+FAIL\s", out, re.M)), out + err)
+        self.assertNotIn("all checks passed", out)
+        self.assertRegex(self.line("ep_past", "tts"), r"WARN ")                 # vieneu itself stays a warning
+        self.assertRegex(self.line("ep_past_ok", "tts-watermark"), r"OK ")
+        self.assertRegex(self.line("ep_before", "tts-watermark"), r"WARN ")
+        self.assertRegex(self.line("ep_silent", "tts-watermark"), r"WARN ")
+
+    def test_episode_argument_errors_are_usage_errors(self):
+        rc, out, err = self.r["ep_missing"]
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertIn("doctor: --episode:", err)
+        self.assertIn("EPISODE.md", err)
+        rc, out, err = self.r["ep_noarg"]
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertIn("--episode", err)
 
 
 class TestSetupStamp(unittest.TestCase):
@@ -645,6 +742,115 @@ class TestCiScript(unittest.TestCase):
             self.assertEqual(rc, 1, f"{name}: {out}{err}")
             self.assertIn(f"ci: FAILED: {why}", err, name)
             self.assertNotIn("all steps passed", out, name)
+
+
+SETUP_PY_SHIM = """#!/bin/bash
+# python3 shim for the setup-script tests: pip and the model prefetch never run for real.
+echo "$*" >> "$SHIM_LOG"
+for word in ${SHIM_FAIL:-}; do
+  case "$*" in *"$word"*) exit 1;; esac
+done
+exit 0
+"""
+
+
+def tts_block():
+    """The narration step of docs/setup-script.sh, between its '# --- tts: begin' and '# --- tts: end' markers."""
+    text = (REPO / "docs" / "setup-script.sh").read_text(encoding="utf-8")
+    m = re.search(r"^# --- tts: begin\n(.*?)^# --- tts: end$", text, re.S | re.M)
+    if not m:
+        raise AssertionError("docs/setup-script.sh: tts markers missing")
+    return m.group(1)
+
+
+def requirement_pins(name):
+    lines = (REPO / name).read_text(encoding="utf-8").splitlines()
+    return [l.strip() for l in lines if l.strip() and not l.lstrip().startswith("#")]
+
+
+@unittest.skipUnless(BASH and shutil.which("timeout"), "needs bash and timeout")
+class TestSetupScriptTts(unittest.TestCase):
+    """The narration step of the environment setup script (#37), run with a python3 shim: every pip call is logged,
+    SHIM_FAIL makes the calls that mention a word fail."""
+
+    def setUp(self):
+        self.td = Path(os.path.realpath(tempfile.mkdtemp(prefix="film-setup-tts-")))
+        self.addCleanup(shutil.rmtree, self.td, ignore_errors=True)
+        (self.td / "bin").mkdir()
+        write_exec(self.td / "bin" / "python3", SETUP_PY_SHIM)
+        script = self.td / "tts.sh"
+        script.write_text('log() { echo "[setup] $*"; }\n' + tts_block() + "exit 0\n", encoding="utf-8")
+        self.script = script
+
+    def run_block(self, **env):
+        e = {k: v for k, v in os.environ.items() if not k.startswith("FILM_TTS")}
+        e.update(PATH=str(self.td / "bin") + os.pathsep + os.environ["PATH"], SHIM_LOG=str(self.td / "calls"),
+                 TTS_LOG=str(self.td / "setup-tts.log"), **env)
+        rc, out, err = run([BASH, self.script], e)
+        calls = (self.td / "calls").read_text().splitlines() if (self.td / "calls").exists() else []
+        return rc, out + err, calls
+
+    def test_pins_equal_requirements_tts_and_the_tool(self):
+        block = tts_block()
+        pins = requirement_pins("requirements-tts.txt")
+        self.assertEqual(sorted(p.split("==")[0] for p in pins), ["resemble-perth", "vieneu"])
+        for pin in pins:
+            self.assertIn(f'"{pin}"', block, f"docs/setup-script.sh must install {pin}")
+        torch = re.search(r"^# torch-cpu: (torch==\S+)$", (REPO / "requirements-tts.txt").read_text(), re.M).group(1)
+        self.assertIn(f'"{torch}"', block)
+        tts = helpers.load("tts/vieneu_tts.py", "film_vieneu_tts_env")
+        self.assertIn(f"vieneu=={tts.VIENEU_PIN}", pins)
+        for pin in [torch] + [p for p in pins if not p.startswith("vieneu")]:
+            self.assertIn(pin, tts.WATERMARK_INSTALL)
+        self.assertIn("--break-system-packages", tts.WATERMARK_INSTALL)
+
+    def test_the_session_hook_never_installs_torch(self):
+        names = " ".join(requirement_pins("requirements.txt")).lower()
+        for heavy in ("torch", "vieneu", "perth"):
+            self.assertNotIn(heavy, names)
+
+    def test_installs_vieneu_then_cpu_torch_then_perth(self):
+        rc, out, calls = self.run_block()
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(calls), 3, calls)
+        self.assertTrue(all(c.startswith("-m pip install") and "--break-system-packages" in c for c in calls), calls)
+        self.assertIn("vieneu==3.8.3", calls[0])
+        self.assertIn("--index-url https://download.pytorch.org/whl/cpu torch==2.15.0 torchaudio", calls[1])
+        self.assertIn("resemble-perth==1.0.1", calls[2])
+        self.assertNotIn("index-url", calls[2])
+        self.assertIn("tts: ok", out)
+        self.assertIn("tts-watermark: ok", out)
+        self.assertNotIn("prefetch", out)
+
+    def test_failures_are_warnings_and_never_abort(self):
+        rc, out, calls = self.run_block(SHIM_FAIL="vieneu")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tts: WARN install failed", out)
+        self.assertIn("tts-watermark: ok", out)                   # the watermark step still runs
+        rc, out, calls = self.run_block(SHIM_FAIL="torch")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tts-watermark: WARN CPU torch failed", out)
+        self.assertFalse(any("resemble-perth" in c for c in calls[-2:]), calls)   # never pulls torch from PyPI
+        rc, out, _ = self.run_block(SHIM_FAIL="resemble-perth")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tts-watermark: WARN resemble-perth failed", out)
+
+    def test_flags(self):
+        rc, out, calls = self.run_block(FILM_TTS="0")
+        self.assertEqual((rc, calls), (0, []))
+        self.assertIn("tts: skipped (FILM_TTS=0)", out)
+        rc, out, calls = self.run_block(FILM_TTS_PREFETCH="1")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("Vieneu(mode='v3turbo')", calls[-1])
+        self.assertIn("tts model: ok", out)
+        rc, out, _ = self.run_block(FILM_TTS_PREFETCH="1", SHIM_FAIL="Vieneu")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("tts model: WARN prefetch failed", out)
+
+    def test_every_install_is_time_boxed(self):
+        for line in tts_block().splitlines():
+            if "PIPQ[@]}\"" in line or "python3 -c" in line:
+                self.assertRegex(line, r"timeout \d+ ", line)
 
 
 if __name__ == "__main__":

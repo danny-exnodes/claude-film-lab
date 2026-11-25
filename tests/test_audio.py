@@ -699,5 +699,74 @@ class TestScoreRender(ScoreCase):
         self.assertTrue(np.array_equal(va[:SR], vb[:SR]))
 
 
+class TestScoreReviewFixes(ScoreCase):
+    """Review notes of the audio round: atomic outputs, stale sub-stems, one message at the last sample, strum cap."""
+    render = TestScoreRender.render
+
+    def files(self, out):
+        return {str(p.relative_to(out)): p.read_bytes() for p in sorted(out.rglob("*")) if p.is_file()}
+
+    def test_a_failed_write_leaves_the_previous_set_untouched(self):
+        out, _, _ = self.render(BASE, "--stems")
+        before = self.files(out)
+        real, calls = score.write_wav, []
+
+        def flaky(path, x, bits):
+            calls.append(path)
+            if len(calls) == 3:
+                raise OSError(28, "No space left on device")
+            return real(path, x, bits)
+        with mock.patch.object(score, "write_wav", flaky):
+            code, _, err = self.run_score(BASE, "--out", str(out), "--overwrite", "--stems", "--seed", "8")
+        self.assertEqual(code, 1, err)
+        self.assertIn("No space left on device", err)
+        self.assertIn("nothing replaced", err)
+        self.assertNotIn("Traceback", err)
+        self.assertEqual(self.files(out), before)
+        self.assertEqual([p.name for p in out.iterdir() if p.name.startswith(".")], [])
+        fresh = self.tmp / "fresh"
+        with mock.patch.object(score, "write_wav", side_effect=OSError(28, "No space left on device")):
+            code, _, err = self.run_score(BASE, "--out", str(fresh))
+        self.assertEqual(code, 1, err)
+        self.assertFalse(fresh.exists(), "a folder the failed run created is removed again")
+
+    def test_overwrite_removes_sub_stems_the_new_render_does_not_make(self):
+        out, _, _ = self.render(BASE, "--stems")
+        self.assertTrue(any((out / "stems").iterdir()))
+        code, text, err = self.run_score(BASE, "--out", str(out))
+        self.assertEqual(code, 2, err)                                       # old sub-stems count as outputs
+        self.assertIn("stems/", err)
+        code, text, err = self.run_score(BASE, "--out", str(out), "--overwrite")
+        self.assertEqual(code, 0, err)
+        self.assertFalse((out / "stems").exists())
+        self.assertIn("removed stale stems/music-guqin.wav", text)
+        self.render(BASE, "--stems", "--overwrite")
+        fewer = self.variant(music=[BASE["music"][0]])                       # no pipa any more
+        code, text, err = self.run_score(fewer, "--out", str(out), "--overwrite", "--stems")
+        self.assertEqual(code, 0, err)
+        self.assertFalse((out / "stems" / "music-pipa.wav").exists())
+        self.assertTrue((out / "stems" / "music-guqin.wav").exists())
+        log = json.loads((out / "score-log.json").read_text(encoding="utf-8"))
+        self.assertEqual(sorted(log["substems"]), sorted(p.stem for p in (out / "stems").iterdir()))
+
+    def test_an_event_on_the_last_sample_is_one_error(self):
+        t = 1 - 0.4 / SR                                                     # below length_s, rounds to its end
+        code, _, err = self.run_score({"length_s": 1, "foley": [{"t": t, "sound": "hoof"}]}, "--dry-run")
+        self.assertEqual(code, 2, err)
+        self.assertIn("ERROR foley[0]", err)
+        self.assertIn("past length_s", err)
+        self.assertNotIn("WARN", err)
+
+    def test_strum_pitch_count_is_capped(self):
+        ev = {"t": 0, "inst": "koto", "dur": 1}
+        ok = self.variant(music=[dict(ev, pitches=["D3"] * score.MAX_STRUM_PITCHES)])
+        code, _, err = self.run_score(ok, "--dry-run")
+        self.assertEqual(code, 0, err)
+        code, _, err = self.run_score(self.variant(music=[dict(ev, pitches=["D3"] * (score.MAX_STRUM_PITCHES + 1))]),
+                                      "--dry-run")
+        self.assertEqual(code, 2)
+        self.assertIn(f"at most {score.MAX_STRUM_PITCHES} pitches", err)
+
+
 if __name__ == "__main__":
     unittest.main()

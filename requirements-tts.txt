@@ -1,0 +1,8 @@
+# Narration (tools/tts/vieneu_tts.py) for the system Python: installed by docs/setup-script.sh, never by the
+# session hook (torch is ~1 GB). Keep these pins equal to docs/setup-script.sh (tests/test_env_scripts.py checks).
+# torch comes first, from the CPU wheel index, so that resemble-perth never pulls the CUDA build from PyPI:
+#   python3 -m pip install --break-system-packages --index-url https://download.pytorch.org/whl/cpu torch==2.15.0 torchaudio
+#   python3 -m pip install --break-system-packages -r requirements-tts.txt
+# torch-cpu: torch==2.15.0
+vieneu==3.8.3
+resemble-perth==1.0.1

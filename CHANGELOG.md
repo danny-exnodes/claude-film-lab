@@ -4,6 +4,73 @@
 
 ## [Unreleased]
 
+### Đợt sửa issue mở (2026-11-25, nhánh `claude/issues-round`)
+Bảy gói việc làm song song, mỗi gói một nhánh, gộp và chạy lại cả bộ test (`bash tools/ci.sh`). Không có request tính phí nào.
+
+#### Ngân sách và ledger (#15, #13 phía dùng)
+- `ark.py ledger-merge` kiểm mọi dòng trước khi ghi (lỗi `<file>:<dòng>`, mã 2, không ghi gì), gộp dòng không `req=` theo
+  bội, kết quả không phụ thuộc thứ tự đầu vào, từ chối khi bản gộp tính một request ít hơn một bản; `req=` chỉ nhận cả cụm hex.
+- Lệnh mới `ark.py ledger-close --req <id> --ledger L --status abandoned`: đóng request mồ côi, vẫn tính vào trần;
+  `status.py` in lệnh này ở mọi dòng OPEN và coi `abandoned` là đã đóng.
+- Agent (`FILM_AGENT`) bị từ chối `--no-budget` và `--force` (mã 2).
+- `lambda-job finish`: `sent: false` → `failed-unsent` (không tính); job `running` quá `deadline` + 60 s → báo worker chết,
+  `--give-up` ghi `failed`; WARN khi `worker_sha256` khác repo; status/ảnh là trang lỗi S3 → mã 2.
+- `ark.py image`: phản hồi không có ảnh → `failed`; ảnh phụ không bao giờ ghi đè file; `--size 0K/0x0` là kích thước lạ.
+- `ark.py video --resume-pending --ledger L`: tải tiếp mọi task video đang mở.
+- Test 8 tiến trình tranh trần 1 ảnh: đúng 1 dòng `pending` (chứng minh `reserve()` chặn tiêu vượt khi chạy song song).
+
+#### Kéo file từ Drive (#36)
+- `drive_sync.py save`: ghi file vừa tải bằng `download_file_content` xuống đĩa từ bản ghi phiên (kể cả agent con,
+  `--transcript`), kiểm `--size`, ghi nguyên tử, không ghi đè thay đổi chưa đẩy, tự đánh dấu đã kéo; không còn chép base64 bằng tay.
+- `drive_sync.py snapshot --only <file…>`: chụp dấu lần đầu chỉ cho các file vừa kéo.
+- `snapshot` không có `--include-out` giữ các dòng `out/<project>/`; symlink trỏ ra ngoài dự án bị từ chối
+  (`pulled`/`record`/`save`) và hiện UNMAPPED trong `plan`; khối `pre` của ledger in `pre done` khi mọi
+  `ledger.drive-<n>.csv` đã gộp.
+
+#### Lồng tiếng và âm thanh (#37, #8 một phần)
+- Cài sẵn lồng tiếng: `docs/setup-script.sh` (v4) bước 3b cài `vieneu==3.8.3`, torch CPU và `resemble-perth==1.0.1` theo
+  `requirements-tts.txt` (lỗi chỉ là WARN; `FILM_TTS=0` bỏ qua, `FILM_TTS_PREFETCH=1` tải sẵn model).
+- `tools/doctor.sh` thêm dòng `tts`, `tts-watermark` và cờ `--episode <tập>` (FAIL thiếu watermark khi tập đã qua G3 và có lời bình).
+- `vieneu_tts.py --require-watermark` (mã 4, trước khi nạp model); `film-narrator` dùng cho mọi lần render; `--check` tính
+  lại khung theo mốc hiện tại (`--strict`: OVER là lỗi), khoá thư mục `vo/`, lỗi ffmpeg khi đổi tốc độ giữ bản đọc cũ,
+  báo wav mồ côi không có mục log.
+- Đọc số: phân số, số âm, tháng, ngày dd-mm-yyyy, khoảng thế kỷ/La Mã (`thế kỷ XIV–XV`); `a/b` đứng một mình là phân số.
+- `status.py --gate G4` kiểm watermark của mọi bản đọc trong `vo/tts-log.json`.
+- `score.py` 1.1.0 ghi qua thư mục tạm (lỗi ghi: mã 1, giữ bộ cũ), xoá stem con cũ khi `--overwrite`, tối đa 16 nốt mỗi lần rải.
+
+#### Lược đồ tập và bộ kiểm (#28, #35 mục 1–2)
+- Plate tư thế `L4b`…`L4z` được nhận ở mọi công cụ: `check_episode.py`, `anchors.py`, `matte.py` (tách như `L4`),
+  `status.py`, `bundle.py`; một định nghĩa chung trong `tools/episode_id.py`.
+- Id shot ba chữ số `s<NNN>` cho tập trên 99 shot; trộn `s<NN>`/`s<NNN>` trong một tập là ERROR.
+- Tập `method: code`: cột `layers` nhận thêm `M-<model>`; `check_episode.py` đọc từ vựng chuyển động TOON thẳng từ
+  `motions.json` (id mới hợp lệ ngay, id `toon/project.js` là giá trị `camera`); id sai nhánh là WARN.
+- Kiểm phủ (check-5): hai bản `approved=yes` của một lớp là ERROR; file trong `plates/` không có dòng `prompts.csv` là WARN;
+  từ khâu 8, shot `seedance` có `ai_motion` mà thiếu clip là ERROR.
+- Checker: khóa YAML ghi hai lần (EPISODE.md, budget.yaml) là ERROR; ``` trong chú thích HTML không còn nuốt lời bình;
+  `--probe` in format đã dùng và WARN khi không kiểm được thời lượng bản cuối; tên báo cáo thống nhất `review/check-v<N>.txt`.
+
+#### Bộ ghép COMPOSE 1.4.0 (#4 một phần)
+- Vải, tư thế, mí mắt vẽ trong một lượt `drawPlate` (hết chồng hai lần ở chỗ nối khi mờ dần, `blur` áp cả lớp, mí nằm
+  trên vải); khoá `sway` theo shot, `root: [x, y]`, salt băm (cây trong film cũ đổi pha lắc sau khi làm mới).
+- `embers` và `glow` theo alpha của khung; `COMPOSE.rgb` đọc `rgb()` và tên màu; chặn NaN khi thời lượng bằng 0; bước
+  chân `figure` luôn trong 10–38 % chiều cao, chân đã đặt không trượt khi quay người.
+- `inline.py`: ghi nguyên tử, giữ CRLF, tỉ lệ khung theo `--size`, cảnh báo thiếu dòng cỡ mặc định, đường dẫn anchors
+  tìm được từ mọi thư mục; `demo_plates.py --help` không tạo gì.
+- Mới: `inline.py <film.html> --preflight` (chạy thử mọi shot bằng node, báo ERROR/WARN, thoát 1 khi có ERROR).
+
+#### Test, CI, doctor
+- Test chạy được bằng user thường: đường dẫn cinecode lấy từ `CINECODE_DIR` hoặc `~/.claude/skills/cinecode`; hết 2 lỗi
+  import ở `test_audio.py` / `test_compose.py`.
+- CI: `tools/ci.sh` (`--install` cài `requirements-ci.txt`), mẫu workflow `docs/ci/tests.yml` để chủ dự án chép tay vào
+  `.github/workflows/tests.yml`.
+- `tests/test_docs.py`: kiểm đường dẫn, lệnh con và cờ mà CLAUDE.md, docs, skill, agent nhắc tới có thật trong mã; kiểm
+  front matter của agent và skill.
+- doctor: phân biệt "không có trả lời" với "trả lời không phải JSON" ở ark-ping; lệnh thử video nhận 2xx không phải object
+  thì báo có thể đã tạo task; thêm kiểm python ≥ 3.10, ổ trống (WARN < 5 GB), dấu phiên bản setup script, và (chế độ
+  đầy đủ) mở Chrome headless qua `CHROME_PATH`.
+- Hook khởi động trong git worktree không chạy pip, không ghi đè dấu cài đặt.
+- Setup script v4 ghi dấu `/opt/film-lab/setup-script.version`: **dán lại setup script** vào môi trường cloud để doctor hết WARN.
+
 ## [1.2.0] - 2026-11-25
 
 ### Phương pháp dựng thứ ba `code` và bộ 11 phong cách vẽ bằng code (#38–#43, 2026-11-19 / 24)

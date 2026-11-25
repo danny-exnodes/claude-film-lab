@@ -1,11 +1,11 @@
 #!/bin/bash
-# Setup script v3 for the "Film Lab" cloud environment: sequential, every step time-boxed, never fails.
+# Setup script v4 for the "Film Lab" cloud environment: sequential, every step time-boxed, never fails.
 # Paste into the environment's Setup script (claude.ai: cloud environment menu -> Edit).
 # The repo danny-exnodes/claude-film-lab does the rest at session start (.claude/hooks/session-start.sh):
 # links /opt/byteplus/ark.py to the repo's tools/ark.py, exports FILM_LAB, CINECODE_FORMATS, CHROME_PATH,
 # re-checks fonts/pip and prints the doctor report. Keep the pip pins below equal to requirements.txt and
 # requirements-tts.txt (tests/test_repo_hygiene.py, tests/test_env_scripts.py).
-SETUP_VERSION=3   # = "v3" in the header. Written to the stamp at the end; tools/doctor.sh compares the two.
+SETUP_VERSION=4   # = "v4" in the header. Written to the stamp at the end; tools/doctor.sh compares the two.
 log() { echo "[setup $(date +%T)] $*"; }
 export DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore
 # A slow mirror should fail fast and retry instead of stalling a whole step

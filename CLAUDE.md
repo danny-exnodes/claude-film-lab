@@ -18,7 +18,7 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Gốc lab: Drive `ClaudeFilmLab` (ID `19yQarw7ATu90uzXjboGP4sy5FzlQhd0y`), mỗi dự án một thư mục `<ProjectName>/`
   (vd. `SonHaiKinh/`): `00_QuanLy · 01_TaiLieuGoc · 02_KinhThu · 03_KichBan · 04_SanXuat · 05_ThanhPham · 99_LuuTru`.
   Cấu trúc, `PROJECT.md`, ánh xạ đường dẫn, quy tắc đặt tên: `docs/CONVENTIONS.md` §11. Mẫu: `templates/project/`.
-- **Kéo** đầu phiên, trước mọi việc, bằng connector Google Drive (không có CLI): đọc `00_QuanLy/PROJECT.md` trước (ID mọi
+- **Kéo** đầu phiên, trước mọi việc, bằng connector Google Drive (không có CLI), mỗi file tải xong ghi bằng `drive_sync.py save`: đọc `00_QuanLy/PROJECT.md` trước (ID mọi
   thư mục), luôn tải `SERIES.md`, `EPISODE.md`, `budget.yaml` và mọi bản `ledger.csv` về `projects/<project>/` và
   `out/<project>/ep<NN>/`; file khác kéo theo khâu sắp chạy (film-pipeline mục 0).
 - **Đẩy** file chữ đã đổi sau mỗi khâu và trước khi dừng phiên (container bị thu hồi khi rảnh); cập nhật
@@ -58,15 +58,22 @@ python3 tools/status.py projects/<project>/ep<NN>-<slug> [--gate G2]   # chỉ �
 python3 tools/ark.py image "<prompt>" <file>.png --size 2K [--fast] [--ref a.png] --budget B --ledger L   # lite 2K ~25 s · flash 1024² ~11 s
 python3 tools/ark.py image-batch <jobs.csv> --budget B --ledger L [--parallel 3] [--dry-run] [--only ID ...] [--fast]   # cả lô lớp tranh: kiểm hết trước khi gửi, bỏ qua file đã có
 python3 tools/ark.py video "<prompt>" <file>.mp4 --image <khung đầu>.png --duration 5 [--resolution 720p] [--no-audio] --budget B --ledger L
+python3 tools/ark.py video --resume-pending --ledger L                     # tải tiếp mọi task video đang mở
+python3 tools/ark.py ledger-close --req <id> --ledger L --status abandoned  # request mồ côi không bao giờ xong: đóng, vẫn tính vào trần
 python3 tools/layers/matte.py IN.png [OUT.png] --style styles/<id> --layer L2 --preview check.png   # bỏ OUT → plates/matte/<cùng tên>.png
 python3 tools/compose/keyframe.py --check <khung đầu>.png --key "#RRGGBB"                # miễn phí, trước mỗi clip tính phí
 python3 tools/layers/matte_seq.py <clip>.mp4 --start-frame <khung đầu>.png --strict      # tách nền cả clip + số đo nhấp nháy
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<project>/pronunciation.csv --out <media>/vo --dry-run --strict
+python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron ... --out <media>/vo --voice "<giọng>" --strict --require-watermark [--check]
 python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio [--stems] [--seed N]   # nhạc dây gảy + tiếng động theo sự kiện, local, miễn phí
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
-python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>]
+python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
+python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ...          # method: code, miễn phí: xem style vẽ bằng code, linh vật giot
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
+python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
+bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL
+bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python ≥ 3.10, bash -n, lint compose, unit test); --install cài requirements-ci.txt
 ```
 - Mã thoát của `ark.py image|video|lambda-job prepare`: **2** = từ chối tại chỗ, chưa gửi gì → sửa lệnh; **3** = vượt trần;
   **1** = request đã rời máy, xem dòng ledger. File đầu ra đã tồn tại bị từ chối (tăng `_v<NN>`; `--overwrite` chỉ cho thử
@@ -79,11 +86,13 @@ python3 tools/compose/inline.py <film>/film.html --init --toon         # film.ht
 - Âm thanh bằng code: `tools/audio/score.py` (cổ cầm, tỳ bà, koto, cồng, trống khung, drone, bộ tiếng động;
   `tools/audio/README.md`). Chỉ viết phần `music` khi người dùng đã chọn nhạc code; `foley` dùng được với mọi lựa chọn.
   `score.json` là dữ liệu dự án (không commit). Chất âm chưa có người nghe duyệt.
-- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
+- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`;
+  bản cuối luôn `--require-watermark`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
   Mọi job Lambda đi qua `ark.py lambda-job prepare` (kiểm trần, ghi `pending`, in payload) và `lambda-job finish`
-  (dòng cuối); không có ledger thì không gọi Lambda.
+  (dòng cuối; worker chết quá `deadline` → `--give-up`); không có ledger thì không gọi Lambda. Trạng thái đóng của ledger thêm
+  `abandoned` (vẫn tính) và `failed-unsent` (không tính). Agent (`FILM_AGENT`) không được dùng `--no-budget`/`--force`.
 - Hai bản `ledger.csv` của một tập (hai phiên, hai file trên Drive) → `ark.py ledger-merge`, không lấy bản mới nhất.
 - Video chạy dạng task bất đồng bộ, không bị giới hạn 30 s; một video 5 s mất ~2–3 phút → chạy Bash với timeout dài
   hoặc `run_in_background`.
@@ -91,7 +100,7 @@ python3 tools/compose/inline.py <film>/film.html --init --toon         # film.ht
 ## Quy ước file
 - Media gen ra để trong `out/<project>/ep<NN>/{plates,clips,renders}/` (git bỏ qua), đặt tên theo
   `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
-- Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` rồi tải zip lên Drive
+- Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` (tập trên 99 shot: `s<NNN>`) rồi tải zip lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với
   tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải
   lên riêng (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
@@ -101,6 +110,7 @@ python3 tools/compose/inline.py <film>/film.html --init --toon         # film.ht
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.
 - Gặp lỗi mới → thêm vào `docs/RUNBOOK.md` (triệu chứng, nguyên nhân, cách xử lý).
+- Trước khi commit: `bash tools/ci.sh`. Tài liệu nhắc lệnh, cờ hay đường dẫn mới thì `tests/test_docs.py` phải qua.
 - Sửa `lambda/ark_image_worker.py` → triển khai lại theo `lambda/README.md` (mục "Triển khai lại"); `build_deploy.py --check`
   in hai mã băm phải khớp với function đang chạy.
 - Sửa `tools/toon/*.js` → tăng `T.VERSION` trong `rig.js`, chạy `tests/test_toon.py` (node + trình duyệt) và

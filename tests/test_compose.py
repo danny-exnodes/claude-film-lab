@@ -251,7 +251,8 @@ class TestInlineAnchors(FilmCase):
         r = run(INLINE, self.film, "--init", "--anchors", self.anchors)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn('COMPOSE.ANCHORS = {"a.png":{"eye":[10,20]}};', self.html())
-        self.assertRegex(self.html(), r"<!-- compose-kit begin v\S+ anchors=%s sha=[0-9a-f]{8}: " % re.escape(str(self.anchors)))
+        # recorded relative to the folder of film.html (here the same folder), so any working directory finds it
+        self.assertRegex(self.html(), r"<!-- compose-kit begin v\S+ anchors=anchors\.json sha=[0-9a-f]{8}: ")
         self.write({"a.png": {"eye": [99, 99]}})
         r = run(INLINE, self.film)                               # the refresh form of the docstring, no --anchors
         self.assertEqual(r.returncode, 0, r.stderr)

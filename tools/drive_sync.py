@@ -5,15 +5,27 @@ The Drive connector has no CLI: Claude pulls and pushes one file at a time with 
 (download_file_content, create_file, update_file). This helper remembers what was pulled, maps every local
 path to its Drive folder ID from PROJECT.md and prints the exact connector calls for what changed.
 
-  python3 tools/drive_sync.py snapshot projects/<project> [--include-out out/<project>] [--force]
+  python3 tools/drive_sync.py save     projects/<project> --id <fileId> --to <path> [--size <fileSize>] [--id ...] [--transcript GLOB] [--force]
+  python3 tools/drive_sync.py snapshot projects/<project> [--include-out out/<project>] [--only <path>...] [--force]
   python3 tools/drive_sync.py pulled   projects/<project> <path>...
   python3 tools/drive_sync.py plan     projects/<project> [--include-out out/<project>] [--json] [--now YYYYMMDD-HHMM] [--date YYYY-MM-DD]
   python3 tools/drive_sync.py record   projects/<project> --uploaded <path> --id <newDriveFileId> [--sha256 <hex>] [--uploaded ... --id ...]
 
+save      right after each download_file_content: write the file the connector returned (base64, into the
+          conversation) to disk without retyping it. The newest result for that file ID is read from the session
+          transcripts (JSONL under ~/.claude/projects/ or $CLAUDE_CONFIG_DIR/projects/: this repo's folder first, with
+          its subagents/, then every project; --transcript GLOB to name them), decoded (standard or url-safe base64),
+          checked against --size (Drive fileSize), written atomically, then marked pulled like `pulled` does.
+          Several --id/--to[/--size] groups per call; all are checked before anything is written. Refused (exit 1,
+          nothing written): overwriting a file with local changes not pushed yet, unless --force. Paths must stay in
+          projects/<project>/ or out/<project>/ (symlinks resolved). The file content is never printed.
 snapshot  right after the first pull of a container: hash the working copy into projects/<project>/.pulled.sha256
           and write the pull time to projects/<project>/.pulled.at (§11.6 pull step 4). When a snapshot already
           exists and files differ from it (local edits not pushed yet), nothing is written and the exit code is 1:
-          push them, or use `pulled` for the files just pulled; --force rewrites everything anyway.
+          push them, or use `pulled` for the files just pulled; --force rewrites everything anyway. Without
+          --include-out the out/<project>/ lines of the old snapshot are kept. --only <path>...: the first snapshot
+          lists just these files (files made locally before the first snapshot stay NEW); refused when a snapshot
+          exists (use `pulled`), --force rewrites it with only these files.
 pulled    after pulling more files into a working copy that already has a snapshot: set only those files' lines
           to their current hashes. No .pushed.log line, .pulled.at untouched.
 plan      list new/changed files: target folder (logical path + ID, or MISSING + which folder to create under which
@@ -22,7 +34,8 @@ plan      list new/changed files: target folder (logical path + ID, or MISSING +
           step 3): for changed files always; for new files too, because Drive may already hold a file with that
           title in the folder (first push after a manual upload, lost snapshot) – archive it if the search finds one. TienDo_SanXuat.csv is listed apart (§11.6 step 5). --json: same plan as JSON.
           A ledger.csv gets a `pre` block before its create_file line: download every Drive copy, ledger-merge,
-          plan again, then upload (§11.6 push step 3); it has no approval gate.
+          plan again, then upload (§11.6 push step 3); it has no approval gate. When ledger.drive-<n>.csv copies are
+          on disk and every row of them is already in the ledger, the block says `pre done` (delete the copies).
 record    after each successful create_file: replace just that file's line in .pulled.sha256 and append
           `<UTC> <path> <new Drive ID>` to projects/<project>/.pushed.log (§11.6 push steps 2 and 6).
           --sha256 (as the plan prints it) is the hash that was uploaded: when the file was edited after the
@@ -38,10 +51,13 @@ lock on projects/<project>/.drive_sync.lock and replaced atomically, so parallel
 
 Ignored everywhere: dotfiles and dot-directories, __pycache__. Never planned or snapshotted: temp files
 (*.b64, *.orig, *.bak, *.tmp, *.part, *~, *.lock, *.swp; the plan lists them once) and ledger.drive-*.csv (Drive copies to merge).
-Exit: 0 ok, 1 plan has blockers (folders to create, unmapped files) or snapshot refused, 2 cannot plan or record
-(no PROJECT.md, bad manifest, a path outside the project...).
+Ignored everywhere too: files whose real path (symlinks resolved) leaves projects/<project>/ and out/<project>/;
+plan lists them as UNMAPPED, pulled/record/save refuse them.
+Exit: 0 ok, 1 plan has blockers (folders to create, unmapped files), snapshot or save refused, 2 cannot plan,
+record or save (no PROJECT.md, bad manifest, a path outside the project, no download in the transcripts...).
 """
-import argparse, contextlib, datetime, fnmatch, hashlib, json, mimetypes, os, re, sys, zipfile
+import argparse, base64, binascii, contextlib, csv, datetime, fnmatch, glob, hashlib, io, json, mimetypes, os, re
+import sys, zipfile
 
 try:
     import fcntl
@@ -128,6 +144,29 @@ def lab_root(project_dir):
 def key_for(project_dir, path):
     """Snapshot key: path relative to the repo root (projects/<project>/..., out/<project>/...), POSIX."""
     return os.path.relpath(os.path.abspath(path), lab_root(project_dir)).replace(os.sep, "/")
+
+
+def out_prefix(project_dir):
+    """Snapshot key prefix of the media folder out/<project>/."""
+    return f"out/{os.path.basename(project_dir)}/"
+
+
+def real_roots(project_dir, out_arg=None):
+    """Real paths (symlinks resolved) a file of this project may live in: projects/<p>/ and out/<p>/."""
+    roots = {os.path.realpath(project_dir),
+             os.path.realpath(os.path.join(lab_root(project_dir), "out", os.path.basename(project_dir)))}
+    if out_arg:
+        roots.add(os.path.realpath(out_arg))
+    return roots
+
+
+def escapes(path, roots):
+    """True when path, symlinks resolved, is outside every root (a link to /etc/..., another project...)."""
+    rp = os.path.realpath(path)
+    return not any(rp == r or rp.startswith(r.rstrip(os.sep) + os.sep) for r in roots)
+
+
+ESCAPE_REASON = "symlink to a file outside the project (never pushed): replace it with a real file or remove it"
 
 
 def mime_for(name):
@@ -353,6 +392,32 @@ def map_out(rel, project_dir, man, day):
     return f"04_SanXuat/{ep}/" + (f"{d.group(1)}-{d.group(2)}-{d.group(3)}" if d else day), None
 
 
+# --- ledger copies (§11.6 push step 3) --------------------------------------------------------------------------
+
+LEDGER_FIELDS = ["ts", "kind", "model", "size", "seconds", "count", "status", "out", "task_id", "usage", "agent", "note"]
+RE_REQ = re.compile(r"req=([0-9a-f]+)")          # as tools/ark.py REQ_RE (matched at the start of note)
+
+
+def ledger_keys(path):
+    """The rows of a ledger as tools/ark.py ledger-merge dedupes them: (req, status, task_id) for rows with
+    note `req=<hex>...`, the whole row otherwise; rows without ts/kind/status are dropped there too.
+    None when the file cannot be read as UTF-8 CSV (counted as not merged)."""
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            text = f.read()
+        rows = list(csv.DictReader(io.StringIO(text.lstrip("﻿"))))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        return None
+    keys = set()
+    for r in rows:
+        if not (r.get("ts") and r.get("kind") and r.get("status")):
+            continue
+        m = RE_REQ.match(r.get("note") or "")
+        keys.add(("req", m.group(1), r.get("status") or "", r.get("task_id") or "") if m
+                 else ("row",) + tuple(r.get(k) or "" for k in LEDGER_FIELDS))
+    return keys
+
+
 # --- archive naming (§11.6 step 3) ----------------------------------------------------------------------------
 
 def archive_name(folder, title, stamp):
@@ -396,23 +461,69 @@ def state_key(pd, arg):
         raise SyncError(f"{arg}: not a file of this project (expected a path under {own[0]} or {own[1]})")
     if ignored(key):
         raise SyncError(f"{arg}: dotfiles and __pycache__ are never pushed")
+    if escapes(full, real_roots(pd)):
+        raise SyncError(f"{arg}: resolves to {os.path.realpath(full)}, outside {own[0]} and {own[1]} (symlink?)")
     return key, os.path.abspath(full)
+
+
+def only_files(pd, args):
+    """(key, abs path) of the files named by `snapshot --only`: files, or folders (every file under them)."""
+    found = []
+    for arg in args:
+        p = arg.replace("\\", "/")
+        full = p if os.path.isabs(p) or os.path.exists(p) else os.path.join(pd, p)
+        if os.path.isdir(full):
+            found += [state_key(pd, os.path.join(full, r)) for r in walk(full)]
+        else:
+            found.append(state_key(pd, arg))
+    return found
+
+
+def cmd_snapshot_only(a, pd):
+    if a.include_out:
+        raise SyncError("--only names the files itself: drop --include-out (paths under out/<project>/ are accepted)")
+    files = [(k, full) for k, full in only_files(pd, a.only) if not (is_temp(k) or is_ledger_copy(k))]
+    snap = {k: sha256(full) for k, full in files}
+    at = utc_iso()
+    with locked_state(pd, fresh=a.force) as st:
+        refused = st.existed          # never with --force: fresh starts from an empty snapshot
+        if refused:
+            st.save = False
+        else:
+            st.snap.update(snap)
+            st.pulled_at = at
+    if refused:
+        print(f"a snapshot exists already: add the files just pulled with `drive_sync.py pulled {a.project} <path>...` "
+              "(nothing was written; snapshot --only --force rewrites it with only these files)", file=sys.stderr)
+        return 1
+    for k in sorted(snap):
+        print(f"only      {k}")
+    print(f"snapshot  {os.path.relpath(os.path.join(pd, SNAPSHOT))}: {len(snap)} file(s) (--only; every other file "
+          f"stays NEW) · pulled at {at}")
+    return 0
 
 
 def cmd_snapshot(a):
     pd = project_dir_of(a.project)
+    if a.only:
+        return cmd_snapshot_only(a, pd)
+    roots = real_roots(pd, a.include_out)
     files = [os.path.join(pd, r) for r in walk(pd)]
     n_project = len(files)
     if a.include_out:
         files += [full for _, full in out_files(a.include_out)]
-    snap, n_kept = {}, 0
+    snap, n_kept, escaped = {}, 0, []
     for i, full in enumerate(files):
         key = key_for(pd, full)
         if is_temp(key) or is_ledger_copy(key):
             continue                 # never pushed: not part of what was pulled
+        if escapes(full, roots):
+            escaped.append(key)      # a symlink out of the project: not ours to hash or push
+            continue
         snap[key] = sha256(full)
         n_kept += i < n_project
     at = utc_iso()
+    kept_out = 0
     with locked_state(pd, fresh=a.force) as st:
         # An existing snapshot is the record of what is on Drive: a file that differs from its line (or has none)
         # is work not pushed yet, and rewriting the snapshot would make `plan` report it as already pushed.
@@ -420,9 +531,22 @@ def cmd_snapshot(a):
         if pending:
             st.save = False
         else:
+            old = st.snap
+            if a.force and not a.include_out:
+                try:                 # --force starts empty (the file may be damaged): out/ lines only if readable
+                    old = read_snapshot(pd) or {}
+                except SyncError:
+                    old = {}
+            # out/ was not hashed this time: keep its lines, so the ledger stays unchanged/CHANGED (not NEW) and
+            # the next `snapshot --include-out` does not list every media file as a local change.
+            keep = {} if a.include_out else {k: h for k, h in old.items() if k.startswith(out_prefix(pd))}
+            kept_out = len(keep)
             st.snap.clear()
+            st.snap.update(keep)
             st.snap.update(snap)
             st.pulled_at = at
+    for k in escaped:
+        print(f"WARN {k}: {ESCAPE_REASON}", file=sys.stderr)
     if pending:
         for k in pending[:20]:
             print(f"  {k}", file=sys.stderr)
@@ -434,7 +558,8 @@ def cmd_snapshot(a):
               f"snapshot --force rewrites every line)", file=sys.stderr)
         return 1
     print(f"snapshot  {os.path.relpath(os.path.join(pd, SNAPSHOT))}: {n_kept} file(s)"
-          + (f" + {len(snap) - n_kept} media" if a.include_out else "") + f" · pulled at {at}")
+          + (f" + {len(snap) - n_kept} media" if a.include_out else "")
+          + (f" + {kept_out} out/ line(s) kept (no --include-out)" if kept_out else "") + f" · pulled at {at}")
     return 0
 
 
@@ -508,11 +633,15 @@ def build_plan(a):
     candidates, unmapped, skipped = [], [], 0
     ignored_temp = []                    # pull/editor leftovers: listed once, never planned, never UNMAPPED
     shot_media, bundled = [], {}         # (media folder, path inside it) of plates/clips; bundle members per folder
+    roots = real_roots(pd, a.include_out)
     for rel in walk(pd):
         if is_ledger_copy(rel):
             continue
         if is_temp(rel):
             ignored_temp.append(key_for(pd, os.path.join(pd, rel)))
+            continue
+        if escapes(os.path.join(pd, rel), roots):
+            unmapped.append({"local": key_for(pd, os.path.join(pd, rel)), "reason": ESCAPE_REASON})
             continue
         folder = map_project(rel)
         if folder is None:
@@ -526,6 +655,9 @@ def build_plan(a):
                 continue
             if is_temp(rel):
                 ignored_temp.append(key_for(pd, full))
+                continue
+            if escapes(full, roots):
+                unmapped.append({"local": key_for(pd, full), "reason": ESCAPE_REASON})
                 continue
             media, _, inside = rel.partition("/")        # out/<project>/<media folder>/<inside>
             if inside.startswith(("plates/", "clips/")) and RE_SHOT_TAG.search(os.path.basename(inside)):
@@ -570,6 +702,16 @@ def build_plan(a):
                                          "copies_glob": f"{os.path.dirname(key)}/{LEDGER_COPIES}",
                                          "search_files": x["archive"]["search_files"],
                                          "excludeContentSnippets": True}}
+            copies = sorted(glob.glob(os.path.join(glob.escape(os.path.dirname(full)), LEDGER_COPIES)))
+            if copies:               # downloaded already: done once every copy's rows are in the ledger
+                mine = ledger_keys(full)
+                unmerged = []
+                for c in copies:
+                    theirs = ledger_keys(c)
+                    if mine is None or theirs is None or not theirs <= mine:
+                        unmerged.append(key_for(pd, c))
+                x["pre"]["ledger_merge"].update(copies=[key_for(pd, c) for c in copies], unmerged=unmerged,
+                                                done=not unmerged)
         elif origin == "media":
             x["notes"].append(NOTE_MEDIA)
         counts[status] += 1
@@ -616,13 +758,19 @@ def print_entry(x, label, project_arg, rel):
         print(f"  folder       {f['path']} = MISSING – create folder {first['path']} under "
               f"{first['parent_id'] or first['parent_path'] + ' (also missing)'} first")
     merge = (x.get("pre") or {}).get("ledger_merge")
-    if merge:
+    if merge and merge.get("done"):
+        names = ", ".join(os.path.basename(c) for c in merge["copies"])
+        print(f"  pre          done: every Drive copy ({names}) is merged into this ledger; delete the copies, then upload")
+    elif merge:
         local, copies = rel(x["path"]), os.path.join(os.path.dirname(rel(x["path"])), LEDGER_COPIES)
         print("  pre          merge the Drive copies into this ledger BEFORE uploading (§11.6 push step 3):")
         print(f"               1) search_files {merge['search_files']}{SNIPPETS_OFF}")
         print(f"               2) download EVERY result to {copies.replace('*', '<n>')} (no result: skip to the upload)")
         print(f"               3) python3 tools/ark.py ledger-merge {local} {copies} -o {local}")
-        print("               4) run plan again (the hash changes), then upload")
+        print("               4) run plan again (the hash changes): this block says `pre done` once every copy is "
+              "merged; then upload")
+        if merge.get("unmerged"):
+            print(f"               not merged yet: {', '.join(merge['unmerged'])}")
     print(f"  create_file  title={c['title']}  parentId={c['parentId'] or '<missing>'}  "
           f"contentMimeType={c['contentMimeType']}  "
           f"disableConversionToGoogleType={str(c['disableConversionToGoogleType']).lower()}")
@@ -731,12 +879,438 @@ def cmd_record(a):
     return 0
 
 
+# --- save: a download_file_content result from the session transcript to disk (pull side) -----------------------
+
+DOWNLOAD_TOOL = "download_file_content"
+RE_PERSISTED = re.compile(r"Full output saved to: (\S+)")          # Claude Code keeps a large tool result in a file
+RE_B64 = re.compile(r"^[A-Za-z0-9+/_-]*={0,2}$")
+RE_CONTENT = re.compile(r'"content"\s*:\s*"([A-Za-z0-9+/=_\-\s]*)"')
+SIZE_KEYS = ("fileSize", "size")
+RE_SIZE = re.compile(r'"(fileSize|size)"\s*:\s*"?(\d+)')
+
+
+class Hit:
+    """One download result found in a transcript (b64 = the base64 text; never printed)."""
+
+    def __init__(self, source, line, ts, mtime, b64=None, error=None, meta=None, fallback=False):
+        self.source, self.line, self.ts, self.mtime = source, line, ts, mtime
+        self.b64, self.error, self.meta, self.fallback = b64, error, meta or {}, fallback
+
+    def order(self):
+        return (self.ts if self.ts is not None else self.mtime, self.mtime, self.line)
+
+    def where(self):
+        return f"{os.path.basename(self.source)}:{self.line}"
+
+
+def claude_projects_dir():
+    """Where Claude Code keeps session transcripts: $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects."""
+    base = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude")
+    return os.path.join(base, "projects")
+
+
+def transcript_slug(path):
+    """Claude Code's transcript folder name for a working directory: every non-alphanumeric character -> '-'."""
+    return re.sub(r"[^A-Za-z0-9]", "-", os.path.abspath(path))
+
+
+def transcripts_in(folder):
+    """Session transcripts of one project folder: <folder>/*.jsonl and <folder>/<session>/subagents/*.jsonl."""
+    g = glob.escape(folder)
+    return glob.glob(os.path.join(g, "*.jsonl")) + glob.glob(os.path.join(g, "*", "subagents", "*.jsonl"))
+
+
+def newest_first(paths):
+    uniq = {os.path.abspath(p) for p in paths if os.path.isfile(p)}
+    return sorted(uniq, key=lambda p: (-os.path.getmtime(p), p))
+
+
+def transcript_tiers(pd, patterns):
+    """[(label, [transcript, ...] newest first)] in search order: the --transcript globs only; else the transcript
+    folder of this repo (cwd or the repo root of the project), then every other project folder."""
+    if patterns:
+        found = []
+        for pat in patterns:
+            hits = [h for h in glob.glob(os.path.expanduser(pat), recursive=True) if os.path.isfile(h)]
+            if not hits:
+                raise SyncError(f"--transcript {pat}: no file matches")
+            found += hits
+        return [("--transcript", newest_first(found))]
+    root = claude_projects_dir()
+    slugs = sorted({transcript_slug(os.getcwd()), transcript_slug(lab_root(pd))})
+    own = newest_first(f for s in slugs for f in transcripts_in(os.path.join(root, s)))
+    seen = set(own)
+    rest = newest_first(f for d in glob.glob(os.path.join(glob.escape(root), "*")) for f in transcripts_in(d)
+                        if os.path.abspath(f) not in seen)
+    return [(f"{root}/{'|'.join(slugs)}", own), (f"{root}/*", rest)]
+
+
+def iso_epoch(ts):
+    if not isinstance(ts, str):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def blocks_of(rec):
+    """Content blocks (dicts with a type) of one transcript record: message.content, or content."""
+    if not isinstance(rec, dict):
+        return []
+    msg = rec.get("message")
+    content = msg.get("content") if isinstance(msg, dict) else rec.get("content")
+    return [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+
+
+def strings_in(v):
+    if isinstance(v, str):
+        yield v
+    elif isinstance(v, dict):
+        for x in v.values():
+            yield from strings_in(x)
+    elif isinstance(v, list):
+        for x in v:
+            yield from strings_in(x)
+
+
+def content_dict(obj, fid):
+    """The {"content": <base64>, ...} dict of a parsed download result: the one whose id is fid, else the only one."""
+    found = []
+
+    def walk_obj(v):
+        if isinstance(v, dict):
+            if isinstance(v.get("content"), str):
+                found.append(v)
+            for x in v.values():
+                walk_obj(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk_obj(x)
+    walk_obj(obj)
+    mine = [d for d in found if d.get("id") == fid or d.get("fileId") == fid]
+    return mine[0] if mine else (found[0] if len(found) == 1 else None)
+
+
+def meta_of(d):
+    return {k: d[k] for k in ("title", "mimeType", *SIZE_KEYS) if k in d and not isinstance(d[k], (dict, list))}
+
+
+def persisted_text(path, transcript):
+    """Text of a tool result Claude Code saved to a file (`Full output saved to: <path>`), when that file is in the
+    transcript store (beside the transcript); None otherwise."""
+    roots = {os.path.realpath(claude_projects_dir()), os.path.realpath(os.path.dirname(os.path.dirname(transcript)))}
+    if escapes(path, roots) or not os.path.isfile(path):
+        return None
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def payload_of_text(text, fid, transcript, depth=0):
+    """(base64, meta) from the text of a download_file_content result, or None."""
+    s = text.strip()
+    try:
+        d = content_dict(json.loads(s), fid)
+        if d is not None:
+            return d["content"], meta_of(d)
+    except ValueError:
+        pass
+    m = RE_PERSISTED.search(s)
+    if m and depth == 0:
+        inner = persisted_text(m.group(1), transcript)
+        if inner is not None:
+            return payload_of_text(inner, fid, transcript, depth + 1)
+    m = RE_CONTENT.search(s)                         # text around the JSON, or JSON cut short
+    if not m:
+        return None
+    size = RE_SIZE.search(s)
+    return m.group(1), ({size.group(1): size.group(2)} if size else {})
+
+
+def result_hit(block, fid, transcript, n, ts, mtime):
+    if block.get("is_error"):
+        return Hit(transcript, n, ts, mtime, error="the download failed (is_error in the transcript)")
+    content = block.get("content")
+    texts = [content] if isinstance(content, str) else \
+        [b.get("text") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str)]
+    for text in texts + (["".join(texts)] if len(texts) > 1 else []):
+        got = payload_of_text(text, fid, transcript)
+        if got:
+            return Hit(transcript, n, ts, mtime, b64=got[0], meta=got[1])
+    return Hit(transcript, n, ts, mtime, error="the result has no base64 \"content\"")
+
+
+def fallback_hit(rec, fid, transcript, n, ts, mtime):
+    """No download_file_content call to pair with: a JSON object with this id and a content field anywhere."""
+    pats = (re.compile(r'\{[^{}]*?"content"\s*:\s*"([A-Za-z0-9+/=_\-\s]*)"[^{}]*?"id"\s*:\s*"' + re.escape(fid) + '"'),
+            re.compile(r'\{[^{}]*?"id"\s*:\s*"' + re.escape(fid) + r'"[^{}]*?"content"\s*:\s*"([A-Za-z0-9+/=_\-\s]*)"'))
+    for s in strings_in(rec):
+        if fid not in s:
+            continue
+        try:
+            d = content_dict(json.loads(s), fid)
+            if d is not None and (d.get("id") == fid or d.get("fileId") == fid):
+                return Hit(transcript, n, ts, mtime, b64=d["content"], meta=meta_of(d), fallback=True)
+        except ValueError:
+            pass
+        for pat in pats:
+            m = pat.search(s)
+            if m:
+                return Hit(transcript, n, ts, mtime, b64=m.group(1), fallback=True)
+    return None
+
+
+RE_TOOL_USE = re.compile(r'"id"\s*:\s*"([^"]+)"\s*,\s*"name"\s*:\s*"([^"]+)"')
+
+
+def scan_transcript(path, ids):
+    """{file id: ([paired hits], [fallback hits])} found in one transcript (JSONL, one record per line)."""
+    found = {i: ([], []) for i in ids}
+    calls = {}                                       # tool_use id -> file id
+    other = set()                                    # tool_use ids of other tools (search_files snippets...)
+    mtime = os.path.getmtime(path)
+    with open(path, encoding="utf-8", errors="replace") as f:
+        for n, line in enumerate(f, 1):
+            if '"tool_use"' in line:
+                other.update(u for u, name in RE_TOOL_USE.findall(line) if not name.endswith(DOWNLOAD_TOOL))
+            named = [i for i in ids if i in line]
+            answers = bool(calls) and "tool_result" in line and any(c in line for c in calls)
+            if not named and not answers:
+                continue
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            ts = iso_epoch(rec.get("timestamp")) if isinstance(rec, dict) else None
+            paired = set()
+            for b in blocks_of(rec):
+                if b.get("type") == "tool_use" and str(b.get("name", "")).endswith(DOWNLOAD_TOOL):
+                    fid = next((v for v in strings_in(b.get("input")) if v in found), None)
+                    if fid and isinstance(b.get("id"), str):
+                        calls[b["id"]] = fid
+                elif b.get("type") == "tool_result" and b.get("tool_use_id") in calls:
+                    fid = calls[b["tool_use_id"]]
+                    paired.add(fid)
+                    found[fid][0].append(result_hit(b, fid, path, n, ts, mtime))
+            if any(b.get("type") == "tool_use" or b.get("tool_use_id") in other for b in blocks_of(rec)):
+                continue                             # a call, or the result of another tool: never a download
+            for fid in named:
+                if fid not in paired:
+                    h = fallback_hit(rec, fid, path, n, ts, mtime)
+                    if h:
+                        found[fid][1].append(h)
+    return found
+
+
+def find_downloads(pd, ids, patterns):
+    """{file id: newest Hit} for every id; SyncError naming the ids not found."""
+    best, searched = {}, []
+    todo = list(dict.fromkeys(ids))
+    for label, files in transcript_tiers(pd, patterns):
+        searched.append(f"{label} ({len(files)} transcript(s))")
+        paired, loose = {i: [] for i in todo}, {i: [] for i in todo}
+        open_ids = list(todo)
+        for k, path in enumerate(files):
+            for fid, (p, fb) in scan_transcript(path, open_ids).items():
+                paired[fid] += p
+                loose[fid] += fb
+            nxt = os.path.getmtime(files[k + 1]) if k + 1 < len(files) else None
+            # files are newest first: once a result is newer than the next file was last written, it is the newest
+            open_ids = [i for i in open_ids if not (paired[i] and nxt is not None
+                                                    and max(h.order() for h in paired[i])[0] >= nxt)]
+            if not open_ids:
+                break
+        for fid in todo:
+            hits = paired[fid] or loose[fid]
+            if hits:
+                best[fid] = max(hits, key=Hit.order)
+        todo = [i for i in todo if i not in best]
+        if not todo:
+            break
+    if todo:
+        raise SyncError(f"no {DOWNLOAD_TOOL} result for file id(s) {', '.join(todo)} in "
+                        + "; ".join(searched) + f": call {DOWNLOAD_TOOL} first (this session), or name the transcript "
+                        "that holds it with --transcript GLOB (a subagent or another session)")
+    return best
+
+
+def decode_b64(text):
+    """Bytes of standard or url-safe base64 (whitespace and missing padding tolerated); ValueError otherwise."""
+    s = re.sub(r"\s+", "", text)
+    if not RE_B64.match(s):
+        raise ValueError("not base64 (unexpected characters)")
+    if re.search(r"[-_]", s) and re.search(r"[+/]", s):
+        raise ValueError("mixes standard and url-safe base64")
+    s = s.rstrip("=")
+    if len(s) % 4 == 1:
+        raise ValueError("base64 cut short")
+    s += "=" * (-len(s) % 4)
+    try:
+        return base64.b64decode(s.translate(str.maketrans("-_", "+/")), validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError(f"not base64 ({e})")
+
+
+def save_target(pd, arg):
+    """(snapshot key, absolute path) for --to: relative to the project folder, or projects/<p>/... | out/<p>/...
+    from the repo root, or absolute; SyncError when it leaves the project (symlinks resolved)."""
+    p = arg.replace("\\", "/")
+    if os.path.isabs(p):
+        full = p
+    elif p.startswith(("projects/", "out/")):
+        full = os.path.join(lab_root(pd), p)
+    else:
+        full = os.path.join(pd, p)
+    full = os.path.normpath(full)
+    key = key_for(pd, full)
+    own = (key_for(pd, pd) + "/", out_prefix(pd))
+    if not key.startswith(own):
+        raise SyncError(f"--to {arg}: not a path of this project (expected a path under {own[0]} or {own[1]})")
+    if ignored(key):
+        raise SyncError(f"--to {arg}: dotfiles and __pycache__ are never pulled")
+    if escapes(full, real_roots(pd)):
+        raise SyncError(f"--to {arg}: resolves to {os.path.realpath(full)}, outside {own[0]} and {own[1]} (symlink?)")
+    if os.path.isdir(full):
+        raise SyncError(f"--to {arg}: is a folder; give the file path")
+    return key, full
+
+
+def write_bytes_atomic(path, data):
+    """Replace path with data: hidden temp file in the same folder (never planned), fsync, os.replace."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.{os.getpid()}.part")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+class SaveGroup(argparse.Action):
+    """--id starts a file; the --to and --size after it belong to that file."""
+
+    def __call__(self, parser, ns, value, opt):
+        jobs = list(getattr(ns, "jobs", None) or [])
+        if self.dest == "id":
+            jobs.append({"id": value})
+        elif not jobs:
+            parser.error(f"{opt} must follow an --id")
+        elif self.dest in jobs[-1]:
+            parser.error(f"{opt} given twice for --id {jobs[-1]['id']}")
+        else:
+            jobs[-1][self.dest] = value
+        ns.jobs = jobs
+
+
+def cmd_save(a):
+    jobs = a.jobs or []
+    if not jobs:
+        raise SyncError("give at least one --id <fileId> --to <path>")
+    pd = os.path.abspath(a.project)
+    if not os.path.isdir(pd) and os.path.basename(os.path.dirname(pd)) != "projects":
+        raise SyncError(f"{a.project}: project working copy not found (expected projects/<project>)")
+    targets = set()
+    for j in jobs:
+        if not str(j["id"]).strip() or str(j["id"]).startswith("<"):
+            raise SyncError(f"--id {j['id']!r}: give the Drive file ID passed to {DOWNLOAD_TOOL}")
+        if "to" not in j:
+            raise SyncError(f"--id {j['id']}: give --to <path> after it")
+        if j.get("size") is not None and j["size"] < 0:
+            raise SyncError(f"--size {j['size']}: expected Drive's fileSize in bytes")
+        j["key"], j["full"] = save_target(pd, j["to"])
+        if j["key"] in targets:
+            raise SyncError(f"--to {j['to']}: given twice")
+        targets.add(j["key"])
+    hits = find_downloads(pd, [j["id"] for j in jobs], a.transcript)
+    for j in jobs:
+        h = hits[j["id"]]
+        if h.error:
+            raise SyncError(f"--id {j['id']}: newest result ({h.where()}): {h.error}; download it again")
+        if h.fallback and j.get("size") is None:
+            raise SyncError(f"--id {j['id']}: found only by text search ({h.where()}, no {DOWNLOAD_TOOL} call to pair "
+                            "it with): pass --size <Drive fileSize> to accept it")
+        try:
+            j["data"] = decode_b64(h.b64)
+        except ValueError as e:
+            raise SyncError(f"--id {j['id']}: result at {h.where()}: {e}; download it again")
+        if j.get("size") is not None and len(j["data"]) != j["size"]:
+            raise SyncError(f"--id {j['id']}: decoded {len(j['data'])} bytes, --size says {j['size']} "
+                            f"({h.where()}): the result is cut short or another version; download it again")
+        j["hit"], j["sha"] = h, hashlib.sha256(j["data"]).hexdigest()
+    if not os.path.isdir(pd):
+        os.makedirs(pd)                              # the very first pull of a container (PROJECT.md)
+        print(f"created   {os.path.relpath(pd)}/")
+    refused, notes = [], []
+    with locked_state(pd) as st:
+        st.save = st.existed                         # no snapshot yet: `snapshot` runs after the first pull
+        for j in jobs:
+            j["track"] = not (is_temp(j["key"]) or is_ledger_copy(j["key"]))
+            if not (j["track"] and os.path.isfile(j["full"])) or a.force:
+                continue
+            cur = sha256(j["full"])
+            if cur == j["sha"] or (st.existed and st.snap.get(j["key"]) == cur):
+                continue                             # same bytes, or untouched since the last pull/push
+            why = ("no snapshot yet: cannot tell a pulled file from local work" if not st.existed else
+                   "not in the snapshot: made locally" if j["key"] not in st.snap else "local changes not pushed yet")
+            refused.append(f"{j['key']}: {why}")
+        if refused:
+            st.save = False
+        else:
+            for j in jobs:
+                write_bytes_atomic(j["full"], j["data"])
+                if j["track"] and st.existed:
+                    st.snap[j["key"]] = j["sha"]
+    if refused:
+        for r in refused:
+            print(f"  {r}", file=sys.stderr)
+        print(f"{len(refused)} file(s) would be overwritten: push them first (plan), or save the Drive copy beside "
+              "them to compare (--to <path>.orig, never pushed); --force overwrites. Nothing was written.",
+              file=sys.stderr)
+        return 1
+    for j in jobs:
+        h = j["hit"]
+        print(f"saved     {j['key']}  {len(j['data'])} bytes  sha256 {j['sha'][:12]}  <- {j['id']} ({h.where()}"
+              + (", text search" if h.fallback else "") + ")")
+        size_meta = next((h.meta[k] for k in SIZE_KEYS if k in h.meta), None)
+        if j.get("size") is None and size_meta is not None and str(size_meta) != str(len(j["data"])):
+            print(f"WARN      {j['key']}: the result says size {size_meta}, decoded {len(j['data'])} bytes: "
+                  "compare with Drive's fileSize")
+        if not j["track"]:
+            notes.append(f"{j['key']}: temp file or Drive ledger copy, not marked pulled (never pushed)")
+        elif st.existed:
+            print(f"pulled    {j['key']} {j['sha'][:12]}")
+    if not st.existed and any(j["track"] for j in jobs):
+        notes.append(f"no {SNAPSHOT} yet: after the first pull run `python3 tools/drive_sync.py snapshot {a.project} "
+                     "--include-out out/<project>` (files made locally before it: snapshot --only <pulled files>)")
+    if any(j.get("size") is None for j in jobs):
+        notes.append("no --size for some file(s): pass Drive's fileSize to catch a result cut short")
+    for n in notes:
+        print(f"note      {n}")
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="drive_sync.py", description=__doc__.split("\n\n")[0])
     sub = p.add_subparsers(dest="cmd", required=True)
+    s = sub.add_parser("save", help="after download_file_content: write the file from the session transcript, mark it pulled")
+    s.add_argument("project")
+    s.add_argument("--id", action=SaveGroup, metavar="FILE_ID", help="Drive file ID given to download_file_content")
+    s.add_argument("--to", action=SaveGroup, metavar="PATH",
+                   help="where to write it: relative to the project folder, or projects/<p>/... | out/<p>/...")
+    s.add_argument("--size", action=SaveGroup, type=int, metavar="BYTES", help="Drive fileSize: the decoded size must match")
+    s.add_argument("--transcript", action="append", metavar="GLOB",
+                   help="search only these session transcripts (*.jsonl; a subagent's or another session's)")
+    s.add_argument("--force", action="store_true", help="overwrite files with local changes not pushed yet")
+    s.set_defaults(jobs=None)
     s = sub.add_parser("snapshot", help="after a pull: hash the working copy, write .pulled.at")
     s.add_argument("project")
     s.add_argument("--include-out", metavar="out/<project>", help="also hash the media folder (e.g. pulled ledger.csv)")
+    s.add_argument("--only", nargs="+", metavar="PATH",
+                   help="first snapshot of just these files/folders (files made locally before it stay NEW)")
     s.add_argument("--force", action="store_true",
                    help="rewrite an existing snapshot even when local changes are not pushed yet (marks them as pulled)")
     s = sub.add_parser("pulled", help="after pulling more files: set just their snapshot lines (snapshot exists)")
@@ -756,7 +1330,8 @@ def main(argv=None):
                    help="hash that was uploaded (the plan prints it), one per --uploaded: a later edit stays CHANGED")
     a = p.parse_args(argv)
     try:
-        return {"snapshot": cmd_snapshot, "pulled": cmd_pulled, "plan": cmd_plan, "record": cmd_record}[a.cmd](a)
+        return {"save": cmd_save, "snapshot": cmd_snapshot, "pulled": cmd_pulled, "plan": cmd_plan,
+                "record": cmd_record}[a.cmd](a)
     except SyncError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2

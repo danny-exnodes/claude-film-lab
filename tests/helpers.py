@@ -13,6 +13,24 @@ STYLE_FIX = FIX / "styles" / "test-style"
 os.environ["ARK_BASE"] = "http://127.0.0.1:9/never-call-the-real-api"
 
 
+def exists(path, kind="exists"):
+    """Path.exists() / is_file() / is_dir() (kind) that answers False instead of raising: as a non-root user
+    a path under /root raises PermissionError, which would break a skip decorator at import time."""
+    try:
+        return bool(getattr(Path(path), kind)())
+    except (OSError, ValueError):
+        return False
+
+
+def cinecode_dir():
+    """The installed cinecode skill: $CINECODE_DIR, else ~/.claude/skills/cinecode (/root/... in the cloud)."""
+    env = os.environ.get("CINECODE_DIR", "").strip()
+    return Path(env).expanduser() if env else Path.home() / ".claude" / "skills" / "cinecode"
+
+
+CINECODE = cinecode_dir()
+
+
 def load(rel, name=None):
     """Import a tool script by path (its __main__ block does not run)."""
     path = TOOLS / rel

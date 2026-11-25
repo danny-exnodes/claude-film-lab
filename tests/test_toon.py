@@ -111,7 +111,7 @@ class TestToonRender(unittest.TestCase):
                         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                         self.assertNotIn("WARN", r.stdout)
                     self.assertEqual(a.read_bytes(), b.read_bytes(), "same frame, same bytes")
-                    self.assertLess(min(Image.open(a).convert("L").getdata()), 90, f"{c}: no ink in the frame")
+                    self.assertLess(Image.open(a).convert("L").getextrema()[0], 90, f"{c}: no ink in the frame")
             out = Path(d) / "tt.png"
             r = self.toon("turntable", "--creature", "mac-loc", "--size", "320x240", "--out", str(out))
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

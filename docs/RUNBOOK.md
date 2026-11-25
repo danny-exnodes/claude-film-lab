@@ -179,6 +179,10 @@
 | `check_episode`: `method code: layer code 'L1' invalid` / `method code: images = N must be 0` / `method code needs an engine: code style pack` | Shot list, ngân sách hoặc style viết theo nhánh `layers` | Mã lớp `C-<nhân vật>;E-<bối cảnh>[;FX-…][;T]`; `budget.yaml` `images: 0`, `video_seconds: 0`; chọn style trong 10 pack `engine: code` (`.claude/skills/film-compose-shot/references/code-method.md`) |
 | `toon.py` thoát 2: `'<id>' is neither a style pack … nor a look` hoặc `is not an engine: code style pack` | Gõ sai id, hoặc đưa style ảnh (`thuy-mac`) cho TOON | Dùng id trong `styles/` có `engine: code`, hoặc id look (`flat-toon`, `flat-toon+riso`) |
 | Khung ASCII/pixel khó đọc hình nhân vật | Nhân vật nhỏ trong khung hoặc cảnh tối/sáng đều | Máy quay gần hơn (nhân vật ≥ 35 % chiều cao khung), giữ cảnh tương phản vừa; `chu-ascii` dùng bảng màu sáng mặc định |
+| `install_three.sh`: `three: …/three.lock missing or has no sha256 line`; trước đó `doctor` báo `three ok` dù chưa cài | `tools/toon/three.lock` bị `.gitignore` (`*.lock`) nuốt nên chưa từng được commit (sửa ở #35: dòng `!tools/toon/three.lock`) | Kéo bản repo mới; `git check-ignore -v tools/toon/three.lock` phải không in gì; `tools/toon/install_three.sh` |
+| READY qc / `toon.py` in `toon: look '<id>' does not draw creatures` | Shot có `creature` trong `cast` nhưng style dùng look 2D hoặc `cardboard` / `popup-paper` | Dùng `thuy-mac-3d` (`ink-wash-3d`), hoặc `dat-nan-3d` / `low-poly-90`; `toon.py … --creature` thoát 2 với cùng lý do |
+| Dị thú: bàn chân trượt hoặc chân duỗi thẳng không chạm đất khi đi | Chân quá ngắn so với sải (`stride`) hoặc thân uốn (`body.wave`) | Bỏ `stride` tự đặt hoặc tăng `legs.length`; `tests/js/creature.test.cjs` kiểm mẫu; spec mới: chạy lại test với spec đó |
+| `ink-wash-3d`: con thú bơi trên cạn, không thấy mặt nước / vòng sóng | `swim` cần `env.water` (`true` hoặc `{level}`) | Thêm `env: {water: true}` vào scene của shot (mẫu: `demo/creatures/luc-tuc-ngu.json`) |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

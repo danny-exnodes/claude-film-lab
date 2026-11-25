@@ -2,8 +2,8 @@
 // Style-free like rig.js: looks (look3d.js, ink3d.js) turn the mesh data into pictures. Needs rig.js and motion.js.
 // Every function is pure: the same (creature, timeline, t, seed) gives the same pose, joints and vertices.
 //
-// World units as in rig.js: ground y = 0, y up; yaw 0 = facing the camera (+z). The creature's local frame: x right
-// (its left side seen from the front... the screen right at yaw 0), y up, z forward (toward its head).
+// World units as in rig.js: ground y = 0, y up; yaw 0 = facing the camera (+z). The creature's local frame: x to the
+// screen right at yaw 0, y up, z forward (toward its head).
 //
 // spec (every key optional; tools/toon/demo/creatures/*.json; "Thông số model" in code-method.md):
 //   { id, name, seed, scale,
@@ -62,10 +62,14 @@
     return [v[0] * c + x[0] * s + k[0] * d, v[1] * c + x[1] * s + k[1] * d, v[2] * c + x[2] * s + k[2] * d];
   };
   T.rotAxis = rotAxis;
+  // centripetal Catmull-Rom (Barry-Goldman): no loops or overshoot where a short span meets a long one (neck / body)
   const catmull = (p0, p1, p2, p3, k) => {
-    const k2 = k * k, k3 = k2 * k;
-    return [0, 1, 2].map((i) => 0.5 * (2 * p1[i] + (-p0[i] + p2[i]) * k + (2 * p0[i] - 5 * p1[i] + 4 * p2[i] - p3[i]) * k2
-                                   + (-p0[i] + 3 * p1[i] - 3 * p2[i] + p3[i]) * k3));
+    const knot = (a, b) => Math.max(1e-6, Math.sqrt(V.dist(a, b)));
+    const t1 = knot(p0, p1), t2 = t1 + knot(p1, p2), t3 = t2 + knot(p2, p3), t = t1 + (t2 - t1) * k;
+    const L = (a, b, ta, tb) => V.lerp(a, b, (t - ta) / (tb - ta));
+    const A1 = L(p0, p1, 0, t1), A2 = L(p1, p2, t1, t2), A3 = L(p2, p3, t2, t3);
+    const B1 = L(A1, A2, 0, t2), B2 = L(A2, A3, t1, t3);
+    return L(B1, B2, t1, t2);
   };
 
   // ------------------------------------------------------------------ the creature

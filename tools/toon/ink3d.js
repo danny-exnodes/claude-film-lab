@@ -81,10 +81,11 @@
     // ink reveal: the picture appears as ink spreading over the paper; returns -1 = still paper, else the wet front
     float revealFront(vec3 w) {
       if (uReveal >= 1.0) return 0.0;
-      float n = fbm(w.xz * 0.32 + vec2(w.y * 0.25, uSeed));
+      vec2 q = w.xz * 0.3 + vec2(w.y * 0.25, uSeed);
+      float n = 0.68 * vnoise(q) + 0.32 * vnoise(q * 2.3 + 5.1);
       float th = uReveal * 1.3 - 0.15;
       if (n > th) return -1.0;
-      return smoothstep(th - 0.07, th, n);
+      return smoothstep(th - 0.1, th, n);
     }
     vec4 inkColour(float d) { d = clamp(d, 0.0, 1.0); return vec4(mix(uPaper, uInk, d), 1.0); }
   `;
@@ -151,6 +152,11 @@
       d = max(d, rf * 0.85);
       gl_FragColor = inkColour(d);
     }`;
+  // eyes: one flat dot of colour (the accent), revealed with the rest
+  const EYE_FRAG = COMMON + `
+    uniform vec3 uCol;
+    varying vec3 vN; varying vec3 vW; varying vec2 vPat;
+    void main() { if (revealFront(vW) < 0.0) discard; gl_FragColor = vec4(mix(uCol, uPaper, 0.8 * haze(vW)), 1.0); }`;
   // inverted hull: back faces pushed out along the normal by a width in px that thins with distance
   const LINE_VERT = NOISE + `
     uniform float uLine; uniform float uFocal; uniform vec2 uFog; uniform float uSeed;
@@ -225,7 +231,8 @@
       float d = 0.0;
       if (uWater > 0.5) {
         float row = vW.z * 2.6 + fbm(vec2(vW.x * 0.18, vW.z * 0.35 + uSeed)) * 1.8;
-        float line = 1.0 - smoothstep(0.025, 0.08, abs(fract(row) - 0.5));
+        float lw = clamp(0.03, fwidth(row) * 1.2, fwidth(row) * 3.0);          // 1.2-3 px whatever the distance
+        float line = 1.0 - smoothstep(lw, lw * 2.2, abs(fract(row) - 0.5));
         float seg = smoothstep(0.58, 0.72, vnoise(vec2(vW.x * 0.55 + uTime * 0.12 * (mod(floor(row), 2.0) - 0.5), floor(row) * 7.13 + uSeed)));
         d = line * seg * 0.42;
         for (int i = 0; i < 8; i++) {
@@ -234,7 +241,8 @@
           if (r.w <= 0.0 || age < 0.0) continue;
           vec2 q = vW.xz - r.xy;
           float dd = length(q), rad = 0.06 + age * 0.5;
-          float ring = exp(-pow((dd - rad) / (0.025 + age * 0.012), 2.0)) * exp(-age * 1.1) * r.w;
+          float rw = clamp(0.015 + age * 0.008, fwidth(dd) * 1.0, fwidth(dd) * 3.5);
+          float ring = exp(-pow((dd - rad) / rw, 2.0)) * exp(-age * 1.1) * r.w;
           ring *= smoothstep(0.25, 0.55, vnoise(vec2(atan(q.y, q.x) * 2.5 + r.z * 3.0, uSeed)));
           d = max(d, ring * 0.85);
         }
@@ -316,7 +324,8 @@
     const M = inkMats(THREE, S);
     const wing = new THREE.ShaderMaterial({ uniforms: Object.assign({}, S.uni, { uTone: { value: Math.min(1, tn + 0.1) } }),
                                             vertexShader: VERT, fragmentShader: WING_FRAG, side: THREE.DoubleSide });
-    const eye = new THREE.MeshBasicMaterial({ color: new THREE.Color().setRGB(...rgb(pal.eye || pal.ink), THREE.SRGBColorSpace) });
+    const eye = new THREE.ShaderMaterial({ uniforms: Object.assign({}, S.uni, { uCol: { value: new THREE.Vector3(...rgb(pal.eye || pal.ink)) } }),
+                                           vertexShader: VERT, fragmentShader: EYE_FRAG });
     return T.creature3d.build(THREE, J, { body: M.body(tn, PATTERN[cr.pattern.kind] || 0, cr.pattern.scale),
                                           limb: M.body(Math.min(1, tn + 0.08), 0, 1, 0.4), wing, eye, outline: M.line });
   }
@@ -330,8 +339,9 @@
       if (!byTone.has(tn)) byTone.set(tn, M.body(tn, 0, 1, 0.3));
       return byTone.get(tn);
     };
-    g.group.traverse((m) => {
-      if (!m.isMesh) return;
+    const meshes = [];
+    g.group.traverse((m) => { if (m.isMesh) meshes.push(m); });
+    meshes.forEach((m) => {
       m.material = matFor(m.material.color);
       m.frustumCulled = false;
       if (m !== g.body && !g.limbs.includes(m)) return;

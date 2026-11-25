@@ -159,7 +159,9 @@ def demo_seconds(creature, default):
 
 def three_url():
     p = os.environ.get("FILM_THREE", THREE_DEFAULT)
-    return "file://" + p if not p.startswith("file://") else p
+    if p.startswith("file://"):
+        return p
+    return "file:///" + p.replace("\\", "/") if len(p) > 1 and p[1] == ":" else "file://" + p   # C:/... (a Windows preview)
 
 
 def shoot(spec, out_dir, frames="all", jpg=False):

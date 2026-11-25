@@ -256,9 +256,29 @@ test('ink landscape: seeded peaks, a clear middle in the near band, finite heigh
   assert.ok(T.inkTone('#1A1714') > 0.85 && T.inkTone('#EFE6D3') < 0.15);
 });
 
+test('the body spine never doubles back (centripetal curve where the neck meets the body)', () => {
+  for (const [cr, id] of [[deer, 'mac-loc'], [bird, 'van-dieu'], [fish, 'luc-tuc-ngu']]) {
+    const sp = T.creatureJoints(cr, T.creaturePose(cr, { start: {} }, 0, 3)).spine;
+    for (let i = 1; i < sp.length - 1; i++) {
+      assert.ok(T.v.dot(T.v.sub(sp[i + 1], sp[i]), T.v.sub(sp[i], sp[i - 1])) > 0, `${id} sample ${i}`);
+    }
+  }
+});
+
+test('brush-write: glyphs are written one after another, done at the end', () => {
+  const w = { text: '山海經', t: [1, 4] };
+  assert.deepStrictEqual(T.writeProgress(w, 0.5), [0, 0, 0]);
+  assert.deepStrictEqual(T.writeProgress(w, 2.5), [1, 0.5, 0]);
+  assert.deepStrictEqual(T.writeProgress(w, 4), [1, 1, 1]);
+  for (let t = 0; t < 5; t += 0.1) {
+    const p = T.writeProgress(w, t);
+    for (let i = 1; i < p.length; i++) assert.ok(p[i] <= p[i - 1]);
+  }
+});
+
 test('registry: new motion ids are in motions.json, the ink style lists only registered ids', () => {
   const m = JSON.parse(fs.readFileSync(path.join(REPO, 'tools', 'compose', 'motions.json'), 'utf8')).motions;
-  for (const id of ['tail-fan', 'wing-flap', 'fly', 'swim', 'head-turn', 'fly-through', 'ink-reveal-3d', 'water-ripple']) {
+  for (const id of ['tail-fan', 'wing-flap', 'fly', 'swim', 'head-turn', 'fly-through', 'ink-reveal-3d', 'water-ripple', 'brush-write']) {
     assert.ok(m[id] && m[id].engine === 'toon', id);
   }
   const looks = JSON.parse(fs.readFileSync(path.join(REPO, 'tools', 'toon', 'looks.json'), 'utf8')).looks;

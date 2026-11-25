@@ -18,7 +18,7 @@ render:
   env: {mist: 3, bands: 3, water: false}
 palette: {ink: '#1A1714', grey: '#8C8378', paper: '#EFE6D3', ochre: '#C89A5A', accent: '#B02E22'}
 motion: [walk-cycle, run-cycle, turn, look-at, head-turn, blink, breath, tail-fan, wing-flap, fly, swim, orbit, dolly, crane,
-         fly-through, ink-reveal-3d, water-ripple]
+         fly-through, ink-reveal-3d, water-ripple, brush-write]
 sound:
   scale: D minor pentatonic
   instruments: [plucked zither, end-blown flute, frame drum, small gong, bowed drone]

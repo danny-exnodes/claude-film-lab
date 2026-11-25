@@ -36,6 +36,7 @@
     "swim": {"module": "toon/creature.js", "call": "TOON creature clip { do: 'swim', t: [a, b], to: [x, z], wave } (body wave tied to the distance; env.water)", "needs": [], "engine": "toon"},
     "fly-through": {"module": "toon/project.js", "call": "TOON SHOT camera { move: { t, path: [[x, y, z], ...], look: 'ahead' } }", "needs": [], "engine": "toon"},
     "ink-reveal-3d": {"module": "toon/ink3d.js", "call": "TOON scene opts { reveal: { at, dur } } (look ink-wash-3d)", "needs": [], "engine": "toon"},
+    "brush-write": {"module": "toon/toon.js", "call": "TOON scene write: [{ text, t: [a, b], x, y, size, vertical }] (glyphs written stroke-down in order, any look)", "needs": [], "engine": "toon"},
     "water-ripple": {"module": "toon/ink3d.js", "call": "TOON scene env { water: true } (swimmers leave rings) + opts { ripples: [{ at: [x, z], t }] }", "needs": [], "engine": "toon"}
   }
 }

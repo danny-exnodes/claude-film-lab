@@ -759,3 +759,13 @@ class TestComfyHook(tc.ComfyCase if tc else unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SnapshotExportTest(unittest.TestCase):
+    """bpy_snapshot runs inside Blender (not importable here): guard the export flags by reading the source."""
+
+    def test_static_snapshots_bake_the_pose(self):
+        src = (Path(__file__).resolve().parent.parent / "tools" / "review" / "bpy_snapshot.py").read_text(encoding="utf-8")
+        self.assertIn("export_apply=True", src)
+        # a skin without animation shows the rest pose in viewers: posed parts (hair proxies) float away from it
+        self.assertIn("export_skins=bool(animations)", src)

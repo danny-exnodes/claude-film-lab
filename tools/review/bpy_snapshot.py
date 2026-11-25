@@ -48,10 +48,14 @@ def _with_parents(objects):
 
 
 def export_glb(path, objects=None, animations=False):
-    """Export to path (.glb). objects=None: every object of the scene (cameras and lights are left out)."""
+    """Export to path (.glb). objects=None: every object of the scene (cameras and lights are left out).
+
+    Without animations the skeleton is NOT exported (export_skins=False): the armature deformation is then baked into
+    the mesh by export_apply, so a posed model looks posed. With a skin and no animation, viewers show the unbent rest
+    pose, and parts baked in the posed shape (hair proxies, children of bones) float away from it."""
     kw = dict(filepath=path, export_format="GLB", export_apply=True, export_yup=True, export_materials="EXPORT",
-              export_animations=bool(animations), export_cameras=False, export_lights=False, export_extras=False,
-              use_selection=False)
+              export_animations=bool(animations), export_skins=bool(animations), export_cameras=False,
+              export_lights=False, export_extras=False, use_selection=False)
     if objects is not None:
         keep = set(_with_parents(objects))
         for ob in bpy.context.scene.objects:

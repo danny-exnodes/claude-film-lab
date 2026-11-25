@@ -4,7 +4,9 @@
 
 ## [Unreleased]
 
-### Xem trực tiếp bản dựng 3D và render: `tools/review/` (2026-11-25, nhánh `claude/review-tool`)
+## [1.4.0] - 2026-11-25
+
+### Xem trực tiếp bản dựng 3D và render: `tools/review/` (#48, 2026-11-25)
 - Web app tự host (Docker `python:3.13-alpine`, chỉ thư viện chuẩn; SQLite trong volume; ngrok cho URL công khai, không
   đăng nhập theo lựa chọn của chủ lab): bảng theo dõi trực tiếp (SSE), **bản vẽ dựng** (phần hình mới của mỗi bước vẽ
   bằng nét cyan rồi thành khối, đường kích thước, phát lại), xem model GLB (OrbitControls, khung dây/pháp tuyến/đất sét,
@@ -45,7 +47,7 @@
 - Web app: bản chụp `/api/builds` đầu tiên không còn ghi đè cập nhật SSE mới hơn (gộp theo `updated`); đường dẫn `#/…`
   mã hoá hỏng mở bảng theo dõi kèm thông báo thay vì trang trắng.
 
-### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
+### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (#47, 2026-11-25)
 Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với
 MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026-11-25-local-engines-design.md`.
 
@@ -523,7 +525,8 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.0.0...v1.1.0

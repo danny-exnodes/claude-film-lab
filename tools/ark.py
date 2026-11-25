@@ -12,10 +12,13 @@
                        [--resolution 480p|720p|1080p (default 720p)] [--no-audio] [--overwrite]
                        (--ledger L.csv --budget B.yaml | --no-budget [--ledger L.csv])
   python3 ark.py video --resume-task TASK_ID [out.mp4] --ledger L.csv
+  python3 ark.py video --resume-pending --ledger L.csv          (every open video task of the ledger, one by one)
   python3 ark.py lambda-job prepare "prompt" out.png [--model dola-seedream-5-0-pro-260628] [--size 2K|4K] [--ref a.png ...]
                        [--refs-dir DIR] [--payload FILE] [--overwrite] --ledger L.csv (--budget B.yaml | --no-budget)
-  python3 ark.py lambda-job finish --status-json jobs/<job_id>.json [--job ID] [--image downloaded.jpg] [--out out.png] --ledger L.csv
+  python3 ark.py lambda-job finish --status-json jobs/<job_id>.json [--job ID] [--image downloaded.jpg] [--out out.png]
+                       [--give-up] --ledger L.csv
   python3 ark.py ledger-merge A.csv B.csv [...] -o OUT.csv
+  python3 ark.py ledger-close --req ID --status abandoned [--note TEXT] --ledger L.csv
 
 image-batch: every row of a CSV is one `image` request (same ledger rows, same guards, never retried). All rows are
 validated before anything is sent (exit 2 lists every problem), rows whose output file exists are skipped, the batch
@@ -24,17 +27,24 @@ is checked against the caps as a whole before the first request (exit 3, one ref
 
 lambda-job (lambda/README.md): pro and 4K images run on the AWS Lambda worker, outside the proxy. `prepare` does the
 same atomic budget check + 'pending' row as `image` and prints the Lambda payload (job_id = the request id);
-`finish` turns the worker's jobs/<job_id>.json into the request's final row. No ledger, no Lambda call.
+`finish` turns the worker's jobs/<job_id>.json into the request's final row (`failed-unsent`, not counted, when the
+worker never sent it; a job still `running` past its deadline is dead: `--give-up` closes it as a counted `failed`).
+No ledger, no Lambda call.
 ledger-merge: union of ledgers pulled from Drive or written by two sessions (rows deduplicated by
-(req, status, task_id)), so no billed row is lost when two copies exist (docs/CONVENTIONS.md §7, §11.6).
+(req, status, task_id); rows without req= as a multiset), so no billed row is lost when two copies exist
+(docs/CONVENTIONS.md §7, §11.6). Every row is checked first (file:line, exit 2, nothing written), and the result
+must count every request at least as much as each copy does.
+ledger-close: a final `abandoned` row for an orphan pending request (killed agent, prepared but never invoked Lambda
+job): it stays counted against the caps, it is only no longer open.
 
 Budget and ledger (docs/CONVENTIONS.md §7): --ledger/--budget (or env FILM_LEDGER/FILM_BUDGET).
 image/video refuse to run (exit 2) without BOTH a budget and a ledger, unless --no-budget is given
-(ad-hoc tests in the main session only). budget.yaml `ledger_required: true` also refuses (exit 2) when the ledger
+(ad-hoc tests in the main session only: with FILM_AGENT set, --no-budget and --force are refused). budget.yaml `ledger_required: true` also refuses (exit 2) when the ledger
 file does not exist yet: pull it from Drive first. The budget is checked BEFORE the call (over a cap: exit 3),
 in the same exclusive ledger lock that appends the request's 'pending' row (note req=<id>), so parallel
 agents cannot overrun a cap. Each request then gets a final row
-(ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row.
+(ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row. A response without
+image data is a failed row; extra images of one response never replace an existing file.
 
 Exit codes of image / video / lambda-job prepare: 2 = refused locally (nothing sent, no ledger row, no output folder:
 fix the command), 3 = over a cap (refused-budget row), 1 = the request left this machine (see its ledger row).
@@ -47,8 +57,8 @@ Credentials: in a Claude cloud session the agent proxy injects the real Ark key
 for ark.ap-southeast.bytepluses.com, so this script sends a placeholder. Outside
 that proxy, set ARK_API_KEY. Never print, log or search for the key.
 """
-import argparse, base64, contextlib, csv, datetime, difflib, fcntl, http.client, io, json, mimetypes, os, re, signal
-import sys, threading, time, uuid
+import argparse, base64, contextlib, csv, datetime, difflib, fcntl, hashlib, http.client, io, json, mimetypes, os, re
+import signal, sys, threading, time, uuid
 import urllib.request, urllib.error
 
 BASE = os.environ.get("ARK_BASE", "https://ark.ap-southeast.bytepluses.com/api/v3")
@@ -211,11 +221,15 @@ def download(url, out):
 
 # --- ledger and budget (docs/CONVENTIONS.md §7) ------------------------------
 LEDGER_FIELDS = ["ts", "kind", "model", "size", "seconds", "count", "status", "out", "task_id", "usage", "agent", "note"]
-FINAL = {"ok", "failed", "cut-502"}    # final row of a request; every one may have been billed
+# final row of a request (closes it): ok/failed/cut-502 may have been billed; abandoned = an orphan pending row closed
+# by `ledger-close` (still billed); failed-unsent = a Lambda job whose worker never sent the request (sent: false)
+FINAL = {"ok", "failed", "cut-502", "abandoned", "failed-unsent"}
+UNBILLED = {"failed-unsent"}           # final rows that close a request without counting it
 BILLED = FINAL | {"pending"}           # pending: written before the call, counts until a final row exists
+STATUSES = BILLED | {"refused-budget"}   # every status a ledger row may carry (ledger-merge refuses others)
 BUDGET_EXIT = 3
 USAGE_EXIT = 2
-REQ_RE = re.compile(r"req=([0-9a-f]+)")
+REQ_RE = re.compile(r"req=([0-9a-f]+)(?=;|\s|$)")   # the whole token: 'req=abcXYZ' is no request id
 
 
 def utc_now():
@@ -407,24 +421,32 @@ def req_id(row):
     return m.group(1) if m else None
 
 
-def billed_requests(rows):
-    """One row per request that may have been billed (docs/CONVENTIONS.md §7).
-    Rows are grouped by req id (else by task_id); a group counts once, using its last final row
-    (ok/failed/cut-502) or, with none, its last pending row. Rows with neither id count one by one."""
-    single, groups = [], {}
+def request_rows(rows):
+    """[(key, row)]: the row that decides each request (docs/CONVENTIONS.md §7), unbilled ones included.
+    Rows are grouped by req id (else by task_id); a group is decided by its last final row (FINAL) or, with none,
+    by its last pending row. Rows with neither id are requests of their own, keyed ('row', fields, n-th copy)."""
+    single, groups, seen = [], {}, {}
     for r in rows:
         if r.get("status") not in BILLED:
             continue
         key = req_id(r) or ("task:" + r["task_id"] if r.get("task_id") else None)
         if key is None:
-            single.append(r)
+            t = tuple(r.get(k) or "" for k in LEDGER_FIELDS)
+            seen[t] = seen.get(t, 0) + 1
+            single.append((("row", t, seen[t]), r))
         else:
             groups.setdefault(key, []).append(r)
     out = list(single)
-    for g in groups.values():
+    for key, g in groups.items():
         finals = [r for r in g if r.get("status") in FINAL]
-        out.append((finals or g)[-1])
+        out.append((key, (finals or g)[-1]))
     return out
+
+
+def billed_requests(rows):
+    """One row per request that may have been billed (docs/CONVENTIONS.md §7): request_rows() without the
+    requests closed as failed-unsent (never sent)."""
+    return [r for _, r in request_rows(rows) if r.get("status") not in UNBILLED]
 
 
 def budget_check(budget, rows, req):
@@ -564,6 +586,16 @@ def guard_output(path, overwrite=False):
     usage_error(f"output exists: {path} (versions only go up; next free: {free})")
 
 
+def extra_out(out, n, rid, avoid=()):
+    """File for image n >= 1 of a multi-image response: <stem>-<n><ext>, or <stem>-<n>-<req id[:8]><ext> when that
+    file exists already or is another batch row's out (realpaths in `avoid`): a paid file is never replaced."""
+    stem, ext = os.path.splitext(out)
+    path = f"{stem}-{n}{ext}"
+    if (os.path.exists(path) and os.path.getsize(path) > 0) or os.path.realpath(path) in avoid:
+        path = f"{stem}-{n}-{rid[:8]}{ext}"
+    return path
+
+
 def guard_proxy_cut(model, size):
     """Exit 2 for an `image` request the proxy would cut at ~30 s (and that may still be billed)."""
     force = "" if os.environ.get("FILM_AGENT") else " (--force sends it anyway)"
@@ -572,7 +604,7 @@ def guard_proxy_cut(model, size):
         usage_error(f"{model} always takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff and fails with 502 "
                     f"(possibly still billed). Run it on {lam}.{force}")
     named, wxh = NAMED_SIZE_RE.fullmatch(size), WXH_RE.fullmatch(size)
-    if not (named or wxh):
+    if not (named or wxh) or 0 in [int(x) for x in (named or wxh).groups()]:
         usage_error(f"unknown --size {size}: use 1K, 2K or <W>x<H> (e.g. 2560x1440).{force}")
     if (int(named.group(1)) not in (1, 2)) if named else (int(wxh.group(1)) * int(wxh.group(2)) > MAX_PIXELS):
         usage_error(f"--size {size} is larger than 2K: it takes longer than the proxy's ~{PROXY_CUTOFF}s cutoff "
@@ -606,12 +638,16 @@ def image(a):
     except BaseException as e:
         log_row(a, req, rid, fail_status(e), err_note(e))
         raise
-    data = r.get("data", [])
+    data = r.get("data") or []
     final = dict(count=max(1, len(data)), usage=json.dumps(r.get("usage", {}), separators=(",", ":")))
-    stem, ext = os.path.splitext(a.out)
+    if not data:
+        log_row(a, req, rid, "failed", "no image in the response", **final)
+        print(f"FAILED: the response has no image data (it may still have been billed; not retried): "
+              f"{json.dumps(r)[:300]}", file=sys.stderr)
+        sys.exit(1)
     try:
         for i, d in enumerate(data):
-            out = a.out if i == 0 else f"{stem}-{i}{ext}"
+            out = a.out if i == 0 else extra_out(a.out, i, rid)
             save_image(base64.b64decode(d["b64_json"]), out)
             print("saved", out)
     except BaseException as e:
@@ -820,7 +856,7 @@ def batch_ledger_rows(a):
         _unreadable_ledger(a.ledger, e)
 
 
-def batch_row(a, job, budget):
+def batch_row(a, job, budget, avoid=frozenset()):
     """One row = one `image` request: pending row (atomic budget check), POST, save, final row. Never retried.
     Returns (ok|failed|cut-502, detail). A SystemExit out of reserve() means nothing was sent."""
     req = {"kind": "image", "model": job["model"], "size": job["size"], "count": 1, "out": job["out"]}
@@ -847,12 +883,12 @@ def batch_row(a, job, budget):
         final = dict(count=max(1, len(data)), usage=json.dumps(r.get("usage", {}), separators=(",", ":")))
         if not data:
             raise ValueError("no image in the response")
-        stem, ext = os.path.splitext(job["out"])
         for n, d in enumerate(data):
-            out = job["out"] if n == 0 else f"{stem}-{n}{ext}"
+            out = job["out"] if n == 0 else extra_out(job["out"], n, rid, avoid)
             # `out` only ever holds a complete file: a rerun skips a row by its output file. The request id keeps
             # the temporary name clear of every other row's out and of files already in the folder
-            part = f"{os.path.splitext(out)[0]}.{rid}.part{ext}"
+            stem, ext = os.path.splitext(out)
+            part = f"{stem}.{rid}.part{ext}"
             try:
                 save_image(base64.b64decode(d["b64_json"]), part, quiet=True)
                 os.replace(part, out)
@@ -898,6 +934,7 @@ def image_batch(a):
         return 0
 
     # phase 3: bounded parallelism; every request does its own atomic reserve()
+    avoid = frozenset(os.path.realpath(j["out"]) for j in todo + skipped)   # extra images never take a row's out
     lock = threading.Lock()
     queue = list(todo)
     count = {"ok": 0, "failed": 0, "cut-502": 0}
@@ -924,7 +961,7 @@ def image_batch(a):
                     continue
             t0 = time.time()
             try:
-                status, detail = batch_row(a, job, budget)
+                status, detail = batch_row(a, job, budget, avoid)
             except SystemExit as e:             # reserve(): over a cap (3) or a ledger it cannot count (2); not sent
                 code = e.code if isinstance(e.code, int) and e.code else USAGE_EXIT
                 why = "refused by the budget" if code == BUDGET_EXIT else "refused locally"
@@ -977,6 +1014,8 @@ def image_batch(a):
 
 
 def video(a):
+    if a.resume_pending:
+        return resume_pending(a)
     if a.resume_task:
         return resume_video(a)
     need_files([a.image] if a.image else [])
@@ -1011,6 +1050,47 @@ def video(a):
     log_row(a, req, rid, "pending", "task created")   # the task id survives even a SIGKILL
     print("task", task, flush=True)
     poll_and_save(a, req, rid)
+
+
+def open_video_tasks(rows):
+    """[(task id, out)] of every video request still open (decided by a pending row) whose task id is known on any
+    of its rows, in ledger order: the tasks `video --resume-pending` polls again."""
+    tasks = {}
+    for r in rows:
+        if r.get("task_id") and req_id(r):
+            tasks[req_id(r)] = r["task_id"]
+    found = []
+    for key, r in request_rows(rows):
+        task = r.get("task_id") or tasks.get(key)
+        if r.get("kind") == "video" and r.get("status") == "pending" and task:
+            found.append((task, r.get("out") or ""))
+    return found
+
+
+def resume_pending(a):
+    """--resume-pending: --resume-task for every open video task of the ledger, one after the other. A task that
+    fails (or has no out) does not stop the others; exit 1 when any did. Nothing new is created or reserved."""
+    todo = open_video_tasks(ledger_rows(a.ledger))
+    if not todo:
+        print(f"no open video task in {a.ledger}")
+        return
+    done = {"ok": 0, "failed": 0}
+    for n, (task, out) in enumerate(todo, 1):
+        a.resume_task, a.out = task, out or None
+        print(f"[{n}/{len(todo)}] task {task} -> {out or '?'}", flush=True)
+        try:
+            resume_video(a)
+            done["ok"] += 1
+        except Interrupted:
+            raise
+        except SystemExit as e:
+            done["failed"] += 1
+            if isinstance(e.code, str):
+                print(e.code, file=sys.stderr)
+            print(f"task {task}: not saved (see its ledger row)", file=sys.stderr, flush=True)
+    print(f"resume-pending: {done['ok']} saved, {done['failed']} failed, of {len(todo)} open task(s)")
+    if done["failed"]:
+        sys.exit(1)
 
 
 def resume_video(a):
@@ -1100,14 +1180,14 @@ def lambda_prepare(a):
     Nothing is sent anywhere: the caller invokes the Lambda with the payload (AWS MCP run_script)."""
     model = a.model or LAMBDA_DEFAULT
     need_files(a.ref)
-    if a.size.upper() in ("1K", "2K", "4K"):
-        print(f"note: --size {a.size} is a named size and does not fix the aspect ratio (Pro 2K returned 1664x2496 "
-              "on 2026-11-10); pass <W>x<H> for a layer plate.", file=sys.stderr)
     guard_output(a.out, a.overwrite)
     budget = checked_budget(a, "image", model)
     rid = new_req()
     req = {"kind": "image", "model": model, "size": a.size, "count": 1, "out": a.out}
     encoded = [encode_ref(path) for path in a.ref or []]     # exit 2 for a file that is not an image: before any folder
+    if a.size.upper() in ("1K", "2K", "4K"):                 # after every local refusal: one message per outcome
+        print(f"note: --size {a.size} is a named size and does not fix the aspect ratio (Pro 2K returned 1664x2496 "
+              "on 2026-11-10); pass <W>x<H> for a layer plate.", file=sys.stderr)
     make_out_dir(a.out)
     payload = {"job_id": rid, "prompt": a.prompt, "model": model, "size": a.size}
     uploads = []
@@ -1143,10 +1223,42 @@ def redact(text):
     return text if cut < 0 else text[:cut] + "Bearer <redacted>"
 
 
+WORKER_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lambda", "ark_image_worker.py")
+LAMBDA_GRACE = 60      # seconds after a running job's `deadline` at which its worker is known to be dead
+
+
+def read_status_json(path):
+    """The worker's jobs/<job_id>.json as a dict; anything else is a local refusal (exit 2, nothing written)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            st = json.load(f)
+    except OSError as e:
+        usage_error(f"cannot read status file {path} ({e.strerror or type(e).__name__})")
+    except ValueError:
+        st = None
+    if not isinstance(st, dict):
+        usage_error(f"status file {path} is not a JSON object (an S3 error page? download it again with "
+                    "`curl -fsS -o`); nothing written")
+    return st
+
+
+def check_worker_hash(st, job):
+    """WARN when the worker that ran the job is not the repo's lambda/ark_image_worker.py (stale deployment)."""
+    try:
+        with open(WORKER_FILE, "rb") as f:
+            want = hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return
+    got = st.get("worker_sha256")
+    if got != want:
+        ran = f"worker {str(got)[:12]}" if got else "a worker without worker_sha256 (older than the repo)"
+        print(f"WARN: job {job} ran {ran}; the repo's lambda/ark_image_worker.py is {want[:12]}. Redeploy before the "
+              "next job (lambda/README.md, 'Triển khai lại')", file=sys.stderr)
+
+
 def lambda_finish(a):
     """Final ledger row for a Lambda job from the worker's jobs/<job_id>.json; saves the downloaded image."""
-    with open(a.status_json, encoding="utf-8") as f:
-        st = json.load(f)
+    st = read_status_json(a.status_json)
     job = a.job or st.get("job_id")
     if not job or (st.get("job_id") and st["job_id"] != job):
         usage_error(f"job id mismatch: --job {a.job!r}, status file says {st.get('job_id')!r}")
@@ -1155,10 +1267,7 @@ def lambda_finish(a):
         usage_error(f"job {job} has no row in {a.ledger}: every Lambda job starts with 'lambda-job prepare' "
                     "(budget check + pending row). Check that this is the episode's ledger")
     status = st.get("status")
-    if status not in ("succeeded", "failed"):
-        print(f"job {job} is {status or 'unknown'}: no final row written; read jobs/{job}.json again later",
-              file=sys.stderr)
-        sys.exit(1)
+    check_worker_hash(st, job)
     last = known[-1]
     req = {k: last.get(k, "") for k in ("kind", "model", "size", "seconds", "count", "out")}
     out = a.out or req.get("out")
@@ -1166,19 +1275,59 @@ def lambda_finish(a):
     done = [r for r in known if r.get("status") in FINAL]
     secs = f"{LAMBDA_NOTE}; seconds={st.get('seconds', '?')}"
     usage = json.dumps(st.get("usage") or {}, separators=(",", ":"))
+    finish = (f"python3 tools/ark.py lambda-job finish --status-json {a.status_json} --give-up "
+              f"--ledger {a.ledger}")
+    if status == "running":
+        deadline = st.get("deadline")
+        if not isinstance(deadline, (int, float)) or isinstance(deadline, bool):
+            if a.give_up:
+                usage_error(f"job {job}: the status has no deadline, so ark.py cannot tell that the worker is dead. "
+                            "Wait 16 minutes after the Invoke, then close it with: python3 tools/ark.py ledger-close "
+                            f"--req {job} --ledger {a.ledger} --status abandoned")
+        else:
+            late = time.time() - deadline
+            if late > LAMBDA_GRACE:
+                if not a.give_up:
+                    print(f"job {job} is still 'running' {late:.0f}s after its deadline: the worker died (time or "
+                          "memory limit). Stop reading the status and do not invoke again. Close the request (it "
+                          f"may have been billed, so it stays counted):\n  {finish}", file=sys.stderr)
+                    sys.exit(1)
+                if not done:
+                    log_row(a, req, job, "failed", f"{LAMBDA_NOTE}; gave up: still running {late:.0f}s after the "
+                                                    "deadline (worker died; may have been billed)")
+                print(f"job {job} closed as failed (worker died); it stays counted. Not retried.", file=sys.stderr)
+                sys.exit(1)
+            if a.give_up:
+                usage_error(f"job {job} may still run for {max(0, -late):.0f}s (+{LAMBDA_GRACE}s): --give-up only "
+                            "after its deadline; read the status again later")
+    if status not in ("succeeded", "failed"):
+        print(f"job {job} is {status or 'unknown'}: no final row written; read jobs/{job}.json again later",
+              file=sys.stderr)
+        sys.exit(1)
     if status == "failed":
         error = redact(st.get("error"))
+        unsent = st.get("sent") is False
         if not done:
-            log_row(a, req, job, "failed", f"{secs}; {error[:240]}")
-        print(f"job {job} FAILED: {error}\nIt may still have been billed; it stays counted. Not retried.",
-              file=sys.stderr)
+            log_row(a, req, job, "failed-unsent" if unsent else "failed", f"{secs}; {error[:240]}")
+        if unsent:
+            print(f"job {job} FAILED before anything was sent to Ark (sent: false): {error}\nNothing was generated; "
+                  "the request is closed as failed-unsent and no longer counts. Fix the cause, then prepare a new "
+                  "job.", file=sys.stderr)
+        else:
+            print(f"job {job} FAILED: {error}\nIt may still have been billed; it stays counted. Not retried.",
+                  file=sys.stderr)
         sys.exit(1)
     final = dict(count=max(1, len(st.get("keys") or [])), usage=usage)
     if a.image:
+        need_files([a.image])
+        with open(a.image, "rb") as f:
+            raw = f.read()
+        if not sniff_mime(raw):     # e.g. S3's XML error page saved by curl without -f
+            usage_error(f"--image {a.image} is not a PNG, JPEG, WebP or GIF image (an S3 error page? download it "
+                        "again with `curl -fsS -o`); nothing written")
         try:
             make_out_dir(out)
-            with open(a.image, "rb") as f:
-                save_image(f.read(), out)
+            save_image(raw, out)
             print("saved", out)
         except Exception as e:
             if not done:
@@ -1196,53 +1345,174 @@ def lambda_finish(a):
     print("usage", usage, "| seconds", st.get("seconds"))
 
 
-def _merge_key(row):
-    rid = req_id(row)
-    if rid:
-        return (rid, row.get("status") or "", row.get("task_id") or "")
-    return tuple(row.get(k) or "" for k in LEDGER_FIELDS)     # old rows without req=: identical rows only
+TS_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+
+
+def row_problems(r):
+    """Why one ledger row cannot be merged (empty list: it can). Strict on purpose: a row ledger-merge cannot
+    read would otherwise be dropped or counted as 0, i.e. billed requests would vanish from the count."""
+    bad = []
+    if not TS_RE.fullmatch(r.get("ts") or ""):
+        bad.append(f"ts {r.get('ts')!r} is not an ISO 8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
+    if r.get("kind") not in ("image", "video"):
+        bad.append(f"kind {r.get('kind')!r} is not image or video")
+    if r.get("status") not in STATUSES:
+        bad.append(f"status {r.get('status')!r} is not one of {', '.join(sorted(STATUSES))}")
+    for k in ("count", "seconds"):
+        v = r.get(k) or ""
+        try:
+            ok = v == "" or 0 <= float(v) < float("inf")
+        except ValueError:
+            ok = False
+        if not ok:
+            bad.append(f"{k} {v!r} is not a number >= 0")
+    note = r.get("note") or ""
+    if note.startswith("req=") and not REQ_RE.match(note):
+        bad.append(f"note {note[:40]!r} starts with req= but has no valid request id (lowercase hex, then ';' or end)")
+    return bad
+
+
+def read_ledger_strict(path, text):
+    """(rows, problems) of a ledger's text for ledger-merge; every problem is 'path:line: reason'."""
+    rows, problems = [], []
+    reader = csv.reader(io.StringIO(text.lstrip("\ufeff")), strict=True)
+    try:
+        header = next(reader, None)
+    except csv.Error as e:
+        return rows, [f"{path}:1: {e}"]
+    if header is None:
+        return rows, problems                     # empty file: no rows
+    if header != LEDGER_FIELDS:
+        return rows, [f"{path}:1: header is not {','.join(LEDGER_FIELDS)}"]
+    while True:
+        line = reader.line_num + 1
+        try:
+            rec = next(reader)
+        except StopIteration:
+            break
+        except csv.Error as e:                    # e.g. a quote that is never closed: the rest cannot be read
+            problems.append(f"{path}:{line}: {e}")
+            break
+        if not rec:
+            continue                              # blank line
+        if len(rec) != len(LEDGER_FIELDS):
+            problems.append(f"{path}:{line}: {len(rec)} cells, the header has {len(LEDGER_FIELDS)} "
+                            "(quote a note that contains a comma)")
+            continue
+        r = dict(zip(LEDGER_FIELDS, rec))
+        problems += [f"{path}:{line}: {why}" for why in row_problems(r)]
+        rows.append(r)
+    return rows, problems
+
+
+def _row_tuple(r):
+    return tuple(r.get(k) or "" for k in LEDGER_FIELDS)
+
+
+def _merge_rank(t):
+    return units(dict(zip(LEDGER_FIELDS, t))), t
 
 
 def merge_rows(row_lists):
-    """Union of ledgers: first occurrence of each (req, status, task_id) wins; ordered by time, a request's
-    pending rows before its final row. Rows that are not ledger-shaped (no ts/kind/status) are dropped."""
-    seen, out = set(), []
+    """Union of ledgers (lists of validated rows), independent of the order of the lists.
+    Rows with a request id: one row per (req, status, task_id); when copies differ, the one with more billing units
+    wins, then the greater field tuple. Rows without one (old ledgers): as a multiset, each distinct row as many
+    times as the copy that has it most often (two identical rows in one copy are two requests).
+    Sorted by (ts, pending before final, fields)."""
+    keyed, counts = {}, {}
     for rows in row_lists:
+        local = {}
         for r in rows:
-            if not (r.get("ts") and r.get("kind") and r.get("status")):
+            t, rid = _row_tuple(r), req_id(r)
+            if rid:
+                k = (rid, r.get("status") or "", r.get("task_id") or "")
+                keyed[k] = t if k not in keyed else max(keyed[k], t, key=_merge_rank)
+            else:
+                local[t] = local.get(t, 0) + 1
+        for t, n in local.items():
+            counts[t] = max(counts.get(t, 0), n)
+    out = list(keyed.values()) + [t for t, n in counts.items() for _ in range(n)]
+    status = LEDGER_FIELDS.index("status")
+    out.sort(key=lambda t: (t[0], 0 if t[status] == "pending" else 1, t))
+    return [dict(zip(LEDGER_FIELDS, t)) for t in out]
+
+
+def merge_shortfall(inputs, merged):
+    """The 'never bill less' check: every request an input counts must count at least as much, with the same kind
+    and model, in the merged ledger, unless the merged ledger closes it as failed-unsent (never sent).
+    `inputs` is [(path, rows)]; returns problems as 'path: reason'."""
+    got = dict(request_rows(merged))
+    problems = []
+    for path, rows in inputs:
+        for key, r in request_rows(rows):
+            m = got.get(key)
+            if r.get("status") in UNBILLED or (m is not None and m.get("status") in UNBILLED):
                 continue
-            k = _merge_key(r)
-            if k not in seen:
-                seen.add(k)
-                out.append({f: r.get(f) or "" for f in LEDGER_FIELDS})
-    out.sort(key=lambda r: (r["ts"], 0 if r["status"] == "pending" else 1))
-    return out
+            name = key if isinstance(key, str) else "row " + ",".join(key[1])[:80]
+            if m is None:
+                problems.append(f"{path}: request {name} is missing from the merged ledger")
+            elif (m.get("kind"), m.get("model")) != (r.get("kind"), r.get("model")) or units(m) < units(r):
+                problems.append(f"{path}: request {name} counts {units(r):g} {r.get('kind')} {r.get('model')} "
+                                f"({r.get('status')}) there but {units(m):g} {m.get('kind')} {m.get('model')} "
+                                f"({m.get('status')}) after the merge: the copies disagree, fix the rows by hand")
+    return problems
+
+
+def _read_text(path):
+    with open(path, newline="", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_SH)
+        try:
+            return f.read()
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def ledger_merge(a):
     """Write the union of the input ledgers and of --out's own rows to --out, under its exclusive lock.
     --out's existing rows are always kept, listed as an input or not: a merge never drops a billed row.
+    Every row of every input is checked first; any problem (file:line), or a merged ledger that would count a
+    request less than one of the copies does, is exit 2 and --out is left untouched.
     With no input: an empty ledger with the header (first generation of an episode with ledger_required)."""
-    missing = [p for p in a.ledgers if not os.path.exists(p)]
+    missing = [p for p in a.ledgers if not os.path.isfile(p)]
     if missing:
         usage_error("no such ledger: " + ", ".join(missing))
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+    created = not os.path.exists(a.out)
     with open(a.out, "a+", newline="", encoding="utf-8") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
             f.seek(0)
-            current = f.read()
-            if not a.ledgers and _parse_rows(a.out, current):
+            try:
+                current = f.read()
+            except UnicodeDecodeError as e:
+                _unreadable_ledger(a.out, e)
+            own_rows, problems = read_ledger_strict(a.out, current)
+            if not a.ledgers and (own_rows or problems):
                 usage_error(f"{a.out} already has rows; pass the ledgers to merge (it was left untouched)")
-            lists, out_listed = [], False
+            inputs, out_listed = [], False
             for path in a.ledgers:
-                if os.path.exists(a.out) and os.path.samefile(path, a.out):
-                    lists.append(_parse_rows(path, current))
+                if os.path.samefile(path, a.out):
+                    rows, bad = own_rows, []
                     out_listed = True
                 else:
-                    lists.append(ledger_rows(path))
-            own = [] if out_listed else _parse_rows(a.out, current)   # rows only this copy has must survive
-            rows = merge_rows([own] + lists)
+                    try:
+                        rows, bad = read_ledger_strict(path, _read_text(path))
+                    except (OSError, UnicodeDecodeError) as e:
+                        rows, bad = [], [f"{path}: cannot be read "
+                                         f"({getattr(e, 'strerror', None) or type(e).__name__})"]
+                problems += bad
+                inputs.append((path, rows))
+            own = [] if out_listed else own_rows      # rows only this copy has must survive
+            if not problems:
+                rows = merge_rows([own] + [r for _, r in inputs])
+                problems = merge_shortfall([(a.out, own_rows)] + inputs, rows)
+            if problems:
+                problems = list(dict.fromkeys(problems))
+                if created and not current:
+                    os.remove(a.out)                  # nothing written: not even an empty file
+                print(f"error: ledger-merge: {len(problems)} problem(s), nothing written:\n  " + "\n  ".join(problems),
+                      file=sys.stderr)
+                sys.exit(USAGE_EXIT)
             buf = io.StringIO()
             w = csv.DictWriter(buf, fieldnames=LEDGER_FIELDS, lineterminator="\n")
             w.writeheader()
@@ -1254,13 +1524,61 @@ def ledger_merge(a):
             os.fsync(f.fileno())
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
-    counts = ", ".join(f"{os.path.basename(p)}: {len(l)}" for p, l in zip(a.ledgers, lists)) or "no input"
+    counts = ", ".join(f"{os.path.basename(p)}: {len(r)}" for p, r in inputs) or "no input"
     if own:
         counts += f" + {len(own)} row(s) already in {os.path.basename(a.out)}"
     billed = billed_requests(rows)
     print(f"{a.out}: {len(rows)} row(s) from {counts} · billed requests: "
           f"{sum(units(r) for r in billed if r.get('kind') == 'image'):g} image(s), "
           f"{sum(units(r) for r in billed if r.get('kind') == 'video'):g} video second(s)")
+
+
+def ledger_close(a):
+    """Close an orphan request (a pending row that will never get a final row: the agent was killed, a Lambda job
+    was prepared but never invoked) with a final `abandoned` row under the ledger's exclusive lock. The request
+    still counts against the caps (it may have been billed); the row only ends it, so status.py stops listing it
+    as OPEN. Refused (exit 2, nothing written) when the request has no pending row or already has a final row."""
+    if not re.fullmatch(r"[0-9a-f]{4,}", a.req or ""):
+        usage_error(f"--req {a.req!r}: give the request id (req=<hex> in the ledger note; 4+ leading hex digits)")
+    if not os.path.isfile(a.ledger):
+        usage_error(f"no such ledger: {a.ledger}")
+    with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            f.seek(0)
+            try:
+                text = f.read()
+            except UnicodeDecodeError as e:
+                _unreadable_ledger(a.ledger, e)
+            if text and not _header_ok(text):
+                _header_refusal(a.ledger)
+            rows = _parse_rows(a.ledger, text)
+            ids = sorted({req_id(r) for r in rows if req_id(r)})
+            found = [i for i in ids if i == a.req] or [i for i in ids if i.startswith(a.req)]
+            if not found:
+                usage_error(f"no request {a.req} in {a.ledger}")
+            if len(found) > 1:
+                usage_error(f"--req {a.req} matches {len(found)} requests ({', '.join(found[:4])}): give more digits")
+            rid = found[0]
+            group = [r for r in rows if req_id(r) == rid]
+            finals = [r for r in group if r.get("status") in FINAL]
+            if finals:
+                usage_error(f"request {rid} already has a final row ({finals[-1].get('status')}): nothing to close")
+            pending = [r for r in group if r.get("status") == "pending"]
+            if not pending:
+                usage_error(f"request {rid} has no pending row: nothing to close")
+            last = pending[-1]
+            task = next((r["task_id"] for r in reversed(group) if r.get("task_id")), "")
+            row = {k: last.get(k, "") for k in ("kind", "model", "size", "seconds", "count", "out")}
+            note = "; ".join(x for x in (f"req={rid}", "closed by ledger-close", a.note) if x)
+            _write_locked(f, dict(row, task_id=task, status=a.status, note=note))
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+    print(f"req={rid} closed as {a.status} in {a.ledger}: it still counts against the caps "
+          f"({units(last):g} {'second(s) of video' if last.get('kind') == 'video' else 'image(s)'}, {last.get('model')})")
+    if task:
+        print(f"note: task {task} may still finish upstream; the clip can still be saved later with "
+              f"python3 tools/ark.py video --resume-task {task} --ledger {a.ledger}", file=sys.stderr)
 
 
 def add_cost_args(sp, overwrite=True):
@@ -1332,6 +1650,8 @@ v.add_argument("--resolution", default="720p", choices=VIDEO_RESOLUTIONS, help="
 v.add_argument("--no-audio", action="store_true", help="send generate_audio=false")
 v.add_argument("--resume-task", metavar="TASK_ID", default=None,
                help="resume polling + download of an existing task (no new request, no budget check; needs --ledger)")
+v.add_argument("--resume-pending", action="store_true",
+               help="--resume-task for every open video task of --ledger (pending, task id known), one by one")
 add_cost_args(v)
 lj = sp.add_parser("lambda-job", help="budget + ledger rows for images made by the Lambda worker (pro, 4K)")
 ljs = lj.add_subparsers(dest="lcmd", required=True)
@@ -1350,9 +1670,18 @@ lf.add_argument("--job", default=None, help="job id (default: job_id in the stat
 lf.add_argument("--image", default=None, help="the downloaded image; saved to --out (converted to its extension)")
 lf.add_argument("--out", default=None, help="output path (default: the out recorded by prepare)")
 lf.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
+lf.add_argument("--give-up", action="store_true",
+                help=f"a job still 'running' more than {LAMBDA_GRACE}s after its deadline (the worker died): write a "
+                     "final 'failed' row (still counted)")
 lm = sp.add_parser("ledger-merge", help="union of ledger copies (two sessions, two Drive files) into one")
 lm.add_argument("ledgers", nargs="*", help="ledgers to merge (none: create an empty ledger with the header)")
 lm.add_argument("-o", "--out", required=True, help="merged ledger; may be one of the inputs")
+lc = sp.add_parser("ledger-close", help="close an orphan pending request with a final 'abandoned' row (still counted)")
+lc.add_argument("--req", required=True, help="the request id (req=<hex> in the note; a unique prefix of 4+ digits)")
+lc.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
+lc.add_argument("--status", required=True, choices=["abandoned"],
+                help="abandoned: the request will never get a final row; it stays counted against the caps")
+lc.add_argument("--note", default="", help="why (appended to the row's note)")
 
 
 def usage_error(msg):
@@ -1364,16 +1693,25 @@ def check_cost_args(a):
     """image/video need budget + ledger, or --no-budget; --resume-task needs a ledger only (exit 2 otherwise)."""
     a.ledger = a.ledger or os.environ.get("FILM_LEDGER") or None
     a.budget = a.budget or os.environ.get("FILM_BUDGET") or None
-    resume = getattr(a, "resume_task", None)
+    agent = os.environ.get("FILM_AGENT")
+    for flag, on in (("--no-budget", a.no_budget), ("--force", getattr(a, "force", False))):
+        if agent and on:        # agents always run under the episode's caps and the proxy guards (cost-7)
+            usage_error(f"{flag} is for ad-hoc tests in the main session; FILM_AGENT={agent} is set, so it is "
+                        "refused (nothing sent). Pass --budget and --ledger; ask the main session for anything else")
+    resume = getattr(a, "resume_task", None) or getattr(a, "resume_pending", False)
     if a.cmd == "video":
-        if resume:
+        if getattr(a, "resume_pending", False):
+            if a.resume_task or a.prompt is not None:
+                usage_error("--resume-pending takes no task id, prompt or output (they come from the ledger)")
+        elif resume:
             if a.out is None:   # 'video --resume-task T out.mp4': the single positional is the output
                 a.prompt, a.out = None, a.prompt
         elif a.prompt is None or a.out is None:
             usage_error("video needs a prompt and an output path (or --resume-task TASK_ID)")
     if resume:
         if not a.ledger:
-            usage_error("--resume-task needs --ledger (or FILM_LEDGER) to log the final row")
+            flag = "--resume-pending" if getattr(a, "resume_pending", False) else "--resume-task"
+            usage_error(f"{flag} needs --ledger (or FILM_LEDGER) to log the final row")
         a.no_budget = True   # nothing new is requested, so there is nothing to check
         return
     if a.no_budget:
@@ -1392,6 +1730,11 @@ def main(argv=None):
     a = p.parse_args(argv)
     if a.cmd == "ledger-merge":
         return ledger_merge(a)
+    if a.cmd == "ledger-close":
+        a.ledger = a.ledger or os.environ.get("FILM_LEDGER") or None
+        if not a.ledger:
+            usage_error("ledger-close needs --ledger (or FILM_LEDGER)")
+        return ledger_close(a)
     if a.cmd == "lambda-job":
         a.ledger = a.ledger or os.environ.get("FILM_LEDGER") or None
         if not a.ledger:      # a Lambda call bypasses the proxy AND every cap unless it is in the ledger

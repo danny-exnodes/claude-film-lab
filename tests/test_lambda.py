@@ -1,6 +1,6 @@
 """Lambda path: ark.py lambda-job prepare/finish, ledger-merge, ledger_required, and the worker's duplicate guard.
 No network, no AWS: boto3 is a stub and ark.call is never reached."""
-import csv, importlib.util, io, json, os, sys, types, unittest
+import csv, hashlib, importlib.util, io, json, os, sys, time, types, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -152,6 +152,107 @@ class TestFinish(LambdaCase):
         self.assertEqual(code, 2)
 
 
+class TestFinishRound2(LambdaCase):
+    """sent:false, stale running + --give-up, worker hash, refusals of a status or image that is an error page."""
+    job = TestFinish.job
+
+    def finish(self, st, *extra):
+        return self.run_ark("lambda-job", "finish", "--status-json", st, *extra, "--ledger", self.ledger)
+
+    def test_unsent_failure_closes_without_counting(self):
+        self.write_budget(f"images: 10\nmodels:\n  {PRO}: 1\n")
+        job, _ = self.job()
+        st = self.status_file(job, status="failed", sent=False, error="ref not in bucket: refs/x-1.jpg", seconds=0.4)
+        code, _, err = self.finish(st)
+        self.assertEqual(code, 1)
+        self.assertIn("before anything was sent", err)
+        rows = self.rows()
+        self.assertEqual([r["status"] for r in rows], ["pending", "failed-unsent"])
+        self.assertEqual(ark.billed_requests(rows), [])
+        self.assertEqual(self.prepare()[0], 0)                  # the model cap of 1 is free again
+
+    def test_sent_or_unknown_failure_still_counts(self):
+        for sent in (True, None):
+            job, _ = self.job()
+            fields = {} if sent is None else {"sent": sent}
+            self.assertEqual(self.finish(self.status_file(job, status="failed", error="HTTP 500", **fields))[0], 1)
+            self.assertEqual(self.rows()[-1]["status"], "failed")
+
+    def test_running_before_the_deadline(self):
+        job, _ = self.job()
+        st = self.status_file(job, status="running", sent=True, deadline=time.time() + 300)
+        code, _, err = self.finish(st)
+        self.assertEqual(code, 1)
+        self.assertIn("read jobs/", err)
+        code, _, err = self.finish(st, "--give-up")
+        self.assertEqual(code, 2)
+        self.assertIn("--give-up only after its deadline", err)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending"])
+
+    def test_stale_running_job_needs_give_up(self):
+        job, _ = self.job()
+        st = self.status_file(job, status="running", sent=True, deadline=time.time() - 120)
+        code, _, err = self.finish(st)
+        self.assertEqual(code, 1)
+        self.assertIn("the worker died", err)
+        self.assertIn("--give-up", err)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending"])
+        code, _, err = self.finish(st, "--give-up")
+        self.assertEqual(code, 1)
+        rows = self.rows()
+        self.assert_one_request(rows, "failed")
+        self.assertIn("gave up", rows[-1]["note"])
+        self.assertEqual(len(ark.billed_requests(rows)), 1)       # may have been billed: still counted
+        self.assertEqual(self.finish(st, "--give-up")[0], 1)
+        self.assertEqual(len(self.rows()), 2)                       # a second give-up adds nothing
+
+    def test_give_up_without_deadline_points_to_ledger_close(self):
+        job, _ = self.job()
+        code, _, err = self.finish(self.status_file(job, status="running"), "--give-up")
+        self.assertEqual(code, 2)
+        self.assertIn(f"ledger-close --req {job}", err)
+
+    def test_worker_hash_mismatch_warns(self):
+        job, _ = self.job()
+        want = hashlib.sha256((REPO / "lambda" / "ark_image_worker.py").read_bytes()).hexdigest()
+        ok = self.status_file(job, status="succeeded", keys=[f"images/{job}.jpg"], worker_sha256=want)
+        self.assertNotIn("WARN", self.finish(ok)[2])
+        for fields in ({"worker_sha256": "0" * 64}, {}):
+            job, _ = self.job()
+            st = self.status_file(job, status="succeeded", keys=[f"images/{job}.jpg"], **fields)
+            code, _, err = self.finish(st)
+            self.assertEqual(code, 0)
+            self.assertIn(f"repo's lambda/ark_image_worker.py is {want[:12]}", err)
+
+    def test_status_that_is_not_a_json_object_is_refused(self):
+        job, _ = self.job()
+        for text in ("<?xml version='1.0'?><Error><Code>AccessDenied</Code></Error>", "[1, 2]", "\"done\""):
+            path = self.tmp / "status.json"
+            path.write_text(text)
+            code, _, err = self.finish(str(path), "--job", job)
+            self.assertEqual(code, 2, text)
+            self.assertIn("not a JSON object", err)
+            self.assertNotIn("Traceback", err)
+        code, _, err = self.finish(str(self.tmp / "missing.json"))
+        self.assertEqual(code, 2)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending"])
+
+    def test_image_that_is_an_error_page_is_refused(self):
+        job, out = self.job()
+        st = self.status_file(job, status="succeeded", keys=[f"images/{job}.jpg"])
+        page = self.tmp / "dl.jpg"
+        page.write_text("<?xml version='1.0'?><Error><Code>AccessDenied</Code></Error>")
+        code, _, err = self.finish(st, "--image", str(page))
+        self.assertEqual(code, 2)
+        self.assertIn("is not a PNG, JPEG, WebP or GIF image", err)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending"])
+        self.assertFalse(os.path.exists(out))
+        code, _, _ = self.finish(st, "--image", str(self.tmp / "gone.jpg"))
+        self.assertEqual(code, 2)
+        self.assertEqual(self.finish(st, "--image", self.downloaded())[0], 0)    # the real download then closes it
+        self.assertEqual([r["status"] for r in self.rows()], ["pending", "ok"])
+
+
 class TestLedgerWithoutTrailingNewline(LambdaCase):
     """A hand-edited ledger often ends without a newline: the next row must not be glued onto the last line."""
 
@@ -239,8 +340,8 @@ class TestLedgerMerge(ArkCase):
 
     def test_video_pending_rows_with_and_without_task_id_kept(self):
         v = dict(kind="video", seconds=5)
-        a = self.ledger_file("a.csv", self.row("vv", "pending", "2026-11-10T01:00:00Z", **v),
-                             self.row("vv", "pending", "2026-11-10T01:00:01Z", task_id="cgt-1", **v))
+        a = self.ledger_file("a.csv", self.row("ee", "pending", "2026-11-10T01:00:00Z", **v),
+                             self.row("ee", "pending", "2026-11-10T01:00:01Z", task_id="cgt-1", **v))
         self.run_ark("ledger-merge", a, a, "-o", self.ledger)
         self.assertEqual([r["task_id"] for r in self.rows()], ["", "cgt-1"])
 

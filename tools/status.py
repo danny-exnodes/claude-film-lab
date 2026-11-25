@@ -38,7 +38,7 @@ RE_SHOT = re.compile(r"_(s\d{2})_")
 RE_VERSION = re.compile(r"_v(\d{2})\.")
 RE_RENDER = re.compile(r"_(draft|final)_v(\d{2})\.mp4$")
 RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
-STATUSES = ["ok", "cut-502", "failed", "pending"]
+STATUSES = ["ok", "cut-502", "failed", "abandoned", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
 METHODS = ("layers", "seedance", "code")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
@@ -248,7 +248,11 @@ def attention_section(rows, billed, ledger, media, bundled):
             if "lambda" in (r.get("note") or "").lower():
                 item["commands"].append(f"read jobs/{rid or '<req>'}.json from the bucket, then python3 tools/ark.py "
                                         f"lambda-job finish --status-json <file> --image <image> --ledger {led}")
+            if rid:      # an orphan that will never get a final row: close it (it stays counted)
+                item["close"] = f"python3 tools/ark.py ledger-close --req {rid} --ledger {led} --status abandoned"
             att["open"].append(item)
+        elif r.get("status") == "abandoned":
+            continue                                 # closed by ledger-close: counted, no file expected
         elif r.get("status") in ("cut-502", "failed"):
             if r.get("status") == "failed" and r.get("kind") == "video" and task:
                 item["commands"].append(resume)
@@ -581,7 +585,7 @@ def budget_text(d, notes):
             continue
         by = c["by_status"]
         parts = [f"ok {by['ok']:g}", f"cut-502 {by['cut-502']:g}"] + \
-                ([f"failed {by['failed']:g}"] if by["failed"] else []) + [f"pending {by['pending']:g}"]
+                ([f"failed {by['failed']:g}"] if by["failed"] else []) +                 ([f"abandoned {by['abandoned']:g}"] if by["abandoned"] else []) + [f"pending {by['pending']:g}"]
         out.append("  " + " · ".join([head] + parts))
     out += notes_text(notes)
     att = d["attention"]
@@ -591,6 +595,8 @@ def budget_text(d, notes):
         out.append(f"    OPEN     {short_id(o['req'])} {o['kind']} {os.path.basename(o['out']) or '-'} · "
                    f"agent {o['agent'] or '-'} · age {o['age']}" + ("" if o["commands"] else " (counted as spent)"))
         out += [f"             {c}" for c in o["commands"]]
+        if o.get("close"):
+            out.append(f"             never finishing: {o['close']}")
     for o in att["cut_failed"]:
         out.append(f"    {o['status'].upper():<8} {o['ts']} {o['model']} {o['size']} "
                    f"{os.path.basename(o['out']) or '-'} (billed or may be; do not retry unchanged)")

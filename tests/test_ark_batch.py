@@ -382,6 +382,7 @@ class TestRun(BatchCase):
         self.assertEqual(h.calls, [])
 
     def test_no_budget_runs_without_a_ledger(self):
+        self.main_session()
         self.write_jobs(self.simple(2))
         f = self.scripted()
         code, so, err = self.batch("--no-budget", cost=[])

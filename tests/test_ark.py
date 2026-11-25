@@ -67,6 +67,10 @@ class ArkCase(TmpDirCase, unittest.TestCase):
         self._env.stop()
         super().tearDown()
 
+    def main_session(self):
+        """No FILM_AGENT: --no-budget and --force are refused to agents (cost-7), allowed in the main session."""
+        os.environ.pop("FILM_AGENT", None)
+
     def fake(self, **kw):
         f = FakeArk(**kw)
         p = mock.patch.object(ark, "call", f)
@@ -314,6 +318,7 @@ class TestCostFlags(ArkCase):
         self.assertIn("--budget without --ledger", err)
 
     def test_no_budget_runs_with_warning(self):
+        self.main_session()
         f = self.fake()
         out = self.tmp / "adhoc" / "c.png"
         code, _, err = self.run_ark("image", "x", str(out), "--no-budget")
@@ -324,6 +329,7 @@ class TestCostFlags(ArkCase):
         self.assertFalse(os.path.exists(self.ledger))
 
     def test_no_budget_with_ledger_still_logs(self):
+        self.main_session()
         self.write_budget("images: 0\n")   # would refuse; --no-budget skips the check
         self.fake()
         code, _, _ = self.run_ark("image", "x", str(self.tmp / "c.png"), "--no-budget", *self.cost)
@@ -416,6 +422,7 @@ class TestBudget(ArkCase):
         self.assertEqual(code, 3)
 
     def test_model_cap(self):
+        self.main_session()
         pro = "dola-seedream-5-0-pro-260628"
         self.write_budget(f"images: 40\nmodels:\n  {pro}: 1\n")
         self.seed_ledger({"kind": "image", "model": pro, "count": 1, "status": "ok"})
@@ -661,6 +668,7 @@ class TestImageFlags(ArkCase):
         return call[2]
 
     def test_only_given_keys(self):
+        self.main_session()
         f = self.fake()
         self.run_ark("image", "x", str(self.tmp / "a.png"), "--no-budget")
         b = self.body(f)
@@ -669,6 +677,7 @@ class TestImageFlags(ArkCase):
         self.assertEqual(b["response_format"], "b64_json")
 
     def test_seed_negative_guidance(self):
+        self.main_session()
         f = self.fake()
         self.run_ark("image", "x", str(self.tmp / "a.png"), "--seed", "42", "--negative", "text",
                      "--negative", "signature, watermark", "--guidance", "5.5", "--no-budget")
@@ -713,6 +722,7 @@ class TestRefReencode(ArkCase):
             self.assertEqual((im.mode, im.size), ("RGB", (120, 60)))
 
     def test_image_sends_jpeg_refs(self):
+        self.main_session()
         a = self.make("a.png", (2500, 2500))
         b = self.tmp / "b.jpg"
         Image.new("RGB", (64, 64), (1, 2, 3)).save(b)
@@ -728,6 +738,7 @@ class TestRefReencode(ArkCase):
             self.assertEqual(im.size, (2048, 2048))
 
     def test_single_ref_is_string(self):
+        self.main_session()
         b = self.tmp / "b.jpg"
         Image.new("RGB", (64, 64)).save(b)
         f = self.fake()

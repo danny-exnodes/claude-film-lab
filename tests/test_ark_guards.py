@@ -143,6 +143,7 @@ class TestBudgetValidation(GuardCase):
         self.refused("lambda-job", "prepare", "x", self.png, *self.cost)
 
     def test_no_budget_skips_validation(self):
+        self.main_session()
         self.write_budget("image: 2\n")
         self.sent("image", "x", self.png, "--no-budget", *self.cost)
 
@@ -248,6 +249,7 @@ class TestProxyCutGuards(GuardCase):
         self.assertIn("unknown --size banana", err)
 
     def test_force_sends(self):
+        self.main_session()
         self.sent("image", "x", str(self.tmp / "f1.png"), "--size", "4K", "--force", *self.cost)
         self.sent("image", "x", str(self.tmp / "f2.png"), "--model", PRO, "--force", *self.cost)
 
@@ -549,6 +551,7 @@ class TestLedgerHeader(GuardCase):
         self.assertIn("ledger header mismatch", self.refused(*self.image_args()))
 
     def test_refused_with_no_budget_too(self):
+        self.main_session()
         self.write_ledger(self.GOOD.replace("status", "state"))
         self.assertIn("ledger header mismatch", self.refused("image", "x", self.png, "--no-budget", *self.cost))
 
@@ -560,6 +563,7 @@ class TestLedgerHeader(GuardCase):
 
     def test_ledger_that_is_not_utf8_refused(self):
         """A UTF-16 export, or one Latin-1 row under a good header: exit 2, not a traceback."""
+        self.main_session()
         self.write_budget("images: 2\n")
         Path(self.ledger).write_bytes((self.GOOD + "\n" + self.ROW.format(0)).encode("utf-16"))
         err = self.refused(*self.image_args())

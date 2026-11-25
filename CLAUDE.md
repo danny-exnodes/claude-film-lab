@@ -95,6 +95,8 @@ python tools/blender/blender.py find | check <shot3d.json> | render <shot3d.json
 python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> | keyframes <shot3d.json> --out <dir>
 python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
 python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
+python tools/review/review.py up [--no-ngrok] | down | url | status        # web app xem trực tiếp (Docker + ngrok), chỉ máy chủ lab
+python tools/review/review.py publish-video <clip>.mp4 --build <id> --label L | publish-model <model>.glb --build <id>
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL
 bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python ≥ 3.10, bash -n, lint compose, unit test); --install cài requirements-ci.txt
@@ -110,6 +112,10 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
 - Âm thanh bằng code: `tools/audio/score.py` (cổ cầm, tỳ bà, koto, cồng, trống khung, drone, bộ tiếng động;
   `tools/audio/README.md`). Chỉ viết phần `music` khi người dùng đã chọn nhạc code; `foley` dùng được với mọi lựa chọn.
   `score.json` là dữ liệu dự án (không commit). Chất âm chưa có người nghe duyệt.
+- Xem trực tiếp (`tools/review/README.md`): `blender.py render|turntable|keyframes` và `comfy.py run` nhận `--review <build>`
+  (hoặc `FILM_REVIEW_BUILD`), tắt mặc định, không có server vẫn chạy bình thường. Review chỉ publish file nằm trong
+  `out/_review/media/`; URL công khai không đăng nhập = ai có link cũng thấy mọi thứ đã publish (lựa chọn của chủ lab):
+  không publish dữ liệu không muốn lộ, `review.py down` khi không dùng. Không đọc/in cấu hình hay authtoken của ngrok.
 - Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`;
   bản cuối luôn `--require-watermark`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.

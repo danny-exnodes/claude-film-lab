@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Xem trực tiếp bản dựng 3D và render: `tools/review/` (2026-11-25, nhánh `claude/review-tool`)
+- Web app tự host (Docker `python:3.13-alpine`, chỉ thư viện chuẩn; SQLite trong volume; ngrok cho URL công khai, không
+  đăng nhập theo lựa chọn của chủ lab): bảng theo dõi trực tiếp (SSE), **bản vẽ dựng** (phần hình mới của mỗi bước vẽ
+  bằng nét cyan rồi thành khối, đường kích thước, phát lại), xem model GLB (OrbitControls, khung dây/pháp tuyến/đất sét,
+  hoạt hình), **dòng thời gian** kiểu CapCut chỉ để duyệt (dạng sóng, đánh dấu, vùng lặp, A/B, cắt/đổi thứ tự → edit.json).
+- Cổng công khai 8790 chỉ đọc (Range, CSP chỉ script cùng nguồn, chặn path traversal); cổng ghi 8791 chỉ 127.0.0.1.
+- `review.py up|down|url|status|publish-video|publish-model`; `client.py` không bao giờ làm hỏng hay làm chậm lệnh gọi;
+  `bpy_snapshot.py` + `demo_build_giot.py` (Giọt dựng 10 bước); `--review BUILD` cho `blender.py render|turntable|keyframes`
+  và `comfy.py run`; `vendor_three.py` chép three.js 0.186.1 đã ghim (example ghim trong `three-examples.lock`).
+
 ### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
 Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với
 MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026-11-25-local-engines-design.md`.

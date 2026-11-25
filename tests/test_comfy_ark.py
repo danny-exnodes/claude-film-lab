@@ -134,7 +134,7 @@ class TestWindowsLock(TmpDirCase, unittest.TestCase):
         fake = FakeMsvcrt()
         win = load_ark_without_fcntl(fake)
         path = self.tmp / "x.txt"
-        path.write_text("hello\n")
+        path.write_bytes(b"hello\n")
         with open(path, "a+", newline="", encoding="utf-8") as f:
             f.seek(0)
             win.lock_file(f)

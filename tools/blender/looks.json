@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "note": "Look ids for shot3d.json `look` and style.yaml `render.look` (engine: blender). tools/blender/looks.py builds each one (materials, lines, world, colour management); spec.py reads the ids from here. Colours are sRGB hex; world.paper / world.ink of a shot override paper / ink. samples = EEVEE TAA samples / Cycles samples (final, preview). lines: Freestyle ink lines in the beauty pass (line_px at 1080 lines tall, scaled with the frame). The line/depth/normal/mask control passes are the same for every look.",
+  "looks": {
+    "grey-layout": {
+      "name": "Grey layout", "name_vi": "Khối xám dựng cảnh",
+      "use": "flat grey clay playblast: composition, camera and motion input for the AI bridge (Wan / LTX layout-to-render)",
+      "paper": "#9A9A9A", "ink": "#2A2A2A", "base": "#B8B8B8",
+      "lines": false, "view": "Standard", "mist": false, "grain": 0,
+      "samples": {"eevee": [16, 4], "cycles": [32, 8]}
+    },
+    "clay": {
+      "name": "Clay", "name_vi": "Đất nặn",
+      "use": "soft lit clay with the assets' colours: turntables, asset review (G2)",
+      "paper": "#E9E4DA", "ink": "#2B2622", "base": "#C9B9A6",
+      "lines": false, "view": "AgX", "mist": true, "grain": 0,
+      "samples": {"eevee": [32, 8], "cycles": [96, 16]}
+    },
+    "toon-ink": {
+      "name": "Toon ink", "name_vi": "Hoạt hình nét mực",
+      "use": "cel-shaded colour (three tones) with solid ink outlines on warm paper",
+      "paper": "#F4EFE4", "ink": "#14161C", "base": "#D8CDB8",
+      "lines": true, "line_px": 2.2, "line_taper": false, "line_fade": 0.25, "steps": 3,
+      "view": "Standard", "mist": true, "grain": 0.02,
+      "samples": {"eevee": [16, 4], "cycles": [64, 16]}
+    },
+    "ink-wash": {
+      "name": "Ink wash", "name_vi": "Thủy mặc",
+      "use": "the 3D counterpart of styles/thuy-mac: graded ink washes on aged rice paper, thin tapered brush lines, mist by depth and at the feet of mountains",
+      "paper": "#EFE6D3", "ink": "#1A1714", "grey": "#8C8378", "base": "#8C8378",
+      "lines": true, "line_px": 1.5, "line_taper": true, "line_fade": 0.85, "steps": 0,
+      "view": "Standard", "mist": true, "grain": 0.05,
+      "samples": {"eevee": [16, 4], "cycles": [64, 16]}
+    }
+  }
+}

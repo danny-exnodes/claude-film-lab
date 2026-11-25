@@ -369,12 +369,12 @@ def png(path, w, h):
                 + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
 out = opt["out"]
 masks = [a["id"] for a in shot["assets"] if a.get("mask", True)]
-for f in frames:
+for i, f in enumerate(frames, 1):
     png(os.path.join(out, "beauty", f"{f:04d}.png"), W, H)
     for p in passes:
         for sub in ([os.path.join("mask", m) for m in masks] if p == "mask" else [p]):
             png(os.path.join(out, sub, f"{f:04d}.png"), W, H)
-    print(f"film-blender: frame {f}", flush=True)
+    print(f"film-blender: frame {f} ({i}/{len(frames)}) 0.01 s", flush=True)
 mp4 = None
 if "mp4" in opt:
     open(opt["mp4"], "wb").write(b"fake mp4")

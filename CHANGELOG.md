@@ -4,6 +4,47 @@
 
 ## [Unreleased]
 
+### Xem trực tiếp bản dựng 3D và render: `tools/review/` (2026-11-25, nhánh `claude/review-tool`)
+- Web app tự host (Docker `python:3.13-alpine`, chỉ thư viện chuẩn; SQLite trong volume; ngrok cho URL công khai, không
+  đăng nhập theo lựa chọn của chủ lab): bảng theo dõi trực tiếp (SSE), **bản vẽ dựng** (phần hình mới của mỗi bước vẽ
+  bằng nét cyan rồi thành khối, đường kích thước, phát lại), xem model GLB (OrbitControls, khung dây/pháp tuyến/đất sét,
+  hoạt hình), **dòng thời gian** kiểu CapCut chỉ để duyệt (dạng sóng, đánh dấu, vùng lặp, A/B, cắt/đổi thứ tự → edit.json).
+- Cổng công khai 8790 chỉ đọc (Range, CSP chỉ script cùng nguồn, chặn path traversal); cổng ghi 8791 chỉ 127.0.0.1.
+- `review.py up|down|url|status|publish-video|publish-model`; `client.py` không bao giờ làm hỏng hay làm chậm lệnh gọi;
+  `bpy_snapshot.py` + `demo_build_giot.py` (Giọt dựng 10 bước); `--review BUILD` cho `blender.py render|turntable|keyframes`
+  và `comfy.py run`; `vendor_three.py` chép three.js 0.186.1 đã ghim (example ghim trong `three-examples.lock`).
+- **Thẻ Máy và ComfyUI** trên bảng theo dõi: `monitor.py` (máy chủ lab, chỉ thư viện chuẩn) gửi mỗi 2 giây CPU, RAM, GPU %,
+  VRAM, nhiệt độ, công suất GPU, dung lượng trống mọi ổ cố định và tên job nặng (chỉ nhãn trong danh sách cho phép, không
+  dòng lệnh/đường dẫn), cùng tiến độ ComfyUI đọc từ log tqdm (bước i/n, s/bước, ETA, %, 10 lượt gần nhất; nối với build
+  khi job chạy bằng `comfy.py run --review`). Biểu đồ canvas 10 phút / 24 giờ (SQLite trung bình 1 phút), màu cảnh báo
+  VRAM > 90 %, > 83 °C, ổ < 10 GB. `/api/metrics`, `/api/comfy`; SSE tối đa một sự kiện mỗi loại mỗi 2 giây.
+  `review.py up|down|status|monitor` bật/tắt/xem monitor (`out/_review/monitor.pid`).
+- Sửa: chuyển từ một build sang build khác khi trang trước còn tải GLB làm model của build trước hiện trong trang sau;
+  mỗi trang giờ vẽ vào khung riêng, trang cũ bị huỷ khi tải xong (`web/route.js`, test node).
+
+#### Sửa sau review PR #48
+- **Lộ thông tin**: `comfy.py` và `blender.py` chỉ gửi lên server loại lỗi cố định (`failed: execution error`,
+  `failed: prompt refused`, `failed: blender error`…) và tên file (`turntable chuc-long.glb (ink-wash)`), không bao giờ
+  đường dẫn tuyệt đối, nội dung ngoại lệ, prompt hay `node_errors` (chi tiết vẫn ở ledger và stderr). `server.py` và
+  `client.py` cùng lọc mọi trường chữ (tiêu đề, nhãn, thông báo, bước hiện tại, stats): đường dẫn kiểu `C:\…`, `D:/…`,
+  `/home/…`, `/mnt/…`, `\\server\…`, `~/…` thành tên file, cắt độ dài.
+- **Chống DoS**: tối đa 64 luồng SSE cùng lúc (quá thì 503 + `Retry-After`), mỗi luồng SSE sống tối đa 10 phút
+  (EventSource tự nối lại); socket timeout 15 giây khi đọc request, hạn 20 giây cho cả phần đầu request (chặn
+  slow-loris), 60 giây cho mỗi khối file gửi đi, 30 giây cho người đọc SSE bị kẹt.
+- **DNS rebinding trên cổng ghi**: cổng 8791 chỉ nhận `Host` là `127.0.0.1|localhost|[::1]:<cổng>` (một header `Host`
+  duy nhất; thêm tên khác bằng `--ingest-host`/`REVIEW_INGEST_HOSTS`) và mọi POST phải có header `X-Film-Review: 1`
+  (403 nếu thiếu). `client.py` tự gửi header (mọi publisher đi qua nó; `monitor.py` dùng `client.INGEST_HEADERS`), người
+  gọi không phải đổi gì. Giữ dữ liệu có giới hạn: ≤ 500 build (bỏ build cập nhật lâu nhất), ≤ 2000 bước, ≤ 500 render,
+  ≤ 200 job mỗi build, lịch sử máy ≤ 24 giờ + 60 dòng.
+- **CSP**: `connect-src 'self' blob:` để Chromium tải được texture nhúng trong GLB.
+- **`review.py down` / pid**: chỉ giết tiến trình đã kiểm (`ngrok.pid` phải là ngrok(.exe); `monitor.pid` phải là python
+  chạy `tools/review/monitor.py`, đọc dòng lệnh bằng PowerShell `Get-CimInstance Win32_Process` hoặc `/proc`); pid cũ hay
+  của chương trình khác thì xoá file pid, không giết; `up` không còn bỏ qua việc bật monitor vì pid cũ.
+- `monitor.py`: kẹp số đo vào đúng khoảng server nhận trước khi gửi; server trả 4xx thì ghi log (mỗi thông báo một lần),
+  gửi bản rút gọn (chỉ số chính) và không lùi thời gian; chỉ lùi khi mất kết nối hoặc 5xx.
+- Web app: bản chụp `/api/builds` đầu tiên không còn ghi đè cập nhật SSE mới hơn (gộp theo `updated`); đường dẫn `#/…`
+  mã hoá hỏng mở bảng theo dõi kèm thông báo thay vì trang trắng.
+
 ### Engine local: Blender (3D) và ComfyUI + MiniMax H3 (video AI tại chỗ) (2026-11-25, nhánh `claude/local-engines`)
 Chạy trên máy của chủ lab (RTX 5070 Ti 16 GB), miễn phí, dùng app và model **đã cài sẵn** (Blender 5.3, Comfy Desktop với
 MiniMax H3); không tải model nào. Thiết kế: `docs/superpowers/specs/2026-11-25-local-engines-design.md`.

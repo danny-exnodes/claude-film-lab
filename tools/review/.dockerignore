@@ -1,0 +1,6 @@
+# Only server.py and web/ go into the image.
+*
+!server.py
+!web
+!web/**
+web/**/*.tmp

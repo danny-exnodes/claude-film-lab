@@ -15,3 +15,7 @@ __pycache__/
 
 # Worktree git của agent (Claude Code)
 /.claude/worktrees/
+
+# Review web app (tools/review/): three.js is vendored locally by tools/review/vendor_three.py, not committed
+/tools/review/web/vendor/
+!tools/review/three-examples.lock

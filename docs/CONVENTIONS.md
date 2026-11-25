@@ -85,6 +85,8 @@ Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`,
 (`matte.py --layer L4`). Chi tiết: `.claude/skills/film-compose-shot/references/layers-method.md`.
 
 Phiên bản luôn tăng, không ghi đè. Media lưu trong `out/<project>/<id>/{plates,clips,renders}/`.
+Stem âm thanh của `tools/audio/score.py`: `out/<project>/<id>/audio/` (`music.wav`, `foley.wav`, `ambience.wav`,
+`preview.wav`, `score-log.json`, `mix-snippet.json`); bản dựng lại vào `audio/v<NN>/`.
 Khung của clip đã tách nền: `clips/<tên clip không đuôi>/000001.png` (6 chữ số, bắt đầu từ 1); khung gốc trước khi
 tách nền: `clips/<tên clip không đuôi>/raw/000001.png`.
 Thư mục film cinecode của tập: `out/<project>/<id>/film/<tên>/` (có `STATE.md` riêng của cinecode).
@@ -163,6 +165,7 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
+| `score.json` | film-compositor | (tuỳ chọn) nhạc code và foley theo sự kiện cho `tools/audio/score.py`: `length_s`, `seed`, `scale`, `music`, `foley`, `silence` (`tools/audio/README.md`; mẫu `templates/episode/score.json`). Dữ liệu dự án: không commit, đẩy lên Drive như file chữ khác. Phần `music` chỉ khi người dùng đã chọn nhạc code |
 | `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-<v>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
@@ -211,7 +214,8 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
-  strip-warp, eyelid, breath, parallax, push-in); id lạ là WARN.
+  strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp
+  tranh); id lạ là WARN.
 
 `prompts.csv`:
 `file,shot,layer,model,size,prompt_file,refs,seed,usage,approved,drive_link`

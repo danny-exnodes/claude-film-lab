@@ -40,7 +40,7 @@ flowchart TD
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
 | 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
 | 6 | Clip AI (**chỉ `method: seedance`**; `layers` bỏ qua khâu này) | `film-animator` (nền) | `out/.../clips/` | – |
-| 7 | Dựng shot, âm thanh | `film-compositor` | film.html theo shot, `review/sound-audit.md` | – |
+| 7 | Dựng shot, âm thanh | `film-compositor` | film.html theo shot, `review/sound-audit.md`; nhạc code/foley theo sự kiện (nếu dùng): `score.json` trong thư mục tập → stem ở `out/.../audio/` (`tools/audio/score.py`, miễn phí) | – |
 | 8 | Dựng cả tập | `film-compositor` | bản nháp 960×540 | **G3** (tối đa 2 vòng sửa) |
 | 9 | Kiểm tra độc lập | `film-reviewer` (chỉ đọc sản phẩm, ghi qc) | `review/qc-<v>.md` | lỗi chặn → quay lại khâu gây lỗi |
 | 10 | Bản cuối | `film-compositor` | 1920×1080, -14 LUFS, lưu Drive | **G4** |

@@ -71,7 +71,8 @@ models:
   video: dreamina-seedance-2-5-260628
 
 motion: [mist-bands, embers, sun-glow, strip-warp,     # id module trong tools/compose/, cách dùng: motion.md
-         smoke, fire, foliage, cloth, pose-cycle]       # năm id của method layers (motion.md)
+         smoke, fire, foliage, cloth, pose-cycle,       # sáu id của method layers (motion.md)
+         figure]
 
 sound:
   scale: "D minor pentatonic"

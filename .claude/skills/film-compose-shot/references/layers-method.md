@@ -9,7 +9,8 @@ hai cách trong cùng một tập, không đổi sau G1 khi chưa hỏi người
 `budget.yaml` có `video_seconds: 0`, cột `ai_motion` của `shots.csv` để trống ở mọi shot.
 
 Tài liệu liên quan: chữ ký và tham số của từng module `compose-api.md`; vải, tư thế và cách canh thẳng plate tư thế
-`layers-character.md`; số liệu riêng của style `styles/<id>/motion.md`.
+`layers-character.md`; hình người nhỏ vẽ bằng code cho cảnh rộng `layers-figure.md`; số liệu riêng của style
+`styles/<id>/motion.md`.
 
 ## 1. Quy tắc dàn cảnh
 
@@ -37,12 +38,18 @@ Bài học G3 của tập đầu tiên: người dùng loại thú **trượt ho
    6 s mà chỉ có máy quay sẽ bị đọc là "đứng yên": cắt sang cỡ cảnh khác hoặc đổi tư thế.
 8. **Đi là đổi cảnh, không phải trượt.** Nhân vật cần "đi tới": hoặc chu kỳ bước tại chỗ (`pose-cycle`) trong khi
    **nền** trôi ngược lại nhờ máy quay và parallax, hoặc cắt giữa hai shot giữ tư thế ở hai chỗ khác nhau.
+9. **Người nhỏ trong cảnh rộng là hình code, không phải plate.** Người cao ≤ 25 % khung (đứng trên sống núi, trước
+   chiến trường, đi dọc đường, đám đông ở xa) vẽ bằng `figure` (`COMPOSE.figure.draw`, `layers-figure.md`): không mua
+   plate tư thế cho chi tiết không ai thấy. Đây là ngoại lệ duy nhất của quy tắc 8: hình code **được** đổi chỗ dọc một
+   `path`, vì mỗi bước dịch chuyển đi kèm một chu kỳ bước và bàn chân đã đặt không trượt. Lớn hơn 25 % khung, mặt
+   người, dị thú: vẫn là plate AI.
 
 ## 2. Kịch bản muốn gì → `layers` làm thế nào
 
 | Kịch bản muốn | `layers` làm | `code_motion` | Ảnh cần thêm |
 |---|---|---|---|
 | Thú hoặc người bước đi | chu kỳ 3–4 plate tư thế tại chỗ, nền trôi; hoặc máy quay di chuyển trên một tư thế giữ rồi cắt | `pose-cycle` (+ `parallax`) hoặc chỉ máy quay | 2–3 plate tư thế (`L4b`, `L4c`, `L4d`), hoặc 0 |
+| Người nhỏ ở xa: đứng, đi dọc đường, quay người, giơ tay, cúi, ngồi; đám đông (≤ 25 % khung) | hình nét mực bằng code, bước đi có chân đặt không trượt, áo và dải tóc theo gió của shot | `figure` | 0 |
 | Quay đầu, giơ tay, rút kiếm | đổi bậc 2–3 plate tư thế, giữ tư thế cuối | `pose-cycle` | 1–2 |
 | Áo choàng, tay áo, tóc trong gió | vùng vải lay tại chỗ, mép dính vào thân đứng yên | `cloth` | 0 |
 | Đuôi, tai, lông, cỏ | dải lệch theo sóng từ gốc ra ngọn | `strip-warp` | 0 |
@@ -86,7 +93,8 @@ request đầu tiên; ảnh đã có trên đĩa được bỏ qua nên chạy l
 - Không cho một lớp `P` hiện mà không có L4 bên dưới; không xoay bộ phận quanh khớp như rối giấy.
 - Không trộn dần dài giữa hai tư thế (bóng ma): `pose-cycle` cắt thẳng, trộn tối đa 2 khung.
 - Không vẽ khói, lửa, sương, tàn lửa, mưa vào tranh; không vẽ bóng đổ, mặt đất, quầng sáng vào L4.
-- Không vẽ nhân vật hay dị thú bằng nét code.
+- Không vẽ nhân vật hay dị thú bằng nét code, **trừ** người nhỏ ≤ 25 % khung trong cảnh rộng bằng `figure`
+  (`layers-figure.md`); không vẽ mặt, cận cảnh hay dị thú bằng `figure`.
 - Không kéo dài một tư thế giữ để "lấp" thời lượng: cắt shot, đổi cỡ cảnh.
 - Không tạo thêm plate tư thế ngoài `shots.csv` và hợp đồng; thiếu thì báo đạo diễn.
 
@@ -105,5 +113,7 @@ Chạy trên `make.py stills` (hai khung cách nhau 1–2 s của mỗi shot) v�
       của `styles/<id>/motion.md`; hai vùng cạnh nhau lệch pha.
 - [ ] Khói, lửa: màu lấy từ `palette` của style; lửa không làm cháy trắng khung; đúng một điểm nhấn màu của style.
 - [ ] Nhân vật giới thiệu ≥ 40 % cao khung, chân chạm L3, nền sau nhạt hơn nhân vật.
+- [ ] `figure`: hình ≤ 25 % cao khung, đọc được là người, chân trên mặt đứng, không cảnh báo `over the cap` /
+      `impossible stride` (danh sách đầy đủ: `layers-figure.md` §7).
 - [ ] `make.py` không báo `TOO STILL` ở shot nào ngoài các khoảng lặng cố ý đã ghi trong `STATE.md`.
 - [ ] `capture.mjs --verify` in `deterministic: yes`.

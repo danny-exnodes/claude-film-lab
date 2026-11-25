@@ -45,6 +45,9 @@ in the same exclusive ledger lock that appends the request's 'pending' row (note
 agents cannot overrun a cap. Each request then gets a final row
 (ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row. A response without
 image data is a failed row; extra images of one response never replace an existing file.
+Rows of the local engines (model `comfy:<workflow>` from tools/comfy/comfy.py, `blender:<...>`) stay in the ledger
+but cost 0 against every cap (images, video_seconds, models.*): they are free and run on the owner's GPU.
+On Windows (local sessions) the ledger lock is an msvcrt byte-range lock instead of flock; nothing else changes.
 
 Exit codes of image / video / lambda-job prepare: 2 = refused locally (nothing sent, no ledger row, no output folder:
 fix the command), 3 = over a cap (refused-budget row), 1 = the request left this machine (see its ledger row).
@@ -57,9 +60,15 @@ Credentials: in a Claude cloud session the agent proxy injects the real Ark key
 for ark.ap-southeast.bytepluses.com, so this script sends a placeholder. Outside
 that proxy, set ARK_API_KEY. Never print, log or search for the key.
 """
-import argparse, base64, contextlib, csv, datetime, difflib, fcntl, hashlib, http.client, io, json, mimetypes, os, re
+import argparse, base64, contextlib, csv, datetime, difflib, hashlib, http.client, io, json, mimetypes, os, re
 import signal, sys, threading, time, uuid
 import urllib.request, urllib.error
+
+try:
+    import fcntl
+except ImportError:      # Windows: tools/comfy/comfy.py and tools/blender/blender.py import this ledger code there
+    fcntl = None
+    import msvcrt
 
 BASE = os.environ.get("ARK_BASE", "https://ark.ap-southeast.bytepluses.com/api/v3")
 
@@ -220,10 +229,67 @@ def download(url, out):
 
 
 # --- ledger and budget (docs/CONVENTIONS.md §7) ------------------------------
+# The ledger lock: fcntl.flock on POSIX (unchanged), an msvcrt byte-range lock on Windows. msvcrt locks are
+# mandatory and exclusive only, so Windows locks one byte far past the data (never a ledger row) and a shared request
+# is exclusive there: readers wait for each other, which a ledger of a few hundred rows does not notice.
+WIN_LOCK_OFFSET = 0x7FFFFFF0     # < 2 GiB: msvcrt.locking takes the position from the CRT
+WIN_LOCK_POLL = 0.05             # seconds between two tries while another process holds the lock
+_pread = getattr(os, "pread", None)     # POSIX only
+
+
+def _win_locking(f, mode, wait=False):
+    """msvcrt.locking() of one byte at WIN_LOCK_OFFSET of open file f; the file position is left as it was."""
+    fd = f.fileno()
+    pos = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        while True:
+            os.lseek(fd, WIN_LOCK_OFFSET, os.SEEK_SET)
+            try:
+                msvcrt.locking(fd, mode, 1)
+                return
+            except OSError:
+                if not wait:
+                    raise
+            time.sleep(WIN_LOCK_POLL)
+    finally:
+        os.lseek(fd, pos, os.SEEK_SET)
+
+
+def lock_file(f, shared=False):
+    """Block until this process holds the lock of open file f (LOCK_SH with shared=True on POSIX, else LOCK_EX)."""
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+    else:
+        _win_locking(f, msvcrt.LK_NBLCK, wait=True)
+
+
+def unlock_file(f):
+    """Release lock_file(f). Windows flushes f first: the next holder must see every byte written under the lock."""
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_UN)
+    else:
+        f.flush()
+        _win_locking(f, msvcrt.LK_UNLCK)
+
+
+def _last_byte(f, size):
+    """The byte at offset size-1 of open file f, without moving f's position (os.pread does not exist on Windows)."""
+    if _pread:
+        return _pread(f.fileno(), 1, size - 1)
+    fd = f.fileno()
+    pos = os.lseek(fd, 0, os.SEEK_CUR)
+    try:
+        os.lseek(fd, size - 1, os.SEEK_SET)
+        return os.read(fd, 1)
+    finally:
+        os.lseek(fd, pos, os.SEEK_SET)
+
+
 LEDGER_FIELDS = ["ts", "kind", "model", "size", "seconds", "count", "status", "out", "task_id", "usage", "agent", "note"]
 # final row of a request (closes it): ok/failed/cut-502 may have been billed; abandoned = an orphan pending row closed
-# by `ledger-close` (still billed); failed-unsent = a Lambda job whose worker never sent the request (sent: false)
-FINAL = {"ok", "failed", "cut-502", "abandoned", "failed-unsent"}
+# by `ledger-close` (still billed); failed-unsent = a Lambda job whose worker never sent the request (sent: false);
+# interrupted = a local ComfyUI job stopped by a timeout, a signal or `comfy.py interrupt` (tools/comfy)
+FINAL = {"ok", "failed", "cut-502", "abandoned", "failed-unsent", "interrupted"}
 UNBILLED = {"failed-unsent"}           # final rows that close a request without counting it
 BILLED = FINAL | {"pending"}           # pending: written before the call, counts until a final row exists
 STATUSES = BILLED | {"refused-budget"}   # every status a ledger row may carry (ledger-merge refuses others)
@@ -254,7 +320,7 @@ def _write_locked(f, row):
     size = os.fstat(f.fileno()).st_size
     if size == 0:
         w.writeheader()
-    elif os.pread(f.fileno(), 1, size - 1) not in (b"\n", b"\r"):
+    elif _last_byte(f, size) not in (b"\n", b"\r"):
         buf.write("\n")
     w.writerow(_ledger_record(row))
     f.write(buf.getvalue())
@@ -304,22 +370,22 @@ def ledger_append(path, row):
         return
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     with open(path, "a+", newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        lock_file(f)
         try:
             _write_locked(f, row)
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
 
 
 def ledger_rows(path):
     if not path or not os.path.exists(path):
         return []
     with open(path, newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_SH)
+        lock_file(f, shared=True)
         try:
             text = f.read()
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
     return _parse_rows(path, text)
 
 
@@ -415,6 +481,20 @@ def units(row):
     return max(0.0, n)        # a negative row must never credit a cap
 
 
+LOCAL_MODEL_PREFIXES = ("comfy:", "blender:")    # local engines (tools/comfy, tools/blender): free, own GPU
+
+
+def is_local(row):
+    """True for a row of a local engine (model comfy:<workflow> or blender:<...>): it is logged like any request
+    but costs nothing, so it never counts against a cap."""
+    return str(row.get("model") or "").startswith(LOCAL_MODEL_PREFIXES)
+
+
+def cost_units(row):
+    """units() a row takes from the caps (images, video_seconds, models.*): 0 for a local engine's row."""
+    return 0.0 if is_local(row) else units(row)
+
+
 def req_id(row):
     """The request id of a ledger row (note starts with 'req=<hex>'), or None for old/refused rows."""
     m = REQ_RE.match(row.get("note") or "")
@@ -454,19 +534,19 @@ def budget_check(budget, rows, req):
     if not budget:
         return []
     used = billed_requests(rows)
-    need = units(req)
+    need = cost_units(req)
     over = []
     if req["kind"] == "image" and budget.get("images") is not None:
-        have = sum(units(r) for r in used if r.get("kind") == "image")
+        have = sum(cost_units(r) for r in used if r.get("kind") == "image")
         if have + need > budget["images"]:
             over.append(f"images: {have:g} used + {need:g} requested > cap {budget['images']}")
     if req["kind"] == "video" and budget.get("video_seconds") is not None:
-        have = sum(units(r) for r in used if r.get("kind") == "video")
+        have = sum(cost_units(r) for r in used if r.get("kind") == "video")
         if have + need > budget["video_seconds"]:
             over.append(f"video_seconds: {have:g} used + {need:g} requested > cap {budget['video_seconds']}")
     cap = budget["models"].get(req["model"])
     if cap is not None:
-        have = sum(units(r) for r in used if r.get("model") == req["model"])
+        have = sum(cost_units(r) for r in used if r.get("model") == req["model"])
         if have + need > cap:
             over.append(f"models.{req['model']}: {have:g} used + {need:g} requested > cap {cap}")
     return over
@@ -488,7 +568,7 @@ def reserve(a, req, rid, tag="", budget=None):
         return
     os.makedirs(os.path.dirname(os.path.abspath(a.ledger)), exist_ok=True)
     with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        lock_file(f)
         try:
             f.seek(0)
             try:
@@ -500,7 +580,7 @@ def reserve(a, req, rid, tag="", budget=None):
             over = budget_check(budget, _parse_rows(a.ledger, text), req) if budget else []
             _write_locked(f, dict(req, status="refused-budget", note="; ".join(over)) if over else pending)
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
     if over:
         print(f"REFUSED (budget {a.budget}): " + "; ".join(over) + "\n"
               "Nothing was sent to the API. Ask the user (main session) to raise the cap in budget.yaml.",
@@ -832,7 +912,7 @@ def read_jobs(a):
 
 def _image_units(rows, model=None):
     """Billed image units in ledger rows; with `model`, the units of that model (any kind, like budget_check)."""
-    return sum(units(r) for r in billed_requests(rows)
+    return sum(cost_units(r) for r in billed_requests(rows)
                if (r.get("model") == model if model else r.get("kind") == "image"))
 
 
@@ -1466,11 +1546,11 @@ def merge_shortfall(inputs, merged):
 
 def _read_text(path):
     with open(path, newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_SH)
+        lock_file(f, shared=True)
         try:
             return f.read()
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
 
 
 def ledger_merge(a):
@@ -1485,7 +1565,7 @@ def ledger_merge(a):
     os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
     created = not os.path.exists(a.out)
     with open(a.out, "a+", newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        lock_file(f)
         try:
             f.seek(0)
             try:
@@ -1529,14 +1609,16 @@ def ledger_merge(a):
             f.flush()
             os.fsync(f.fileno())
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
     counts = ", ".join(f"{os.path.basename(p)}: {len(r)}" for p, r in inputs) or "no input"
     if own:
         counts += f" + {len(own)} row(s) already in {os.path.basename(a.out)}"
     billed = billed_requests(rows)
+    local = sum(1 for r in billed if is_local(r))
     print(f"{a.out}: {len(rows)} row(s) from {counts} · billed requests: "
-          f"{sum(units(r) for r in billed if r.get('kind') == 'image'):g} image(s), "
-          f"{sum(units(r) for r in billed if r.get('kind') == 'video'):g} video second(s)")
+          f"{sum(cost_units(r) for r in billed if r.get('kind') == 'image'):g} image(s), "
+          f"{sum(cost_units(r) for r in billed if r.get('kind') == 'video'):g} video second(s)"
+          + (f" · {local} local request(s) (comfy:/blender:, free)" if local else ""))
 
 
 def ledger_close(a):
@@ -1549,7 +1631,7 @@ def ledger_close(a):
     if not os.path.isfile(a.ledger):
         usage_error(f"no such ledger: {a.ledger}")
     with open(a.ledger, "a+", newline="", encoding="utf-8") as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
+        lock_file(f)
         try:
             f.seek(0)
             try:
@@ -1579,7 +1661,7 @@ def ledger_close(a):
             note = "; ".join(x for x in (f"req={rid}", "closed by ledger-close", a.note) if x)
             _write_locked(f, dict(row, task_id=task, status=a.status, note=note))
         finally:
-            fcntl.flock(f, fcntl.LOCK_UN)
+            unlock_file(f)
     what = "second(s) of video" if last.get("kind") == "video" else "image(s)"
     print(f"req={rid} closed as {a.status} in {a.ledger}: it still counts against the caps "
           f"({units(last):g} {what}, {last.get('model')})")

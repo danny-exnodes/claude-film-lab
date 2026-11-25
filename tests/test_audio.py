@@ -14,7 +14,7 @@ import sfx    # noqa: E402
 
 score = helpers.load("audio/score.py", "film_audio_score")
 SR = 48000
-CINECODE_MIX = Path("/root/.claude/skills/cinecode/scripts/mix.py")
+CINECODE_MIX = helpers.CINECODE / "scripts" / "mix.py"
 
 
 def f0(x, guess):
@@ -593,7 +593,7 @@ class TestScoreRender(ScoreCase):
             self.assertEqual(set(layer), {"file", "at", "gain_db", "bus"})
         self.assertIn('"bus": "foley"', text)
 
-    @unittest.skipUnless(CINECODE_MIX.is_file(), "cinecode is not installed")
+    @unittest.skipUnless(helpers.exists(CINECODE_MIX, "is_file"), "cinecode is not installed")
     def test_snippet_uses_buses_and_fields_cinecode_mix_knows(self):
         src = CINECODE_MIX.read_text(encoding="utf-8")
         buses = set(re.findall(r'"(\w+)":\s*-?\d+', re.search(r"BUS_DB\s*=\s*\{([^}]*)\}", src).group(1)))

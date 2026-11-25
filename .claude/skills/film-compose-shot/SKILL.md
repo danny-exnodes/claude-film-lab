@@ -22,9 +22,12 @@ ngoại lệ duy nhất: người nhỏ ≤ 25 % khung trong cảnh rộng bằn
 Quy ước chung: `docs/CONVENTIONS.md` (tên file §2, `shots.csv` §6, ngân sách và ledger §7, lưu trữ §9).
 API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `references/seedance-layer.md`.
 
-**Ba phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.** `method: code` (nhân vật
+**Bốn phương pháp dựng: rẽ nhánh theo `method` của `EPISODE.md` trước khi dựng shot đầu tiên.** `method: code` (nhân vật
 và cảnh vẽ hoàn toàn bằng code, không lớp tranh): đọc `references/code-method.md` thay cho mọi mục về plates của file này;
-khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`.
+khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`. `method: blender` (model 3D render bằng
+Blender, không lớp tranh): đọc `references/blender-method.md`; render `renders3d/s<NN>/beauty/` (chuỗi PNG) hoặc
+`beauty.mp4` dùng như một clip cả khung, compose kit chỉ phủ sương, nắng, chữ. Clip H3 local (`video_engine: comfy`):
+`references/local-video.md` (âm thanh tự sinh của clip mặc định tắt dưới lời bình).
 
 | `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |
 |---|---|---|---|
@@ -232,7 +235,9 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 - Gói mỗi shot: `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN>` → một zip (lớp tranh, clip mp4, dòng
   `prompts.csv`, điểm neo của shot) → người dùng duyệt tải lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (đạo diễn tải; compositor không tải lên Drive).
-  Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4).
+  Khung PNG đã tách nền không cần gói (tách lại miễn phí từ mp4). Tập `blender`: gói có `renders3d/s<NN>*/beauty.mp4`
+  + `render.json` (không chuỗi PNG, `references/blender-method.md` §3); khôi phục = giải nén gói trong
+  `$FILM_LAB/out/<project>/ep<NN>/`.
 - Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
   trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.

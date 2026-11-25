@@ -27,6 +27,25 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - Issue #13 step 3, L1 at 4K through the Lambda (prepared by lambda-hardening): main session, only after the free redeploy of the hardened worker. One Pro image at an explicit landscape size such as 3840x2160 via `ark.py lambda-job prepare` = 1 image under the models.dola-seedream-5-0-pro-260628 cap. Recommended second image: one Pro 2K with --ref of a locked character, which exercises the never-run refs path and the state-variant item of issue #3.
 - Issue #3, seed and negative prompt (scoring tool NOT built this round, judged by eye): production or lab session, 4 lite images at 1024x1024 with --budget/--ledger of a lab folder (same prompt and seed twice, another seed, same seed plus --negative).
 
+## Engine local (Blender, ComfyUI + MiniMax H3) – việc tiếp
+
+- Kiểm giấy phép thương mại của MiniMax H3 trên model card và ghi vào `docs/MODELS.md` trước khi đăng phim kiếm tiền.
+- Hằng số dự báo trong `status.py`: H3 bản cuối đã đo (713 s GPU cho clip 5,17 s 1344×768, 20 bước); phút Blender mỗi
+  shot và H3 bản nháp 864×480 vẫn là ước lượng: thay bằng số đo sau vài tập.
+- H3 bản cuối ~34 s mỗi bước vì model 20 GB không vừa VRAM 16 GB: thử bản DiT nhỏ hơn hay `--turbo` cho nháp, và đo xem
+  bản nháp 864×480 có đủ để duyệt chuyển động trước khi render bản cuối không.
+- `comfy.py run` chỉ in "running" + thời gian: đọc tiến độ từng bước qua websocket `/ws` (không thêm thư viện).
+- Prompt khi có `--last`: H3 first-last-frame có cần dòng neo cho `<Picture 2>` ở cuối clip không? Chưa kiểm; hiện chỉ có
+  dòng neo khung đầu.
+- Ghim sha256 các file model H3 trong `tools/comfy/comfy.lock.json` (`models --verify`); hash ~45 GB một lần.
+- Khung dọc (9:16) cho H3 (`--res` thêm preset dọc).
+- Model đã có trên máy nhưng chưa nối: ảnh tĩnh local bằng Qwen-Image 2512 / Z-Image Turbo (thay Seedream, miễn phí);
+  phóng clip H3 1344×768 → 1920×1080 bằng SeedVR2; LTX-2.3 điều khiển bằng pass depth/line của Blender; Wan Animate 2.
+- Blender: nhân vật glTF có khung xương (armature) chưa thử, mới thử action cấp object; máy chủ lab chưa có `ffmpeg` trên
+  PATH (mp4 do encoder của Blender làm; nhánh ffmpeg và nhánh EEVEE→Cycles mới thử bằng fake); look phẳng trong Cycles
+  không đổ bóng.
+- `check_episode.py`: kiểm nội dung `ASSETS.md` (mỗi `A-<asset>` trong `shots.csv` có một dòng nguồn + giấy phép).
+
 ## Lỗi reviewer xác nhận nhưng chưa sửa
 
 ### ark-paid-guards

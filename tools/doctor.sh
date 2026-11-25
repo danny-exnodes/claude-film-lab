@@ -9,6 +9,8 @@
 # a POST with an invalid resolution ("9999p") that Ark rejects before it creates a task. Should Ark
 # ever accept it, doctor FAILs and prints the task id so it can be cancelled in the Ark console.
 # Full mode also launches headless Chrome once through CHROME_PATH (when set) and renders a data: page.
+# Local engines (lines blender, comfy): n/a when absent (cloud), WARN when configured but broken, never FAIL; only
+# FILM_COMFY_URL on this machine is contacted, and only when FILM_COMFY_URL or FILM_COMFY_HOME is set.
 # The exit code is the number of FAIL lines. Never prints or searches for API keys.
 # ARK_DIR (default /opt/byteplus) is where the ark.py link lives; tests point it elsewhere.
 set -u
@@ -141,6 +143,38 @@ out=$(FILM_THREE_DIR="$tdir" "$LAB/tools/toon/install_three.sh" --check 2>&1)
 if [ $? = 0 ]; then ok three "$(echo "$out" | sed 's/^three: //')"
 elif echo "$out" | grep -q "hash differs"; then bad three "$(echo "$out" | head -1 | cut -c1-110); run tools/toon/install_three.sh"
 else warn three "not installed: the 3D code styles need it; run tools/toon/install_three.sh"; fi
+# Local engines (method blender, video_engine comfy) run only on the owner's PC, in a local session. They never FAIL:
+# a cloud session has neither, which is "n/a". blender: `blender.py find` searches this machine only (FILM_BLENDER,
+# PATH, the usual install folders), no network; exit 1 = none found (n/a unless FILM_BLENDER is set), 3 = found but
+# `--version` fails (WARN). comfy: only when FILM_COMFY_URL or FILM_COMFY_HOME is set, and the
+# only address ever contacted is FILM_COMFY_URL on this machine (default http://127.0.0.1:8188), by `comfy.py ping`.
+na() { printf '  INFO  %-22s %s\n' "$1" "n/a: $2"; }
+if [ ! -f "$LAB/tools/blender/blender.py" ]; then na blender "tools/blender/blender.py not in this checkout"
+else
+  out=$(timeout 30 python3 "$LAB/tools/blender/blender.py" find 2>&1); rc=$?
+  last=$(echo "$out" | grep -v '^[[:space:]]*$' | tail -1 | cut -c1-90)
+  if [ $rc = 0 ]; then ok blender "$(echo "$out" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-100)"
+  elif [ $rc = 1 ] && [ -z "${FILM_BLENDER:-}" ]; then na blender "no Blender on this machine (method blender renders on the owner's PC)"
+  elif [ $rc = 124 ]; then warn blender "blender.py find gave no answer within 30 s (docs/RUNBOOK.md: Blender)"
+  elif [ $rc = 3 ]; then warn blender "Blender found but broken: ${last:-no output} (docs/RUNBOOK.md: Blender)"
+  elif [ -n "${FILM_BLENDER:-}" ]; then warn blender "FILM_BLENDER=$FILM_BLENDER is set but not usable: ${last:-no output} (docs/RUNBOOK.md: Blender)"
+  else warn blender "blender.py find failed (rc $rc): ${last:-no output}"; fi
+fi
+if [ ! -f "$LAB/tools/comfy/comfy.py" ]; then na comfy "tools/comfy/comfy.py not in this checkout"
+elif [ -z "${FILM_COMFY_URL:-}" ] && [ -z "${FILM_COMFY_HOME:-}" ]; then
+  na comfy "FILM_COMFY_URL and FILM_COMFY_HOME unset (local video engine, owner's PC only)"
+else
+  curl_=${FILM_COMFY_URL:-http://127.0.0.1:8188}
+  case "$curl_" in
+    http://127.0.0.1|http://127.0.0.1[:/]*|http://localhost|http://localhost[:/]*|"http://[::1]"|"http://[::1]"[:/]*)
+      out=$(FILM_COMFY_URL="$curl_" timeout 20 python3 "$LAB/tools/comfy/comfy.py" ping 2>&1); rc=$?
+      last=$(echo "$out" | grep -v '^[[:space:]]*$' | tail -1 | cut -c1-80)
+      if [ $rc = 0 ]; then ok comfy "$(echo "$out" | grep -v '^[[:space:]]*$' | head -1 | cut -c1-100)"
+      elif [ $rc = 124 ]; then warn comfy "$curl_ gave no answer within 20 s (docs/RUNBOOK.md: ComfyUI)"
+      else warn comfy "$curl_: ${last:-no answer}; start it: python tools/comfy/comfy.py start (docs/RUNBOOK.md: ComfyUI)"; fi ;;
+    *) warn comfy "FILM_COMFY_URL=$curl_ is not this machine: not contacted (the local engine listens on http://127.0.0.1:8188)" ;;
+  esac
+fi
 if [ $QUICK = 0 ]; then
   # WebGL2 in headless Chromium (software, SwiftShader): the TOON 3D looks render through it
   v=$(cd "$LAB" && timeout 60 node -e "

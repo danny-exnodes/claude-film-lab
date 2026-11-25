@@ -22,7 +22,8 @@ claude-film-lab/
 ├── templates/episode/            # EPISODE.md, budget.yaml, shots.csv, prompts.csv mẫu
 ├── templates/project/            # PROJECT.md, SERIES.md, README_CauTruc.md, TienDo_SanXuat.csv mẫu (§11)
 ├── formats/                      # CINECODE_FORMATS (định dạng cinecode đã lưu, xem §9)
-├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, drive_sync.py, episode_id.py, rename_episode.py, layers/, compose/
+├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, drive_sync.py, episode_id.py, rename_episode.py, layers/, compose/,
+│                                 #   toon/, audio/, tts/, blender/ (render 3D local), comfy/ (clip AI local)
 ├── tests/                        # python3 -m unittest discover -s tests
 ├── lambda/ · docs/
 ├── projects/<project>/           # git bỏ qua – bản làm việc CHỈ CHỮ kéo từ Drive (§11):
@@ -69,6 +70,9 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Mã lớp | `L1` nền · `L2` tầng giữa · `L3` tiền cảnh · `L4` nhân vật · `L4b`…`L4z` tư thế · `P<n>-<bộ-phận>` · `FX` | `P1-duoi` · `L4b` |
 | Clip AI | `<id>_s<NN>_<model-ngắn>_v<NN>.mp4` | `ep01_s03_seedance25_v01.mp4` · `q01t01_s03_seedance25_v01.mp4` |
 | Bản dựng | `<id>_<draft\|final>_v<NN>.mp4` | `ep01_draft_v03.mp4` · `q01t01_draft_v01.mp4` |
+| Clip local (ComfyUI, `video_engine: comfy`) | như clip AI, model ngắn `h3`, kèm file `.json` cạnh clip (`<clip>.mp4.json` hoặc `<tên clip không đuôi>.json`) | `ep01_s03_h3_v01.mp4` + `ep01_s03_h3_v01.mp4.json` |
+| Shot 3D (`method: blender`, chữ) | `<thư mục tập>/shots3d/s<NN>.json` | `shots3d/s03.json` |
+| Render Blender (media) | `out/<project>/<id>/renders3d/s<NN>/` (render lại `s<NN>_v<NN>/`), `s<NN>_preview/`, `s<NN>_keys/`, `turntable-<asset>/` | `renders3d/s03/beauty/0001.png` |
 
 Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho `check_episode.py`, `status.py`, `bundle.py`,
 `drive_sync.py`, `layers/anchors.py`, `layers/matte.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`, `<S>` = `s(?:\d{2}|\d{3})`,
@@ -82,6 +86,10 @@ Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho
 - khung của clip: thư mục `clips/<tên clip không đuôi>/` (tên khớp regex clip, bỏ `.mp4`) chỉ chứa `^\d{6}\.png$`
   và thư mục con tùy chọn `raw/` (khung gốc tách bằng ffmpeg, cũng `^\d{6}\.png$`)
 - dòng clip trong `prompts.csv`: `file` theo regex clip, `layer` = mã lớp mà clip thay (thường `L4`), `shot` khớp tên file
+- file cạnh clip local (trong `clips/`): `^<ID>_<S>_[a-z0-9]+_v\d{2}(\.mp4)?\.json$`
+- `shots3d/`: `^s(\d{2}|\d{3})\.json$`; `renders3d/`: thư mục `^(s(\d{2}|\d{3})(_(preview|keys))?|turntable-[a-z0-9][a-z0-9_-]*)(_v\d{2})?$`
+  (tên khác → WARN). Nội dung một render: `beauty/0001.png…`, `depth/`, `normal/`, `line/`, `mask/<asset>/`, `beauty.mp4`,
+  `render.json` (`tools/blender/README.md`)
 
 Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
 `<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4` (`matte.py`
@@ -152,6 +160,20 @@ render:
 ```
 Mười pack có sẵn và cách dùng: `.claude/skills/film-compose-shot/references/code-method.md`. Thêm pack = chép `styles/_template-code/`.
 
+**Style render bằng Blender (`engine: blender`, cho tập `method: blender`).** Như `engine: code`: bắt buộc `id, name,
+status, base, engine: blender, render, palette`; không khóa của model ảnh (có thì WARN).
+```yaml
+engine: blender
+render:
+  look: ink-wash            # look của Blender: grey-layout | clay | toon-ink | ink-wash (tools/blender/looks.json khi có)
+  engine: eevee             # eevee (mặc định, cần GPU) | cycles
+  line: 2.0                 # độ dày nét Line Art ở 1080p, 0 = không nét
+  mist: 0.35                # sương theo độ sâu, 0–1
+  palette: {paper: "#EFE6D3"}   # "#RRGGBB"
+```
+Hai pack có sẵn: `styles/thuy-mac-blender/`, `styles/toon-3d-blender/` (draft); cách dùng:
+`.claude/skills/film-compose-shot/references/blender-method.md`.
+
 ## 4. Dự án (series) và tập
 
 Đường dẫn dưới đây là của bản làm việc `projects/<project>/`; nơi lưu thật trên Drive xem bảng ánh xạ §11.3.
@@ -188,6 +210,8 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-v<N>.txt` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
+| `shots3d/s<NN>.json` | film-3d-artist | (`method: blender`) một `shot3d.json` mỗi shot không dùng lại: model, máy quay, look; schema phiên bản 1 trong `tools/blender/README.md` (kiểm bằng `tools/blender/spec.py`), mẫu `templates/episode/shot3d.json`. Bắt buộc từ khâu 5; `seconds` và `camera.move` khớp `shots.csv` (lệch → WARN) |
+| `ASSETS.md` | film-3d-artist | (`method: blender`) nguồn và giấy phép mỗi model 3D (preset hoặc GLB); có thể nằm ở thư mục dự án cho cả series; mẫu `templates/episode/ASSETS.md`. Thiếu: WARN ở khâu 3, ERROR từ khâu 4 |
 
 ## 5. `EPISODE.md`
 
@@ -200,7 +224,8 @@ episode: 1               # số tập (trong quyển nếu có book)
 slug: bac-thi
 style: thuy-mac
 length_s: 60
-method: layers           # cách dựng: layers | seedance | code (xem dưới)
+method: layers           # cách dựng: layers | seedance | code | blender (xem dưới)
+video_engine: comfy      # tuỳ chọn, chỉ với seedance | blender: clip khâu 6 bằng seedance (mặc định) hoặc comfy
 stage: 2                 # 0..11 theo docs/WORKFLOW.md
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/q01t01
@@ -214,12 +239,22 @@ drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục ch�
 `method` = cách dựng của tập, chọn cùng người dùng ở khâu 0, sau G1 không tự đổi (phải hỏi người dùng):
 `layers` = chỉ dùng model ảnh, tách lớp, ghép lớp và làm chuyển động từng thành phần bằng code, không gọi Seedance;
 `seedance` = cử động nhân vật bằng clip Seedance; `code` = nhân vật và cảnh vẽ hoàn toàn bằng code (`tools/toon/`), không
-gọi model nào. Không phân biệt hoa thường; giá trị khác → ERROR `method must be layers, seedance or code`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
+gọi model nào; `blender` = model 3D render bằng Blender trên máy chủ lab (`tools/blender/`, phiên local), không model ảnh.
+Không phân biệt hoa thường; giá trị khác → ERROR `method must be layers, seedance, code or blender`. Thiếu khóa = `seedance` (tập cũ giữ nguyên nghĩa) kèm một WARN; tập mới chép từ
 mẫu ghi `layers`. Với `layers`, `tools/check_episode.py` báo ERROR khi: một shot có `ai_motion` (§6), `video_seconds` > 0,
 hoặc `models.<id>` > 0 với id chứa `seedance` trong `budget.yaml` (§7). Với `code`: ERROR khi `images`, `video_seconds` hoặc
 bất kỳ `models.<id>` > 0, khi một shot có `ai_motion`, khi mã lớp không phải `C-<slug>`/`M-<slug>`/`E-<slug>`/`FX[-<tên>]`/`T`, hoặc khi
 style của tập không phải `engine: code` (và ngược lại: style `engine: code` chỉ cho tập `code`); không cần `prompts.csv`
 (có thì WARN). Nhân vật khóa ở G2 là `characters/<slug>/character.json` + `review/turntable-<slug>.png`.
+Với `blender`: ERROR khi `images` hoặc `models.<id>` (không phải seedance) > 0, khi `video_seconds`/`models.<seedance>` > 0
+mà tập không ghi `video_engine: seedance` hoặc không shot nào có `ai_motion`, khi một shot có `ai_motion` mà thiếu
+`video_engine`, khi mã lớp không phải `A-<asset>`/`E-<slug>`/`FX[-<tên>]`/`T`, khi style không phải `engine: blender` (và
+ngược lại); không cần `prompts.csv` (có thì WARN); `shots3d/`, `ASSETS.md`, `renders3d/` theo §2 và §4. Model khóa ở G2 là
+`ASSETS.md` + turntable `renders3d/turntable-<asset>/` + một shot mẫu `renders3d/s<NN>_preview/`.
+`video_engine` = engine của khâu 6: `seedance` (mặc định, `ark.py video`, trả tiền) hoặc `comfy` (`tools/comfy/comfy.py run`,
+MiniMax H3 local, miễn phí, chỉ trên máy chủ lab). Chỉ đi với `seedance` và `blender` (với `layers`/`code` là ERROR; giá trị
+khác `seedance`/`comfy` là ERROR). Với `comfy`, `video_seconds` để 0 được (tập `seedance` + `comfy` có `video_seconds` > 0 →
+WARN: không dùng tới). Phiên cloud (`CLAUDE_CODE_REMOTE=true`) mở tập `blender` hoặc `comfy` → WARN: khâu 4–6 cần phiên local.
 Một khóa ghi hai lần trong khối YAML (vd. `method: layers` rồi `method: seedance`) là ERROR: YAML lặng lẽ giữ giá trị sau
 (cũng vậy với `budget.yaml`).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
@@ -242,8 +277,11 @@ Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## 
   `run-cycle`, `jump`, `turn`, `wave`, `cheer`, `point`, `bounce`, `look-at`, `blink`…; checker đọc thẳng sổ đăng ký, id
   mới thêm vào đó là hợp lệ ngay); id compose rig lớp tranh (`PLATES.<id>.rig…`: `cloth`, `strip-warp`…) là WARN;
   `ai_motion` trống. Ngược lại, id `engine: toon` ở tập `layers`/`seedance` là WARN.
+  Tập `method: blender`: `layers` = `A-<asset>` (model 3D, id trong `shot3d.json`), `E-<bối cảnh>`, `FX[-<hiệu ứng>]`, `T`;
+  `camera` ∈ `static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track` (tên chuyển động của `shot3d.json`);
+  `code_motion` = hiệu ứng compose phủ lên render (id rig lớp tranh là WARN); `ai_motion` chỉ khi có `video_engine`.
 - `reuse_of` = shot id dùng lại tài sản, hoặc trống.
-- Từ khâu 8 (G3), tập `seedance`: shot có `ai_motion` phải có clip `<id>_<shot>_<model>_v<NN>.mp4` trong `clips/` (shot có
+- Từ khâu 8 (G3), tập `seedance` hoặc `blender`: shot có `ai_motion` phải có clip (Seedance hoặc H3 local) `<id>_<shot>_<model>_v<NN>.mp4` trong `clips/` (shot có
   `reuse_of` dùng clip của shot gốc; clip `approved=no` không tính), thiếu là ERROR.
 - `code_motion` và `motion:` của style dùng id trong `tools/compose/motions.json` (mist-bands, embers, sun-glow,
   strip-warp, eyelid, breath, parallax, push-in; `figure` = người nhỏ vẽ bằng code trong cảnh rộng, không cần lớp
@@ -271,6 +309,10 @@ ledger_required: true    # (tuỳ chọn) từ chối khi file ledger chưa có:
 phiên trước khi tạo ảnh để trần ngân sách tính đúng, §11.6), header:
 `ts,kind,model,size,seconds,count,status,out,task_id,usage,agent,note`
 - `kind` ∈ `image, video`; `status` ∈ `pending, ok, failed, cut-502, abandoned, failed-unsent, refused-budget`; `ts` ISO 8601 UTC; `agent` lấy từ biến môi trường `FILM_AGENT` (trống = phiên chính).
+- **Dòng local** (engine chạy trên máy chủ lab): `model` bắt đầu bằng `comfy:` (`tools/comfy/comfy.py run`: `comfy:h3-i2v`,
+  `comfy:h3-r2v`; `status` thêm `interrupted`, `task_id` = prompt id, `usage` = `gpu_s=<n>`, `note` = `req=<hex>;seed=<n>`)
+  hoặc `blender:`. Cùng cách ghi `pending` + dòng cuối, nhưng **không tính vào trần nào** (`images`, `video_seconds`,
+  `models`); `tools/status.py` liệt kê chúng riêng (`LOCAL`) và không báo OPEN/MISSING cho chúng.
 - Ngân sách không phải tuỳ chọn: `ark.py image|video` từ chối (thoát mã 2, không gọi API, không ghi ledger) nếu thiếu
   budget **hoặc** ledger (cờ `--budget/--ledger` hoặc env `FILM_BUDGET/FILM_LEDGER`); `--budget` không có ledger là lỗi.
   Ngoại lệ duy nhất: cờ `--no-budget` (in một dòng cảnh báo, ledger tuỳ chọn) – chỉ để thử nhanh ở phiên chính. Có biến
@@ -355,7 +397,13 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
 - Không bao giờ commit dữ liệu dự án vào repo (kể cả "tạm"). Ví dụ trong style pack (`styles/<id>/examples.md`) chỉ
   chép prompt đã duyệt, không chép kịch bản hay kinh thư.
 - Media lưu Drive theo **gói mỗi shot**: `python3 tools/bundle.py out/<project>/<id> --shot s03` → một file zip, một lần
-  duyệt tải lên `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/`. Bản nháp duyệt
+  duyệt tải lên `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/`. Đường dẫn trong zip tính từ
+  `out/<project>/<id>/`: khôi phục = kéo zip từ Drive và giải nén ngay trong `out/<project>/<id>/` (file về đúng
+  `plates/`, `clips/`, `renders3d/`). Tập `method: blender`: gói có thêm các thư mục `renders3d/s03[_v<NN>|_preview|_keys]/`
+  của shot, chỉ file ở cấp đầu (`beauty.mp4` – bản compositor dùng –, `render.json`; `_keys`: `first.png`, `last.png`,
+  `keyframes.json`); thư mục khung PNG (`beauty/`, `depth/`, `normal/`, `line/`, `mask/`; ~3 MB mỗi khung 1080p) không
+  vào gói, trừ `beauty/` của render không có `beauty.mp4` (`--no-mp4`), hoặc khi thêm `--with-frames`. Turntable G2
+  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2. Bản nháp duyệt
   (`renders/*_draft_*.mp4`) cũng vào `04_SanXuat/…/<YYYY-MM-DD>/`; bản cuối (`renders/*_final_*.mp4`) vào
   `05_ThanhPham/<thư mục tập>/`, tải riêng từng file.
 - cinecode lưu định dạng ở `~/.cinecode/formats`; hook đặt `CINECODE_FORMATS=<repo>/formats` để định dạng sống qua các phiên.

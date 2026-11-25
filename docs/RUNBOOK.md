@@ -122,8 +122,8 @@
 | Ledger có dòng `failed` kèm `task_id` cho một clip (mất kết nối khi chờ hoặc khi tải về) | Clip đã được tạo và tính phí nhưng chưa tải về; link có hạn | `python3 tools/ark.py video --resume-task <id> --ledger <ledger>` (miễn phí); không gọi lệnh `ark.py video` mới |
 | AWS MCP báo `needs you to sign in again` dù connector hiện "connected" (gặp 3 lần 2026-11-10/11) | Phiên đăng nhập phía AWS chỉ sống vài giờ; connector vẫn hiện là đã kết nối | Người dùng đăng nhập lại ở claude.ai → Settings → Connectors → AWS MCP rồi nhắn Claude chạy ngay. Chuẩn bị sẵn mọi thứ không cần AWS trước (build zip, `lambda-job prepare`) để dùng trọn phiên đăng nhập; lệnh bị từ chối không thay đổi gì trên AWS |
 | Ark trả lỗi hết số dư / hạn mức tài khoản khi tạo ảnh hoặc video | Tài khoản BytePlus hết tiền (2026-11-11) | Không thử lại, không đổi model để "lách": báo người dùng nạp thêm. Dòng ledger của request đó vẫn tính theo quy tắc §7. `ark.py ping` và `tools/doctor.sh` không tốn phí nên vẫn chạy được |
-| `check_episode` in `WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers, seedance or code` | `EPISODE.md` của tập viết trước khi có khóa `method` (vd. tập 1); thiếu khóa được hiểu là `seedance` | Thêm `method: seedance` (tập đã dựng bằng clip Seedance) hoặc `method: layers` vào khối YAML của `EPISODE.md`, đẩy file lên Drive. Chọn cách dựng là quyết định của người dùng ở khâu 0 |
-| `ERROR EPISODE.md: method must be layers, seedance or code (got ...)` | Giá trị `method:` gõ sai, để trống, hoặc là danh sách | Sửa thành đúng một trong ba chữ `layers`, `seedance`, `code` (không phân biệt hoa thường) |
+| `check_episode` in `WARN  EPISODE.md: EPISODE.md has no method: (treated as seedance); add method: layers, seedance, code or blender` | `EPISODE.md` của tập viết trước khi có khóa `method` (vd. tập 1); thiếu khóa được hiểu là `seedance` | Thêm `method: seedance` (tập đã dựng bằng clip Seedance) hoặc `method: layers` vào khối YAML của `EPISODE.md`, đẩy file lên Drive. Chọn cách dựng là quyết định của người dùng ở khâu 0 |
+| `ERROR EPISODE.md: method must be layers, seedance, code or blender (got ...)` | Giá trị `method:` gõ sai, để trống, hoặc là danh sách | Sửa thành đúng một trong bốn chữ `layers`, `seedance`, `code`, `blender` (không phân biệt hoa thường) |
 | `ERROR shots.csv:<dòng>: method layers: shot sNN has ai_motion; use code_motion or pose-cycle, or set method: seedance` | Tập ghi `method: layers` nhưng shot còn cột `ai_motion` (cử động giao cho Seedance) | Xoá `ai_motion` của shot đó và viết cử động ở `code_motion` (cử động lớn dùng `pose-cycle`); nếu shot thật sự cần Seedance thì hỏi người dùng để đổi cả tập sang `method: seedance`, không tự đổi sau G1 |
 | `ERROR budget.yaml: method layers: video_seconds = N must be 0 (no Seedance), or set method: seedance` (hoặc `models.<id chứa seedance> = N`) | Tập `method: layers` nhưng `budget.yaml` còn trần video Seedance lớn hơn 0 (thường do chép `budget.yaml` của tập cũ) | Đặt `video_seconds: 0` và xoá hoặc đặt 0 cho trần `models.<seedance...>`; chỉ giữ trần video khi người dùng chọn `method: seedance` |
 | `check_episode.py` báo `method layers: shot sNN has ai_motion…`, hoặc `status.py` in `method layers but sNN has ai_motion` | kịch bản viết theo nhánh `seedance` trong tập `method: layers` (hai phương pháp bị trộn) | giao lại `film-writer`: bỏ `ai_motion`, viết hành động thành tư thế giữ + `code_motion` (`cloth`, `pose-cycle`…) theo `.claude/skills/film-compose-shot/references/layers-method.md` §2; hoặc hỏi người dùng đổi cả tập sang `method: seedance`. Không tạo clip cho tập `layers` |
@@ -213,6 +213,49 @@
 | READY qc / `toon.py` in `toon: look '<id>' does not draw creatures` | Shot có `creature` trong `cast` nhưng style dùng look 2D hoặc `cardboard` / `popup-paper` | Dùng `thuy-mac-3d` (`ink-wash-3d`), hoặc `dat-nan-3d` / `low-poly-90`; `toon.py … --creature` thoát 2 với cùng lý do |
 | Dị thú: bàn chân trượt hoặc chân duỗi thẳng không chạm đất khi đi | Chân quá ngắn so với sải (`stride`) hoặc thân uốn (`body.wave`) | Bỏ `stride` tự đặt hoặc tăng `legs.length`; `tests/js/creature.test.cjs` kiểm mẫu; spec mới: chạy lại test với spec đó |
 | `ink-wash-3d`: con thú bơi trên cạn, không thấy mặt nước / vòng sóng | `swim` cần `env.water` (`true` hoặc `{level}`) | Thêm `env: {water: true}` vào scene của shot (mẫu: `demo/creatures/luc-tuc-ngu.json`) |
+
+## Blender (`tools/blender/`, phương pháp `blender`)
+
+Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compose-shot/references/blender-method.md`.
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| doctor: `INFO blender n/a: no Blender on this machine` | Phiên cloud hoặc máy không có Blender | Bình thường ở cloud: tập `blender` chỉ làm phần chữ. Trên máy chủ lab: đặt `FILM_BLENDER` tới `blender.exe` |
+| doctor: `WARN blender FILM_BLENDER=… is set but not usable` | Đường dẫn sai, Blender bị gỡ/nâng cấp sang thư mục khác | Sửa `FILM_BLENDER` (thư mục `Blender Foundation\Blender 5.x`), chạy lại `python tools/blender/blender.py find` |
+| doctor: `WARN blender Blender found but broken: …` (`blender.py find` thoát mã 3) | Có file Blender (qua `FILM_BLENDER`, PATH hoặc thư mục cài) nhưng `blender --version` lỗi hoặc không in phiên bản: bản cài hỏng/dở, thiếu DLL, file khác trùng tên `blender` trên PATH | Chạy tay `"<đường dẫn in ra>" --version` để xem lỗi; cài lại Blender 5.3 hoặc đặt `FILM_BLENDER` tới bản chạy được. Mã 1 = không tìm thấy Blender nào (n/a ở cloud) |
+| Render EEVEE lỗi hoặc khung đen khi chạy nền (`-b`): không có ngữ cảnh GPU/OpenGL | EEVEE, Workbench, Grease Pencil cần GPU kể cả khi `-b`; chạy từ dịch vụ Windows, SSH, WSL hay Task Scheduler "chạy cả khi không đăng nhập" thì không có | Chạy từ phiên Windows đã đăng nhập (Claude Code local); không được thì `--engine cycles` (OptiX/CUDA) cho shot đó và ghi Nhật ký (look toon cần EEVEE) |
+| `check_episode`: `method blender: layer code 'L1' invalid` / `images = N must be 0` / `method blender needs an engine: blender style pack` | Shot list, ngân sách hoặc style viết theo nhánh khác | Mã lớp `A-<asset>;E-<bối cảnh>[;FX-…][;T]`; `budget.yaml` `images: 0`; style `thuy-mac-blender` hoặc `toon-3d-blender` |
+| `check_episode`: `method blender: shot sNN has ai_motion but EPISODE.md has no video_engine` | Tập 3D muốn clip AI mà chưa chọn engine | Hỏi người dùng: `video_engine: comfy` (H3 local, miễn phí) hoặc `seedance` (trả tiền, đặt `video_seconds`); hoặc xoá `ai_motion` |
+| `check_episode`: `WARN shots3d: tools/blender/spec.py not in this checkout` | Bản repo chưa có bộ Blender | Kéo bản repo mới; schema chưa được kiểm, `blender.py check` cũng không chạy được |
+| `check_episode`: `WARN shots3d/sNN.json: camera.move … differs` / `seconds … differs` | `shot3d.json` lệch `shots.csv` sau khi sửa kịch bản | Sửa shot3d theo `shots.csv` (kịch bản đã duyệt thắng), render lại thành `_v<NN>` |
+| `check_episode`: `no final Blender render for sNN at stage 7` | Container bị thu hồi, hoặc chỉ có bản `--preview` | Kéo gói shot từ Drive (`04_SanXuat/<thư mục tập>/<ngày>/<id>_sNN_<ngày>.zip`), giải nén trong `out/<project>/<id>/` → `renders3d/sNN/beauty.mp4` + `render.json` về chỗ cũ; không có gói nào chứa `renders3d/sNN*/` → `blender.py render … --out …/renders3d/sNN_v<NN>/` |
+| `blender.py render` từ chối: `--out` đã có/không rỗng | Không ghi đè render cũ | Dùng thư mục `_v<NN>` tiếp theo |
+| Render rất chậm hoặc hết VRAM khi ComfyUI đang chạy | Hai việc GPU cùng lúc trên 16 GB | Chờ clip xong (`comfy.py interrupt` chỉ khi người dùng đồng ý), một việc GPU một lúc |
+| Khung đầu tiên sau khi đổi look/shader mất 1–2 phút | EEVEE biên dịch shader một lần (có cache cho lần sau) | Bình thường; đo tốc độ từ khung thứ hai |
+| Log Blender: `Warning: edge N - M appears twice, correcting` | Freestyle dựng mesh nét | Vô hại (`blender.py` không in ra) |
+| Pass normal/depth ra xám đều hoặc bị cong sRGB | Blender 5.x áp view transform lên File Output | `scene.py` đặt `save_as_render = False` + `color_management = OVERRIDE`, `Non-Color`; sửa `scene.py` thì giữ hai dòng đó |
+| Hai lần render cùng khung ra byte khác nhau | PNG mang metadata ngày giờ | `scene.py` tắt mọi `use_stamp_*`; đừng bật lại |
+
+## ComfyUI (`tools/comfy/`, clip MiniMax H3 local, `video_engine: comfy`)
+
+Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Installs\ComfyUI` (`FILM_COMFY_HOME`), model ở
+`%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-Shared\models` (`FILM_COMFY_MODELS`), server `FILM_COMFY_URL` (mặc định
+`http://127.0.0.1:8188`). Chi tiết: `.claude/skills/film-compose-shot/references/local-video.md`.
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| doctor: `INFO comfy n/a: FILM_COMFY_URL and FILM_COMFY_HOME unset` | Phiên cloud hoặc chưa cấu hình | Bình thường ở cloud. Trên máy chủ lab: đặt `FILM_COMFY_HOME` (hoặc `FILM_COMFY_URL`) rồi chạy lại doctor |
+| doctor: `WARN comfy http://127.0.0.1:8188: … connection refused`; `comfy.py ping` thoát khác 0 | Server ComfyUI chưa chạy | `python tools/comfy/comfy.py start` (Python của Comfy Desktop, không giao diện, `--offline`), hoặc mở ứng dụng Comfy Desktop; chạy lại `comfy.py ping` |
+| doctor: `WARN comfy FILM_COMFY_URL=… is not this machine: not contacted` | `FILM_COMFY_URL` trỏ ra ngoài localhost | Lab chỉ dùng server trên chính máy: `http://127.0.0.1:8188` |
+| `comfy.py run` thoát 2: node ngoài danh sách cho phép | Workflow có node API trả tiền (vd. node MiniMax trong `comfy_api_nodes/`) hoặc custom node lạ | Không sửa danh sách để cho qua: dùng workflow `h3-i2v`/`h3-r2v` của repo; kiểu shot mới thì thử trong giao diện trước (`local-video.md` §6) |
+| `comfy.py run` thoát 2: thiếu file model | Model H3 bị xoá/đổi tên, hoặc `FILM_COMFY_MODELS` trỏ sai | `python tools/comfy/comfy.py models`; sửa `FILM_COMFY_MODELS`; không tải bản khác thay thế khi chưa hỏi người dùng |
+| Lỗi hết VRAM (`CUDA out of memory`, `torch.OutOfMemoryError`) | Clip dài/lớn, Blender hoặc ứng dụng khác đang giữ GPU | Một việc GPU một lúc; thử bản nháp 864×480 hoặc shot ngắn hơn; đóng Comfy Desktop nếu `comfy.py start` cũng đang chạy |
+| `ping` báo torch không thấy GPU / thiếu `sm_120`; chạy chậm như CPU | Custom node cài kèm đã thay torch bằng bản CPU/CUDA cũ | Không cài custom node có `requirements` kéo torch; cài lại torch đúng bản của Comfy Desktop, `comfy.py ping` kiểm lại; ghi vào đây |
+| Ổ C: đầy giữa lúc chạy | Server do app Comfy Desktop mở ghi vào `ComfyUI-Shared\output` trên C: (còn ~16 GB) | Dùng `comfy.py start` (input/output/temp/user vào `out/_comfy/` của lab, `FILM_COMFY_WORK`); xoá clip cũ trong `out/_comfy/output` khi đã có bản ở `clips/` |
+| `comfy.py start`: `ModuleNotFoundError: No module named 'torch'` | Chạy nhầm `standalone-env\python.exe` (trình thông dịch gốc của Desktop, không có torch) | Python đúng là `ComfyUI\.venv\Scripts\python.exe` (`comfy.py` tự chọn); `FILM_COMFY_PYTHON` chỉ khi bản cài khác |
+| Dòng ledger `comfy:*` là `pending` mãi, `status.py` LOCAL in `open` | Lần chạy chết giữa chừng (máy tắt, server đóng) | Miễn phí, không có gì để lấy lại: xem `/history` của server nếu còn chạy (`comfy.py interrupt --prompt-id <task_id>` nếu còn chạy), `ark.py ledger-close --req <id> --ledger L --status abandoned`, rồi tạo clip mới với `_v<NN>` tiếp theo |
+| `comfy.py run` cảnh báo `below the model's trained range (124..362 frames)` | Clip H3 ngắn hơn ~5,2 s | Dùng `--seconds 5` trở lên (124 khung); khung cuối Blender vẫn dùng được, chuyển động chỉ chậm lại |
+| Clip H3 có tiếng (soundscape) lẫn dưới lời bình | H3 sinh âm thanh cùng hình | Compositor tắt tiếng clip (mặc định) và ghi vào `review/sound-audit.md` |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

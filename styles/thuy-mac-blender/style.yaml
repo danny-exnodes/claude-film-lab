@@ -1,0 +1,23 @@
+# Thủy mặc Blender (Ink wash, Blender 3D) – style pack render bằng Blender (engine: blender), schema: docs/CONVENTIONS.md §3.
+# Cho tập method: blender: model 3D (GLB hoặc preset) dựng trong Blender trên máy của chủ lab, look ink-wash (giấy trắng,
+# bậc giá trị mực, nét Line Art, sương theo độ sâu). Không model ảnh, không trả tiền. Bảng màu lấy từ styles/thuy-mac.
+# Hướng dẫn: .claude/skills/film-compose-shot/references/blender-method.md
+id: thuy-mac-blender
+name: Thủy mặc Blender
+name_en: Ink wash (Blender 3D)
+status: draft
+base: cinecode:ink-wash
+engine: blender
+render:
+  look: ink-wash          # look của Blender (tools/blender/looks.json): grey-layout | clay | toon-ink | ink-wash
+  engine: eevee           # eevee (mặc định, cần GPU) | cycles (dự phòng, OptiX/CUDA)
+  line: 2.0               # độ dày nét Line Art ở 1080p; 0 = không nét
+  mist: 0.35              # sương theo độ sâu 0-1 (ba tầng núi tan vào giấy)
+  palette: {ink: '#1A1714', paper: '#EFE6D3', ochre: '#C89A5A'}
+palette: {ink: '#1A1714', grey: '#8C8378', paper: '#EFE6D3', ochre: '#C89A5A', accent: '#B02E22'}
+motion: [mist-bands, embers, sun-glow]
+sound:
+  scale: D minor pentatonic
+  instruments: [plucked zither, end-blown flute, frame drum, small gong, bowed drone]
+  notes: Như thuy-mac (cùng series); tiếng động theo chất liệu của model 3D.
+type: {latin: Cormorant Garamond, cjk: Noto Serif CJK TC}

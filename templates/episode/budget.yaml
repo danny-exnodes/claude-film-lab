@@ -7,6 +7,9 @@ images: 40               # tổng số ảnh tối đa, mọi model (gồm nháp
 video_seconds: 0         # tổng giây video Seedance tối đa. method: layers (EPISODE.md) → bắt buộc 0 (khác 0 là ERROR);
                          # method: seedance → đặt trần cùng người dùng, vd. 30 (≈ 6 clip 5 s)
                          # method: code → images: 0 và video_seconds: 0 (không model nào được gọi)
+                         # method: blender → images: 0; video_seconds: 0 trừ khi video_engine: seedance và có shot ai_motion
+                         # video_engine: comfy (clip H3 local) → không tốn giây video: video_seconds để 0; dòng ledger
+                         # comfy:* / blender:* không tính vào trần nào
 models:                  # (tuỳ chọn) trần riêng theo model: ảnh hoặc giây video
   dola-seedream-5-0-pro-260628: 6   # ảnh pro chỉ qua Lambda: `ark.py lambda-job prepare/finish` đếm vào trần này (lambda/README.md)
 # ledger_required: true   # bật từ khâu 4: ark.py từ chối khi out/<project>/ep<NN>/ledger.csv chưa có (phải kéo từ Drive trước)

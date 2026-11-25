@@ -38,7 +38,9 @@ def real_link_target():
 def base_env(tmp, **extra):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("GIT_") and k not in ("FILM_LAB", "CINECODE_FORMATS", "CHROME_PATH",
-                                                     "CLAUDE_PROJECT_DIR", "CLAUDE_ENV_FILE", "ARK_API_KEY")}
+                                                     "CLAUDE_PROJECT_DIR", "CLAUDE_ENV_FILE", "ARK_API_KEY",
+                                                     "FILM_BLENDER", "FILM_COMFY_URL", "FILM_COMFY_HOME",
+                                                     "FILM_COMFY_MODELS")}
     env.update(ARK_BASE=CLOSED, ARK_DIR=str(tmp / "ark"), FILM_SETUP_STAMP=str(tmp / "no-setup-stamp"),
                NO_PROXY="127.0.0.1,localhost",
                no_proxy="127.0.0.1,localhost", HTTPS_PROXY="http://127.0.0.1:9", https_proxy="http://127.0.0.1:9")
@@ -105,6 +107,60 @@ def call(method, path, body=None, timeout=300):
 if __name__ == "__main__":
     call("GET", "/models")
 """
+
+
+# Stand-ins for the local engines' CLIs (packages P1/P2: tools/blender/blender.py find, tools/comfy/comfy.py ping).
+# FAKE_BLENDER = ok | missing (exit 1, as `find` does when no Blender is found) | broken (exit 3: found, but
+# `--version` fails) | crash (any other code); FAKE_COMFY = ok | down.
+# comfy.py appends "<argv> <FILM_COMFY_URL>" to $COMFY_LOG, so a test can prove it was (not) called.
+FAKE_BLENDER = """import os, sys
+kind = os.environ.get("FAKE_BLENDER", "missing")
+if sys.argv[1:] != ["find"]:
+    sys.exit("fake blender.py: only find")
+if kind == "ok":
+    print("blender 5.3.0 /fake/blender")
+elif kind == "missing":
+    print("blender: not found (FILM_BLENDER, PATH, install folders)", file=sys.stderr); sys.exit(1)
+elif kind == "broken":
+    print("blender: found /fake/blender via PATH, but `--version` failed", file=sys.stderr); sys.exit(3)
+else:
+    print("Traceback: fake crash", file=sys.stderr); sys.exit(4)
+"""
+FAKE_COMFY = """import os, sys
+with open(os.environ["COMFY_LOG"], "a") as f:
+    f.write(" ".join(sys.argv[1:]) + " " + os.environ.get("FILM_COMFY_URL", "-") + "\\n")
+if os.environ.get("FAKE_COMFY") == "ok":
+    print("ComfyUI 0.43.1 · python 3.12 · torch 2.9.0+cu130 · RTX 5070 Ti 15.1 GB free")
+else:
+    print("comfy: no ComfyUI at " + os.environ.get("FILM_COMFY_URL", "?") + " (connection refused)", file=sys.stderr)
+    sys.exit(1)
+"""
+
+
+def local_engine_jobs(td):
+    """Doctor scenarios for the blender and comfy lines: fakelab has the stand-ins above, barelab has neither tool."""
+    for lab, with_tools in (("fakelab", True), ("barelab", False)):
+        (td / lab / "tools").mkdir(parents=True, exist_ok=True)
+        if with_tools:
+            (td / lab / "tools" / "blender").mkdir()
+            (td / lab / "tools" / "blender" / "blender.py").write_text(FAKE_BLENDER)
+            (td / lab / "tools" / "comfy").mkdir()
+            (td / lab / "tools" / "comfy" / "comfy.py").write_text(FAKE_COMFY)
+    log = lambda name: str(td / f"comfy-{name}.log")
+    base = {"DOCTOR": "fake", "FAKE_ARK": "exit"}
+    return {
+        "loc_none": ([None, "--quick"], dict(base, COMFY_LOG=log("none"))),
+        "loc_ok": ([None, "--quick"], dict(base, FAKE_BLENDER="ok", FAKE_COMFY="ok", COMFY_LOG=log("ok"),
+                                           FILM_COMFY_URL="http://127.0.0.1:8188")),
+        "loc_broken": ([None, "--quick"], dict(base, FILM_BLENDER="/nowhere/blender.exe", FAKE_COMFY="down",
+                                               FILM_COMFY_HOME="/nowhere/ComfyUI", COMFY_LOG=log("broken"))),
+        "loc_crash": ([None, "--quick"], dict(base, FAKE_BLENDER="crash", COMFY_LOG=log("crash"))),
+        "loc_found_broken": ([None, "--quick"], dict(base, FAKE_BLENDER="broken", COMFY_LOG=log("found_broken"))),
+        "loc_far": ([None, "--quick"], dict(base, FILM_COMFY_URL="http://192.0.2.7:8188", FAKE_COMFY="ok",
+                                            COMFY_LOG=log("far"))),
+        "loc_bare": ([None, "--quick"], dict(base, DOCTOR="bare", FILM_COMFY_URL="http://127.0.0.1:8188",
+                                             FILM_BLENDER="/x/blender", COMFY_LOG=log("bare"))),
+    }
 
 
 def tts_jobs(td):
@@ -242,11 +298,15 @@ class TestDoctor(unittest.TestCase):
             "two_args": ([None, "--quick", "extra"], {}),
         }
         jobs.update(tts_jobs(cls.td))
+        jobs.update(local_engine_jobs(cls.td))
+        shutil.copy2(doctor, cls.td / "barelab" / "tools" / "doctor.sh")
+        (cls.td / "barelab" / "tools" / "ark.py").write_text(FAKE_ARK)
 
         def go(item):
             name, ((scn, *args), extra) = item
             env = base_env(cls.td, ARK_BASE=fake + scn if scn else CLOSED, **extra)
-            script = cls.td / "fakelab" / "tools" / "doctor.sh" if extra.get("DOCTOR") else doctor
+            lab = {"fake": "fakelab", "bare": "barelab"}.get(extra.get("DOCTOR"))
+            script = cls.td / lab / "tools" / "doctor.sh" if lab else doctor
             return name, run([BASH, script, *args], env)
 
         before = real_link_target()
@@ -392,6 +452,49 @@ class TestDoctor(unittest.TestCase):
 
     def test_real_link_untouched(self):
         self.assertTrue(self.link_unchanged)
+
+    # --- local engines: blender, comfy (owner's PC only; never FAIL) ----------------------------------------------
+    def comfy_calls(self, name):
+        p = self.td / f"comfy-{name}.log"
+        return p.read_text().splitlines() if p.exists() else []
+
+    def assert_no_local_fail(self, name):
+        rc, out, err = self.r[name]
+        self.assertNotRegex(out, r"FAIL\s+(blender|comfy)\s", out + err)
+        self.assertEqual(rc, len(re.findall(r"^\s+FAIL\s", out, re.M)), out + err)
+
+    def test_local_engines_absent_are_quietly_not_applicable(self):
+        self.assertRegex(self.line("loc_none", "blender"), r"INFO .*n/a: no Blender on this machine")
+        self.assertRegex(self.line("loc_none", "comfy"), r"INFO .*n/a: FILM_COMFY_URL and FILM_COMFY_HOME unset")
+        self.assertEqual(self.comfy_calls("none"), [], "unconfigured: ComfyUI is not contacted at all")
+        self.assertRegex(self.line("loc_bare", "blender"), r"INFO .*n/a: tools/blender/blender.py not in this checkout")
+        self.assertRegex(self.line("loc_bare", "comfy"), r"INFO .*n/a: tools/comfy/comfy.py not in this checkout")
+        for name in ("loc_none", "loc_bare"):
+            self.assert_no_local_fail(name)
+
+    def test_local_engines_ok(self):
+        self.assertRegex(self.line("loc_ok", "blender"), r"OK .*blender 5\.3\.0 /fake/blender")
+        self.assertRegex(self.line("loc_ok", "comfy"), r"OK .*ComfyUI 0\.43\.1")
+        self.assertEqual(self.comfy_calls("ok"), ["ping http://127.0.0.1:8188"])
+
+    def test_local_engines_configured_but_broken_warn(self):
+        self.assertRegex(self.line("loc_broken", "blender"),
+                         r"WARN .*FILM_BLENDER=/nowhere/blender.exe is set but not usable: blender: not found")
+        self.assertRegex(self.line("loc_broken", "comfy"),
+                         r"WARN .*http://127\.0\.0\.1:8188: comfy: no ComfyUI .*comfy\.py start")
+        self.assertEqual(self.comfy_calls("broken"), ["ping http://127.0.0.1:8188"], "FILM_COMFY_HOME alone: default URL")
+        self.assertRegex(self.line("loc_crash", "blender"), r"WARN .*blender.py find failed \(rc 4\): Traceback")
+        # exit 3 = a Blender was found but `--version` fails: WARN even without FILM_BLENDER (never n/a)
+        self.assertRegex(self.line("loc_found_broken", "blender"),
+                         r"WARN .*Blender found but broken: blender: found /fake/blender via PATH")
+        for name in ("loc_broken", "loc_crash", "loc_found_broken"):
+            self.assert_no_local_fail(name)
+
+    def test_comfy_url_off_this_machine_is_never_contacted(self):
+        self.assertRegex(self.line("loc_far", "comfy"), r"WARN .*FILM_COMFY_URL=http://192\.0\.2\.7:8188 is not this "
+                                                        r"machine: not contacted")
+        self.assertEqual(self.comfy_calls("far"), [])
+        self.assert_no_local_fail("loc_far")
 
     # --- narration (#37) ----------------------------------------------------------------------------------------
     def test_tts_missing_is_a_warning_with_the_install_line(self):

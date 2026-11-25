@@ -1,0 +1,37 @@
+{
+  "id": "h3-i2v",
+  "title": "MiniMax H3 image-to-video with audio: start frame (+ optional end frame), or text only",
+  "source": "https://github.com/Comfy-Org/workflow_templates (MIT, Copyright (c) 2023-present Comfy Org; THIRD_PARTY.md): template video_minimax_h3_i2v.json (subgraph 'Image to Video (MiniMax H3)'), flattened to API format; node classes, input names and wiring from the template, values ours",
+  "verified": false,
+  "model_set": "minimax-h3",
+  "fps": 24,
+  "frames": {"grid": [17, 5], "min": 5, "max": 362, "trained": [124, 362]},
+  "size_multiple": 32,
+  "res": {"480p": [864, 480], "768p": [1344, 768]},
+  "defaults": {"seconds": 5, "res": "768p", "steps": 20},
+  "turbo": {"steps": 6, "note": "Lightning/Turbo LoRA: drafts only, never for faces or quality runs"},
+  "negative": false,
+  "prompt_format": "i2v",
+  "images": {
+    "image": {"flag": "--image", "prepare": "crop", "required": false},
+    "last": {"flag": "--last", "prepare": "crop", "required": false, "needs": "image"}
+  },
+  "params": {
+    "prompt": [["8", "prompt"]],
+    "width": [["8", "width"]],
+    "height": [["8", "height"]],
+    "frames": [["8", "length"]],
+    "seed": [["9", "noise_seed"]],
+    "steps": [["11", "steps"]],
+    "fps": [["16", "fps"]],
+    "prefix": [["17", "filename_prefix"]],
+    "image": [["6", "image"]],
+    "last": [["7", "image"]]
+  },
+  "optional": {
+    "image": {"remove": ["6"], "drop": [["8", "first_frame"]]},
+    "last": {"remove": ["7"], "drop": [["8", "last_frame"]]},
+    "turbo": {"remove": ["2"], "rewire": [["11", "model", "1", 0], ["12", "model", "1", 0]]}
+  },
+  "output": {"node": "17"}
+}

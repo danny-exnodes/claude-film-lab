@@ -7,13 +7,16 @@
 Run it at session start and before a gate instead of reading EPISODE.md, budget.yaml, ledger.csv, prompts.csv
 and the media tree by hand. It writes nothing and makes no network call.
 
-Sections: STAGE (stage, gates, BLOCKED lines), METHOD (`method:` of EPISODE.md: layers | seedance | code,
-missing = seedance; code = characters drawn in code, nothing to pay for), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used against each cap, counted exactly like
+Sections: STAGE (stage, gates, BLOCKED lines), METHOD (`method:` of EPISODE.md: layers | seedance | code | blender,
+missing = seedance; code = characters drawn in code, nothing to pay for; blender = Blender 3D renders on the owner's PC,
+free; plus `video_engine:` seedance | comfy for stage 6), NEXT (the `## Việc tiếp theo` lines of EPISODE.md), BUDGET (used against each cap, counted exactly like
 tools/ark.py does, then ATTENTION: OPEN / CUT-502 / FAILED / MISSING requests), SHOTS (state of every layer of
 every shot, clips, orphan plates), FORECAST (what the episode will still cost, from shots.csv and prompts.csv
 alone: images to make, Seedance seconds planned, each against what is left under budget.yaml: `fits` or
 `OVER by N`; CONFLICT lines for ai_motion shots in a `method: layers` episode), MEDIA (files in no bundle,
-renders), GATE (checklist for the first undated gate, or the one named by --gate).
+renders), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
+of the local engines (model comfy:* or blender:*), free: they count against no cap and are never OPEN/MISSING paid
+requests (tools/ark.py skips them the same way); FORECAST adds the local GPU minutes still to run (estimates).
 
 Exit codes: 0 nothing blocks; 1 something needs action (a BLOCKED line, an OPEN request, a MISSING paid file, or
 --gate given and that gate is not ready); 2 usage (no EPISODE.md, unreadable front matter).
@@ -31,6 +34,7 @@ import check_episode  # noqa: E402  (tools/check_episode.py: front matter and te
 STAGES = {0: "Mở tập", 1: "Nghiên cứu nguồn", 2: "Kịch bản, shot list", 3: "Thiết kế nhân vật, bối cảnh",
           4: "Ảnh khóa", 5: "Lớp tranh", 6: "Clip AI", 7: "Dựng shot, âm thanh", 8: "Dựng cả tập",
           9: "Kiểm tra độc lập", 10: "Bản cuối", 11: "Xuất bản"}        # docs/WORKFLOW.md §2
+BLENDER_STAGES = {3: "Model 3D, shot3d.json", 4: "Turntable + shot mẫu", 5: "Render Blender", 6: "Clip AI (tuỳ chọn)"}
 GATE_STAGE = {"G1": 2, "G2": 4, "G3": 8, "G4": 10}                      # the stage each gate closes
 GATES = list(GATE_STAGE)
 NEXT_HEADING = "## Việc tiếp theo"
@@ -41,8 +45,17 @@ RE_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 STATUSES = ["ok", "cut-502", "failed", "abandoned", "pending"]
 LIST_MAX = 10          # MISSING lines shown in the text form (the JSON form has them all)
 USAGE_EXIT = 2
-METHODS = ("layers", "seedance", "code")   # EPISODE.md `method:`; a missing key means seedance (episodes older than the key)
+METHODS = ("layers", "seedance", "code", "blender")   # EPISODE.md `method:`; missing = seedance (episodes older than the key)
 DEFAULT_METHOD = "seedance"
+VIDEO_ENGINES = ("seedance", "comfy")      # EPISODE.md `video_engine:` (method seedance and blender); missing = seedance
+LOCAL_PREFIXES = ("comfy:", "blender:")   # ledger models of the local engines: free, counted against no cap
+# Local GPU time, for FORECAST only. ESTIMATES, not a promise: measure on the owner's PC and fix these numbers.
+#   MiniMax H3 (tools/comfy/, workflow h3-i2v / h3-r2v), measured on the owner's PC 2026-11-25: a 5.17 s clip at
+#   1344x768, 20 steps = 713 GPU s (~34 s per step) = 2.3 min per clip second; the 864x480 draft (~10 s per step, from
+#   the owner's Desktop logs) is ~0.8 min per clip second.
+H3_MIN_PER_S = {"final": 2.3, "draft": 0.8}
+#   Blender (tools/blender/blender.py render), per shot: --preview 960x540 12 fps, final 1920x1080 24 fps EEVEE (estimate)
+BLENDER_MIN_PER_SHOT = {"preview": 1.0, "final": 5.0}
 MIN_CLIP_S = 4                     # shortest clip Seedance accepts (docs/MODELS.md): a shorter shot still bills 4 s
 TO_MAKE = ("no-prompt", "todo", "rejected")   # layer states that still need a paid image
 
@@ -84,17 +97,48 @@ def read_method(meta, notes):
         return {"name": DEFAULT_METHOD, "source": "default", "raw": None}
     if isinstance(raw, str) and raw.strip() in METHODS:
         return {"name": raw.strip(), "source": "episode", "raw": raw}
-    notes.append(f"EPISODE.md: method = {raw!r} is not layers | seedance | code: the forecast counts the episode as "
-                 f"{DEFAULT_METHOD}")
+    notes.append(f"EPISODE.md: method = {raw!r} is not layers | seedance | code | blender: the forecast counts the "
+                 f"episode as {DEFAULT_METHOD}")
     return {"name": DEFAULT_METHOD, "source": "invalid", "raw": raw}
 
 
-def method_text(m):
+def read_video_engine(meta, method, notes):
+    """The clip engine of stage 6: {name: seedance | comfy | None (method layers/code: no clip), explicit: bool}."""
+    raw = meta.get("video_engine")
+    if method in ("layers", "code"):
+        if "video_engine" in meta:
+            notes.append(f"EPISODE.md: video_engine = {raw!r} in a method {method} episode (makes no clip): ignored")
+        return {"name": None, "explicit": False}
+    if "video_engine" not in meta:
+        return {"name": "seedance", "explicit": False}
+    if isinstance(raw, str) and raw.strip().lower() in VIDEO_ENGINES:
+        return {"name": raw.strip().lower(), "explicit": True}
+    notes.append(f"EPISODE.md: video_engine = {raw!r} is not seedance | comfy: counted as seedance")
+    return {"name": "seedance", "explicit": False}
+
+
+def method_text(m, engine=None):
     if m["source"] == "default":
-        return f"{m['name']} (default, no method: in EPISODE.md)"
-    if m["source"] == "invalid":
-        return f"invalid ({m['raw']!r}; counted as {m['name']})"
-    return m["name"]
+        out = f"{m['name']} (default, no method: in EPISODE.md)"
+    elif m["source"] == "invalid":
+        out = f"invalid ({m['raw']!r}; counted as {m['name']})"
+    else:
+        out = m["name"]
+    if engine and engine.get("explicit"):
+        out += f" · video_engine {engine['name']}" + (" (local ComfyUI clips, free)" if engine["name"] == "comfy" else "")
+    return out
+
+
+def stage_name(stage, method):
+    """The stage's name (docs/WORKFLOW.md §2); method blender names stages 3-6 after its own work."""
+    if method == "blender" and stage in BLENDER_STAGES:
+        return BLENDER_STAGES[stage]
+    return STAGES.get(stage, "?")
+
+
+def is_local(row):
+    """A ledger row of a local engine (tools/comfy/comfy.py, tools/blender/blender.py): free."""
+    return str(row.get("model") or "").startswith(LOCAL_PREFIXES)
 
 
 def gate_dates(meta, notes):
@@ -200,6 +244,39 @@ def budget_section(budget, billed, notes):
         if cap is not None:
             caps.append(entry(f"models.{model}", [r for r in billed if r.get("model") == model], cap))
     return {"caps": caps}
+
+
+RE_GPU_S = re.compile(r"(?:^|[;\s])gpu_s=([0-9.]+)")
+
+
+def local_section(rows):
+    """Ledger rows of the local engines (model comfy:* / blender:*), one per request: the last final row of its req=
+    (any status but pending), else its pending row (a run that died or still runs). Free: no cap counts them."""
+    groups, single = {}, []
+    for r in rows:
+        if not is_local(r):
+            continue
+        rid = ark.req_id(r) or (("task:" + r["task_id"]) if r.get("task_id") else None)
+        (groups.setdefault(rid, []) if rid else single).append(r)
+    decided = list(single) + [([x for x in g if x.get("status") != "pending"] or g)[-1] for g in groups.values()]
+    models = {}
+    for r in decided:
+        m = models.setdefault(r.get("model") or "?", {"model": r.get("model") or "?", "requests": 0, "by_status": {},
+                                                       "video_s": 0.0, "gpu_s": 0.0})
+        m["requests"] += 1
+        st_ = r.get("status") or "?"
+        m["by_status"][st_] = m["by_status"].get(st_, 0) + 1
+        if r.get("kind") == "video" and st_ == "ok":
+            m["video_s"] += ark.units(r)
+        g = RE_GPU_S.search(r.get("usage") or "")
+        if g:
+            try:
+                m["gpu_s"] += float(g.group(1))
+            except ValueError:
+                pass
+    open_ = [{"req": ark.req_id(r) or "-", "model": r.get("model") or "", "out": r.get("out") or "",
+              "age": age_text(r.get("ts"))} for r in decided if r.get("status") == "pending"]
+    return {"models": sorted(models.values(), key=lambda m: m["model"]), "open": open_}
 
 
 def age_text(ts, now=None):
@@ -324,8 +401,12 @@ def layer_state(rows, plates, on_disk):
 
 def shots_section(ep_dir, media, notes, method=None):
     shots = read_table(os.path.join(ep_dir, "shots.csv"), notes, "no shot table")
-    code = method == "code"                         # layers drawn in code: nothing to generate, no prompts.csv
+    code = method in ("code", "blender")            # layers drawn in code / rendered by Blender: no prompts.csv
     prompts = None if code else read_table(os.path.join(ep_dir, "prompts.csv"), notes, "every layer shows as no-prompt")
+    blender = method == "blender"
+    renders3d, turntables = check_episode.renders3d_index(media) if blender else ({}, [])
+    shots3d = {m.group(1) for m in (check_episode.RE_SHOT3D_FILE.match(n) for n in
+                                    listdir_files(os.path.join(ep_dir, "shots3d"))) if m} if blender else set()
     plates = listdir_files(os.path.join(media, "plates")) if media else []
     on_disk = set(plates)
     clip_shots = set()
@@ -344,14 +425,22 @@ def shots_section(ep_dir, media, notes, method=None):
             if method == "code":
                 layers.append({"layer": code, "state": "drawn"})
                 continue
+            if blender:
+                layers.append({"layer": code, "state": "3d"})
+                continue
             rows = [r for r in prompts or [] if r.get("shot") == shot and r.get("layer") == code]
             layers.append(dict({"layer": code}, **layer_state(rows, plates, on_disk)))
-        out.append({"shot": shot, "reuse_of": s.get("reuse_of") or None, "layers": layers,
-                    "clip": (shot in clip_shots) if s.get("ai_motion") else None,
-                    "from_s": s.get("from_s", ""), "to_s": s.get("to_s", "")})
+        item = {"shot": shot, "reuse_of": s.get("reuse_of") or None, "layers": layers,
+                "clip": (shot in clip_shots) if s.get("ai_motion") else None,
+                "from_s": s.get("from_s", ""), "to_s": s.get("to_s", "")}
+        if blender:          # shot3d.json written? Blender render: final | preview | none
+            r3 = renders3d.get(shot, {})
+            item.update(shot3d=shot in shots3d,
+                        render="final" if r3.get("final") else "preview" if r3.get("preview") else "none")
+        out.append(item)
     listed = {r.get("file") for r in prompts or []}
     return {"present": {"shots.csv": shots is not None, "prompts.csv": prompts is not None},
-            "shots": out, "orphans": [n for n in plates if n not in listed]}
+            "shots": out, "orphans": [n for n in plates if n not in listed], "turntables": turntables}
 
 
 # ----------------------------------------------------------------- forecast ---
@@ -367,14 +456,50 @@ def clip_seconds(shot):
     return max(MIN_CLIP_S, math.ceil(round(b - a, 6))), None
 
 
-def forecast_section(shots, method, caps, notes):
+def shot_length(shot):
+    """Seconds of a shot (from_s/to_s), or None when they are unusable."""
+    try:
+        a, b = float(shot["from_s"]), float(shot["to_s"])
+    except (TypeError, ValueError):
+        return None
+    return b - a if math.isfinite(a) and math.isfinite(b) and b > a else None
+
+
+def local_forecast(shots, method, engine):
+    """Local GPU minutes still to run (ESTIMATES: BLENDER_MIN_PER_SHOT, H3_MIN_PER_S): Blender renders of the non-reuse
+    shots of a method blender episode (preview + final, or only the final once a preview exists) and one local H3
+    clip per ai_motion shot without a clip when video_engine is comfy. Free; only time."""
+    out = {"estimate": True, "blender_shots": [], "blender_min": 0.0, "h3_clips": [], "h3_min": 0.0,
+           "h3_draft_min": 0.0}
+    if method == "blender":
+        for s in shots["shots"]:
+            if s["reuse_of"] or s.get("render") == "final":
+                continue
+            m = BLENDER_MIN_PER_SHOT["final"] + (0 if s.get("render") == "preview" else BLENDER_MIN_PER_SHOT["preview"])
+            out["blender_shots"].append(s["shot"])
+            out["blender_min"] += m
+    if engine and engine.get("name") == "comfy":
+        for s in shots["shots"]:
+            if s["clip"] is False and not s["reuse_of"]:
+                sec = shot_length(s)
+                if sec is None:
+                    continue
+                out["h3_clips"].append({"shot": s["shot"], "seconds": round(sec, 3)})
+                out["h3_min"] += sec * H3_MIN_PER_S["final"]
+                out["h3_draft_min"] += sec * H3_MIN_PER_S["draft"]
+    return out
+
+
+def forecast_section(shots, method, caps, notes, engine=None):
     """What is still to pay for, from the SHOTS data alone (no network), against what is left under each cap.
     Images: one per layer code of a non-reuse shot that is neither approved, made nor lost (a lost file was paid
     for: it is pulled back from Drive, see MISSING). Video: one clip per ai_motion shot without a clip, the shot
     length rounded up to whole seconds and never under MIN_CLIP_S; a `layers` episode plans none and lists every
-    ai_motion shot as a conflict. Returns None when there is no shots.csv."""
+    ai_motion shot as a conflict. video_engine comfy plans no paid second: its clips go to `local` (GPU minutes, an
+    estimate), like the Blender renders of a method blender episode. Returns None when there is no shots.csv."""
     if not shots["present"]["shots.csv"]:
         return None
+    engine = engine or {"name": None if method in ("layers", "code") else "seedance", "explicit": False}
     states = [l["state"] for s in shots["shots"] if not s["reuse_of"] for l in s["layers"]]
     clips, conflicts, skipped = [], [], []
     for s in shots["shots"]:
@@ -382,7 +507,10 @@ def forecast_section(shots, method, caps, notes):
             continue
         if method in ("layers", "code"):
             conflicts.append(f"method {method} but {s['shot']} has ai_motion")
-        elif s["clip"] is False:
+        elif method == "blender" and not engine.get("explicit"):
+            conflicts.append(f"method blender but {s['shot']} has ai_motion and EPISODE.md has no video_engine "
+                             f"(comfy = local clip, seedance = paid clip)")
+        elif s["clip"] is False and engine.get("name") == "seedance":
             seconds, why = clip_seconds(s)
             if seconds is None:
                 skipped.append(s["shot"])
@@ -403,7 +531,7 @@ def forecast_section(shots, method, caps, notes):
     video = {"planned": sum(c["seconds"] for c in clips), "clips": clips}
     video.update(against(video["planned"], "video_seconds"))
     return {"method": method, "images": images, "video_seconds": video, "conflicts": conflicts, "skipped": skipped,
-            "fits": not images["over"] and not video["over"]}
+            "fits": not images["over"] and not video["over"], "local": local_forecast(shots, method, engine)}
 
 
 def forecast_text(f, notes):
@@ -418,6 +546,15 @@ def forecast_text(f, notes):
            + f" · {tail(i)}",
            f"  video_seconds: {v['planned']} planned" + (f" in {len(v['clips'])} clip(s) ({each})" if each else "")
            + f" · {tail(v)}"]
+    loc = f.get("local") or {}
+    parts = []
+    if loc.get("blender_shots"):
+        parts.append(f"Blender {len(loc['blender_shots'])} shot(s) ≈ {loc['blender_min']:.0f} min")
+    if loc.get("h3_clips"):
+        parts.append(f"H3 {len(loc['h3_clips'])} clip(s) ≈ {loc['h3_min']:.0f} min at 1344x768 "
+                     f"(draft 864x480 ≈ {loc['h3_draft_min']:.0f} min)")
+    if parts:
+        out.append("  local GPU (free; estimate, measure): " + " · ".join(parts))
     out += [f"  CONFLICT: {c}" for c in f["conflicts"]]
     return out + notes_text(notes)
 
@@ -581,6 +718,17 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
              (f" ({', '.join(turn[:3])})" if turn else " (none)"))
         fc = d["forecast"]
         need(fc and fc["fits"] and not fc["conflicts"], f"nothing to pay for ({forecast_brief(fc)})")
+    elif gate == "G2" and d["method"]["name"] == "blender":
+        # method blender: the 3D models seen as a turntable and one sample shot rendered (blender-method.md)
+        turn = d["shots"].get("turntables") or []
+        need(turn, "turntable of the 3D models in renders3d/ (tools/blender/blender.py turntable)" +
+             (f" ({', '.join(turn[:3])})" if turn else " (none)"))
+        sample = [s["shot"] for s in d["shots"]["shots"] if s.get("render") in ("final", "preview")]
+        need(sample, "one sample shot rendered in renders3d/ (blender.py render, --preview is enough)" +
+             (f" ({', '.join(sample[:4])})" if sample else " (none)"))
+        fc = d["forecast"]
+        need(fc and fc["fits"] and not fc["conflicts"] and not fc["skipped"],
+             f"nothing over the budget ({forecast_brief(fc)})")
     elif gate == "G2":
         need(exists("prompts.csv"), "prompts.csv present")
         done = [s["shot"] for s in shots
@@ -591,10 +739,15 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
         need(fc and fc["fits"] and not fc["skipped"], f"forecast fits the budget ({forecast_brief(fc)})")
     elif gate == "G3":
         bad = [f"{s['shot']} {l['layer']}:{l['state']}" for s in shots for l in s["layers"]
-               if l["state"] not in ("approved", "drawn")]
+               if l["state"] not in ("approved", "drawn", "3d")]
         need(shots and not bad, "every layer of every non-reuse shot approved" +
              (f" (not yet: {', '.join(bad[:6])}{f', +{len(bad) - 6} more' if len(bad) > 6 else ''})" if bad
               else "" if shots else " (no shots)"))
+        if d["method"]["name"] == "blender":
+            todo = [s["shot"] for s in shots if s.get("render") != "final"]
+            need(shots and not todo, "every non-reuse shot rendered by Blender (final)" +
+                 (f" (not yet: {', '.join(todo[:6])}{f', +{len(todo) - 6} more' if len(todo) > 6 else ''})"
+                  if todo else ""))
         no_clip = [s["shot"] for s in d["shots"]["shots"] if s["clip"] is False]
         need(not no_clip, "every ai_motion shot has a clip" + (f" (none for {', '.join(no_clip)})" if no_clip else ""))
         need(d["media"]["draft"], f"draft render ({d['media']['draft'] or 'none'})")
@@ -629,6 +782,16 @@ def budget_text(d, notes):
         parts = [f"ok {by['ok']:g}", f"cut-502 {by['cut-502']:g}"] + \
                 [f"{s} {by[s]:g}" for s in ("failed", "abandoned") if by[s]] + [f"pending {by['pending']:g}"]
         out.append("  " + " · ".join([head] + parts))
+    loc = d.get("local") or {"models": [], "open": []}
+    if loc["models"]:
+        out.append("  LOCAL (local engines, free: no cap counts them)")
+    for m in loc["models"]:
+        parts = [f"{n} {k}" for k, n in sorted(m["by_status"].items())]
+        extra = (f" · {m['video_s']:g} s video" if m["video_s"] else "") +                 (f" · GPU {m['gpu_s'] / 60:.1f} min" if m["gpu_s"] else "")
+        out.append(f"    {m['model']} {m['requests']} run(s) · {' · '.join(parts)}{extra}")
+    for o in loc["open"]:
+        out.append(f"    open     {o['req'][:8]} {o['model']} {os.path.basename(o['out']) or '-'} · age {o['age']} "
+                   f"(no final row: the run died or still runs; free, nothing to resume)")
     out += notes_text(notes)
     att = d["attention"]
     if any(att.values()):
@@ -656,7 +819,7 @@ def episode_text(d, notes):
     out = [f"STAGE  {st['n']} {st['name']} · " + " · ".join(f"{g} {d['gates'][g] or '-'}" for g in GATES)]
     out += [f"  BLOCKED: {b['text']}" for b in d["blocked"]]
     out += notes_text(notes["stage"])
-    out.append(f"METHOD {method_text(d['method'])}")
+    out.append(f"METHOD {method_text(d['method'], d.get('video_engine'))}")
     out += notes_text(notes["method"])
     out.append("NEXT")
     out += d["next"] or ["  (nothing under '## Việc tiếp theo')"]
@@ -667,7 +830,11 @@ def episode_text(d, notes):
             [f"{l['layer']}:{l['state']}" + (f"(next v{l['next_version']:02d})" if l["state"] == "rejected" else "")
              for l in s["layers"]]
         clip = "" if s["clip"] is None else f" · clip {'yes' if s['clip'] else 'no'}"
+        if "render" in s and not s["reuse_of"]:
+            clip = f" · shot3d {'yes' if s['shot3d'] else 'no'} · render {s['render']}" + clip
         out.append(f"  {s['shot']}  {' '.join(cells) or '(no layers)'}{clip}")
+    if d["shots"].get("turntables"):
+        out.append(f"  turntables (renders3d/): {', '.join(d['shots']['turntables'])}")
     if d["shots"]["orphans"]:
         out.append(f"  orphans (in plates/, no prompts.csv row): {', '.join(d['shots']['orphans'])}")
     out += notes_text(notes["shots"])
@@ -696,9 +863,13 @@ def flat(notes):
 def collect_ledger(ledger, budget_path, media, bundled, notes):
     budget, state = (None, "missing") if budget_path is None else read_budget(budget_path, notes)
     rows = read_ledger(ledger, notes)
-    billed = ark.billed_requests(rows)
+    # Local engines (comfy:*, blender:*) cost nothing: they are left out of every cap and of ATTENTION here, whatever
+    # tools/ark.py counts, and listed apart under LOCAL.
+    billed = [r for r in ark.billed_requests(rows) if not is_local(r)]
+    paid_rows = [r for r in rows if not is_local(r)]
     return ({"budget": budget_section(budget, billed, notes),
-             "attention": attention_section(rows, billed, ledger, media, bundled)}, state)
+             "attention": attention_section(paid_rows, billed, ledger, media, bundled),
+             "local": local_section(rows)}, state)
 
 
 def needs_action(d):
@@ -743,12 +914,15 @@ def main(argv=None):
          "gates": gate_dates(meta, notes["stage"])}
     d["blocked"] = blocked_gates(stage, d["gates"])
     d["method"] = read_method(meta, notes["method"])
+    d["video_engine"] = read_video_engine(meta, d["method"]["name"], notes["method"])
+    d["stage"]["name"] = stage_name(stage, d["method"]["name"])
     d["next"] = next_lines(body)
     led, budget_state = collect_ledger(ledger, a.budget or os.path.join(a.episode, "budget.yaml"), media, bundled,
                                        notes["budget"])
     d.update(led)
     d["shots"] = shots_section(a.episode, media, notes["shots"], d["method"]["name"])
-    d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"])
+    d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"],
+                                     d["video_engine"])
     d["media"] = media_section(media, bundled, notes["media"])
     gate = a.gate or next((g for g in GATES if not d["gates"][g]), None)
     d["gate"] = gate_section(gate, a.episode, media, d, budget_state, ledger) if gate else None

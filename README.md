@@ -32,6 +32,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
 | `tools/compose/` | Bộ JS dựng 2.5D cho cinecode: parallax, sương, tàn lửa, khói, lửa, lá lay, đung đưa, vải bay, đổi tư thế theo khung, nhân vật vẽ bằng nét mực cho cảnh rộng, chớp mắt, thở |
 | `tools/toon/` | Bộ TOON cho `method: code`: nhân vật vẽ bằng code (rig, đi/chạy/nhảy/vẫy, chân không trượt), 8 look (canvas + three.js) và 3 hậu kỳ (riso, pixel, ASCII); `toon.py` xem thử miễn phí, `lookbook` cả 11 style; linh vật `demo/giot.json` |
+| `tools/blender/`, `tools/comfy/` | Engine local trên máy chủ lab (phiên local, miễn phí): Blender render shot 3D cho `method: blender`; ComfyUI + MiniMax H3 làm clip cho `video_engine: comfy`; `docs/WORKFLOW.md` mục engine local |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
 | `tools/audio/` | Âm thanh tổng hợp local: dây gảy (cổ cầm, tỳ bà, koto), tiếng động theo sự kiện, `score.py` xuất stem WAV từ bản nhạc JSON |
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |

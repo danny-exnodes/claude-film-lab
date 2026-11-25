@@ -24,6 +24,9 @@ Phương pháp dựng (đọc `method` trong `EPISODE.md` trước khi viết sh
 - `method: seedance` hoặc không có khóa: quy tắc `ai_motion` như cũ (mục 4 của skill).
 - `method: code`: nhân vật vẽ bằng code; mã lớp `C-`/`M-`/`E-`/`FX-`/`T`, `code_motion` là hành động rig, `ai_motion` trống
   (skill mục 4a, `.claude/skills/film-compose-shot/references/code-method.md` §4).
+- `method: blender`: model 3D render bằng Blender; mã lớp `A-<asset>`/`E-`/`FX-`/`T`, `camera` ∈ `static, push-in, pull-out,
+  pan, tilt, orbit, dolly, crane, track`, `ai_motion` chỉ khi `EPISODE.md` có `video_engine` (một cử động Blender không
+  làm được) (`.claude/skills/film-compose-shot/references/blender-method.md` §5).
 - Một tập một nhánh. Không tự đổi `method`; điều nhánh đang dùng không làm được thì ghi vào báo cáo.
 - Id shot `s<NN>` (tối đa 99 shot); hơn 99 shot thì cả tập dùng `s<NNN>` từ `s001` (CONVENTIONS §6), không gộp shot
   chỉ để vừa 99, không trộn hai kiểu.

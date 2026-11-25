@@ -39,8 +39,8 @@ job): it stays counted against the caps, it is only no longer open.
 
 Budget and ledger (docs/CONVENTIONS.md §7): --ledger/--budget (or env FILM_LEDGER/FILM_BUDGET).
 image/video refuse to run (exit 2) without BOTH a budget and a ledger, unless --no-budget is given
-(ad-hoc tests in the main session only: with FILM_AGENT set, --no-budget and --force are refused). budget.yaml `ledger_required: true` also refuses (exit 2) when the ledger
-file does not exist yet: pull it from Drive first. The budget is checked BEFORE the call (over a cap: exit 3),
+(ad-hoc tests in the main session only: with FILM_AGENT set, --no-budget and --force are refused).
+budget.yaml `ledger_required: true` also refuses (exit 2) when the ledger file does not exist yet: pull it from Drive first. The budget is checked BEFORE the call (over a cap: exit 3),
 in the same exclusive ledger lock that appends the request's 'pending' row (note req=<id>), so parallel
 agents cannot overrun a cap. Each request then gets a final row
 (ok/failed/cut-502, same req=<id>) after it, so a killed process still leaves a billed row. A response without
@@ -1580,8 +1580,9 @@ def ledger_close(a):
             _write_locked(f, dict(row, task_id=task, status=a.status, note=note))
         finally:
             fcntl.flock(f, fcntl.LOCK_UN)
+    what = "second(s) of video" if last.get("kind") == "video" else "image(s)"
     print(f"req={rid} closed as {a.status} in {a.ledger}: it still counts against the caps "
-          f"({units(last):g} {'second(s) of video' if last.get('kind') == 'video' else 'image(s)'}, {last.get('model')})")
+          f"({units(last):g} {what}, {last.get('model')})")
     if task:
         print(f"note: task {task} may still finish upstream; the clip can still be saved later with "
               f"python3 tools/ark.py video --resume-task {task} --ledger {a.ledger}", file=sys.stderr)

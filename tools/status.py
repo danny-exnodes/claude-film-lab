@@ -585,7 +585,7 @@ def budget_text(d, notes):
             continue
         by = c["by_status"]
         parts = [f"ok {by['ok']:g}", f"cut-502 {by['cut-502']:g}"] + \
-                ([f"failed {by['failed']:g}"] if by["failed"] else []) +                 ([f"abandoned {by['abandoned']:g}"] if by["abandoned"] else []) + [f"pending {by['pending']:g}"]
+                [f"{s} {by[s]:g}" for s in ("failed", "abandoned") if by[s]] + [f"pending {by['pending']:g}"]
         out.append("  " + " · ".join([head] + parts))
     out += notes_text(notes)
     att = d["attention"]

@@ -17,7 +17,9 @@ ARK_DIR="${ARK_DIR:-/opt/byteplus}"
 #    shared by every session in the container, so a linked worktree (work in progress) never moves it.
 gitdir=$(git rev-parse --path-format=absolute --git-dir 2>/dev/null || true)
 gitcommon=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+WORKTREE=0
 if [ -n "$gitdir" ] && [ "$gitdir" != "$gitcommon" ]; then
+  WORKTREE=1
   echo "film-lab: linked git worktree - $ARK_DIR/ark.py stays on the main checkout ($(dirname "$gitcommon"))"
 else
   mkdir -p "$ARK_DIR"
@@ -60,8 +62,13 @@ fi
 
 # 4. pip into the system Python: rerun only when requirements change. The stamp is written only after a
 #    successful install, so a failed one is retried at the next start.
+#    A linked worktree never installs and never rewrites the stamp: both belong to the main checkout (its
+#    requirements.txt may be work in progress; the pip install would change the system Python for every session).
 pyhashes="${FILM_LAB_STAMP:-$(python3 -I -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/.film-lab-session-start.sha256}"
-if ! sha256sum --check --status "$pyhashes" 2>/dev/null; then
+if [ $WORKTREE = 1 ]; then
+  sha256sum --check --status "$pyhashes" 2>/dev/null \
+    || echo "film-lab: linked git worktree - pip install skipped and stamp kept (the main checkout's session start installs; by hand: python3 -m pip install -r requirements.txt)"
+elif ! sha256sum --check --status "$pyhashes" 2>/dev/null; then
   rm -f "$pyhashes"
   rc=0
   timeout 600 python3 -m pip install -q --root-user-action=ignore -r requirements.txt >/dev/null || rc=$?

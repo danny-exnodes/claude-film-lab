@@ -4,6 +4,7 @@
 # The repo danny-exnodes/claude-film-lab does the rest at session start (.claude/hooks/session-start.sh):
 # links /opt/byteplus/ark.py to the repo's tools/ark.py, exports FILM_LAB, CINECODE_FORMATS, CHROME_PATH,
 # re-checks fonts/pip and prints the doctor report. Keep the pip pins below equal to requirements.txt.
+SETUP_VERSION=3   # = "v3" in the header. Written to the stamp at the end; tools/doctor.sh compares the two.
 log() { echo "[setup $(date +%T)] $*"; }
 export DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore
 # A slow mirror should fail fast and retry instead of stalling a whole step
@@ -129,5 +130,6 @@ else
   rm -rf "$tmp3"
 fi
 
+mkdir -p /opt/film-lab && echo "$SETUP_VERSION" > /opt/film-lab/setup-script.version && log "stamp: v$SETUP_VERSION"
 log "done"
 exit 0

@@ -16,6 +16,7 @@ CLOSED = os.environ["ARK_BASE"]            # helpers points it at a closed local
 REAL_LINK = Path("/opt/byteplus/ark.py")
 ark = helpers.load("ark.py")
 TASK_ID = "cgt-FAKE-TASK-1"
+SETUP_VERSION = re.search(r"^SETUP_VERSION=(\d+)", (REPO / "docs" / "setup-script.sh").read_text(), re.M).group(1)
 
 
 def must_be_redirectable(*scripts):
@@ -38,7 +39,8 @@ def base_env(tmp, **extra):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith("GIT_") and k not in ("FILM_LAB", "CINECODE_FORMATS", "CHROME_PATH",
                                                      "CLAUDE_PROJECT_DIR", "CLAUDE_ENV_FILE", "ARK_API_KEY")}
-    env.update(ARK_BASE=CLOSED, ARK_DIR=str(tmp / "ark"), NO_PROXY="127.0.0.1,localhost",
+    env.update(ARK_BASE=CLOSED, ARK_DIR=str(tmp / "ark"), FILM_SETUP_STAMP=str(tmp / "no-setup-stamp"),
+               NO_PROXY="127.0.0.1,localhost",
                no_proxy="127.0.0.1,localhost", HTTPS_PROXY="http://127.0.0.1:9", https_proxy="http://127.0.0.1:9")
     env.update(extra)
     return env
@@ -61,9 +63,10 @@ class FakeArk(http.server.BaseHTTPRequestHandler):
         pass
 
     def answer(self, code, obj):
-        raw = json.dumps(obj).encode()
+        html = obj == "html"                     # a proxy or error page instead of Ark's JSON
+        raw = b"<html><body>Bad gateway</body></html>" if html else json.dumps(obj).encode()
         self.send_response(code)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", "text/html" if html else "application/json")
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
@@ -73,6 +76,8 @@ class FakeArk(http.server.BaseHTTPRequestHandler):
         row = lambda i, s="Active": {"id": i, "domain": "VideoGeneration", "task_type": ["x"], "status": s}
         rows = [row(ark.VIDEO_DEFAULT, "Shutdown" if kind == "shutdown" else "Active"),
                 row(ark.IMAGE_FAST), row(ark.LAMBDA_DEFAULT), row("retired-model-000000", "Shutdown")]
+        if kind in ("html", "list"):              # 200 that is not JSON / JSON that is not an object
+            return self.answer(200, "html" if kind == "html" else [1, 2])
         self.answer(200, {"data": [] if kind == "empty" else rows})
 
     def do_POST(self):
@@ -80,6 +85,8 @@ class FakeArk(http.server.BaseHTTPRequestHandler):
         kind = self.path.split("/")[1].split("_")[1]
         if kind == "task":
             return self.answer(200, {"id": TASK_ID})
+        if kind in ("html", "list"):
+            return self.answer(200, "html" if kind == "html" else [TASK_ID])
         code, name = (404, "ModelNotOpen") if kind.startswith("notopen") else (400, "InvalidParameter")
         # "notopenmix": a ModelNotOpen answer whose message happens to mention InvalidParameter
         self.answer(code, {"error": {"code": name, "message": "fake InvalidParameter" if kind == "notopenmix" else "fake"}})
@@ -122,6 +129,25 @@ class TestDoctor(unittest.TestCase):
         shims.mkdir()
         write_exec(shims / "node", "#!/bin/bash\necho v20.11.1\n")
         old_path = str(shims) + os.pathsep + os.environ["PATH"]
+        # python3 that reports SHIM_PYV to the version check (everything else runs for real), a df with SHIM_DF_KB
+        # free, and stand-ins for CHROME_PATH: one renders the page it is given, one crashes, one is not executable
+        mach = cls.td / "machine"
+        mach.mkdir()
+        write_exec(mach / "python3", CI_PY_SHIM % sys.executable)
+        write_exec(mach / "df", "#!/bin/bash\necho 'Filesystem 1024-blocks Used Available Capacity Mounted on'\n"
+                                'echo "/dev/fake 99999999 1 ${SHIM_DF_KB} 1% /"\n')
+        mach_path = str(mach) + os.pathsep + os.environ["PATH"]
+        write_exec(cls.td / "chrome-good", '#!/bin/bash\nfor a in "$@"; do case "$a" in data:*) '
+                                           'echo "<html><body>${a#*,}</body></html>";; esac; done\n')
+        write_exec(cls.td / "chrome-bad", "#!/bin/bash\necho 'Running as root without --no-sandbox is not supported' >&2\n"
+                                          "exit 1\n")
+        (cls.td / "chrome-noexec").write_text("")
+        (cls.td / "stamp-same").write_text(SETUP_VERSION + "\n")
+        (cls.td / "stamp-old").write_text("1\n")
+        cine = cls.td / "cinecode"                 # an installed cinecode that is not a git clone
+        (cine / "templates" / "quick").mkdir(parents=True)
+        (cine / "SKILL.md").write_text("---\nname: cinecode\n---\n")
+        shutil.copy2(helpers.FIX / "cinecode" / "film.html", cine / "templates" / "quick" / "film.html")
         doctor = REPO / "tools" / "doctor.sh"
         must_be_redirectable(doctor)
         (cls.td / "fakelab" / "tools").mkdir(parents=True)
@@ -139,6 +165,20 @@ class TestDoctor(unittest.TestCase):
             "no_onnx": (["ok_invalid"], broken),
             "net_traceback": ([None], dict(fast, FAKE_ARK="raise", DOCTOR="fake")),
             "net_exit": ([None], dict(fast, FAKE_ARK="exit", DOCTOR="fake")),
+            "ping_html": (["html_invalid", "--quick"], {}),
+            "ping_list": (["list_invalid", "--quick"], {}),
+            "probe_html": (["ok_html"], fast),
+            "probe_list": (["ok_list"], fast),
+            "old_python": ([None, "--quick"], {"PATH": mach_path, "SHIM_PYV": "3.8.10", "SHIM_LOG": str(cls.td / "py")}),
+            "low_disk": ([None, "--quick"], {"PATH": mach_path, "SHIM_DF_KB": "1048576",
+                                             "FILM_SETUP_STAMP": str(cls.td / "stamp-old")}),
+            "big_disk": ([None, "--quick"], {"PATH": mach_path, "SHIM_DF_KB": "73400320",
+                                             "FILM_SETUP_STAMP": str(cls.td / "stamp-same")}),
+            "chrome_good": (["ok_invalid"], dict(fast, CHROME_PATH=str(cls.td / "chrome-good"))),
+            "chrome_bad": (["ok_invalid"], dict(fast, CHROME_PATH=str(cls.td / "chrome-bad"))),
+            "chrome_noexec": (["ok_invalid"], dict(fast, CHROME_PATH=str(cls.td / "chrome-noexec"))),
+            "cine_dir": ([None, "--quick"], {"CINECODE_DIR": str(cls.td / "cinecode")}),
+            "no_cine": ([None, "--quick"], {"CINECODE_DIR": str(cls.td / "nowhere")}),
             "help": ([None, "--help"], {}),
             "h": ([None, "-h"], {}),
             "bogus": ([None, "--bogus"], {}),
@@ -215,6 +255,53 @@ class TestDoctor(unittest.TestCase):
         for name in ("closed", "net_traceback", "net_exit"):
             self.assertRegex(self.line(name, "video-model"), r"FAIL .*Ark host unreachable: .*refused")
 
+    def test_non_json_models_answer_is_not_called_unreachable(self):
+        l = self.line("ping_html", "ark-ping")
+        self.assertRegex(l, r"FAIL .*Ark host answered, but not with JSON .*Expecting value")
+        self.assertNotIn("unreachable", l)
+        l = self.line("ping_list", "ark-ping")
+        self.assertRegex(l, r"FAIL .*Ark host answered with JSON that is not a model list")
+        self.assertNotIn("unreachable", l)
+        for name in ("ping_html", "ping_list"):
+            self.assertNotIn("Traceback", self.r[name][1])
+
+    def test_probe_answer_that_is_not_an_object_may_be_a_task(self):
+        for name, what in (("probe_html", r"not JSON: Expecting value"), ("probe_list", r"JSON list, not an object")):
+            l = self.line(name, "video-model")
+            self.assertRegex(l, r"FAIL .*not a task object \(%s\): a task may exist and be billed, check the Ark "
+                                r"console" % what)
+            self.assertNotIn("probe failed", l)
+            self.assertNotEqual(self.r[name][0], 0)
+
+    def test_cinecode_is_found_through_cinecode_dir(self):
+        self.assertRegex(self.line("cine_dir", "skill-cinecode"), r"WARN .*present, not a git clone")
+        self.assertRegex(self.line("cine_dir", "compose-kit"), r"OK .*--init ok on installed template")
+        self.assertRegex(self.line("no_cine", "skill-cinecode"), r"FAIL .*nowhere/SKILL.md missing")
+
+    def test_python_version(self):
+        self.assertRegex(self.line("old_python", "python"), r"FAIL .*3\.8\.10 is too old: .*3\.10")
+        self.assertRegex(self.line("closed_quick", "python"), r"OK +python +3\.\d+\.\d+")
+
+    def test_free_disk(self):
+        self.assertRegex(self.line("low_disk", "disk"), r"WARN .*only 1\.0 GB free .*5 GB")
+        self.assertRegex(self.line("big_disk", "disk"), r"OK +disk +70\.0 GB free")
+        rc, out, _ = self.r["low_disk"]
+        self.assertEqual(len(re.findall(r"^\s+FAIL\s", out, re.M)), rc, "a low disk only warns")
+
+    def test_setup_script_stamp(self):
+        self.assertRegex(self.line("closed_quick", "setup-script"), r"WARN .*no stamp .*older than v%s" % SETUP_VERSION)
+        self.assertRegex(self.line("low_disk", "setup-script"),
+                         r"WARN .*ran setup script v1, the repo has v%s" % SETUP_VERSION)
+        self.assertRegex(self.line("big_disk", "setup-script"), r"OK +setup-script +v%s" % SETUP_VERSION)
+
+    def test_headless_chrome_launch(self):
+        self.assertRegex(self.line("chrome_good", "chrome-launch"), r"OK .*headless page rendered via .*chrome-good")
+        self.assertRegex(self.line("chrome_bad", "chrome-launch"),
+                         r"FAIL .*headless launch failed \(rc 1\): Running as root")
+        self.assertRegex(self.line("chrome_noexec", "chrome-launch"), r"FAIL .*not an executable file")
+        self.assertRegex(self.line("closed", "chrome-launch"), r"INFO .*CHROME_PATH unset")
+        self.assertNotIn("chrome-launch", self.r["closed_quick"][1], "quick mode launches no browser")
+
     def test_full_mode_really_imports_onnxruntime(self):
         self.assertRegex(self.line("no_onnx", "rembg"), r"FAIL .*import fails.*stubbed out by the test")
         self.assertRegex(self.line("invalid", "rembg"), r"(OK .*imported|FAIL )")   # FAIL: rembg not installed here
@@ -245,6 +332,15 @@ class TestDoctor(unittest.TestCase):
 
     def test_real_link_untouched(self):
         self.assertTrue(self.link_unchanged)
+
+
+class TestSetupStamp(unittest.TestCase):
+    def test_setup_script_version_matches_its_header_and_is_stamped_where_doctor_reads(self):
+        sh = (REPO / "docs" / "setup-script.sh").read_text()
+        self.assertRegex(sh.splitlines()[1], r"^# Setup script v%s\b" % SETUP_VERSION)
+        self.assertIn('echo "$SETUP_VERSION" > /opt/film-lab/setup-script.version', sh)
+        self.assertIn("${FILM_SETUP_STAMP:-/opt/film-lab/setup-script.version}",
+                      (REPO / "tools" / "doctor.sh").read_text())
 
 
 PY_SHIM = """#!/bin/bash
@@ -338,7 +434,14 @@ def scn_worktree(L):
     after = L.link()
     doctor_ok = L.doctor(wt)
     (L.tmp / "ark" / "ark.py").unlink()
-    return dict(before=before, hook=hook, after=after, doctor_ok=doctor_ok, doctor_bad=L.doctor(wt))
+    doctor_bad = L.doctor(wt)
+    # work in progress on requirements.txt in the worktree: no pip run, the main checkout's stamp stays as it is
+    stamp_before = (L.tmp / "stamp").read_text()
+    with open(wt / "requirements.txt", "a") as f:
+        f.write("example-wip-package==1.0\n")
+    wip = L.hook(lab=wt)
+    return dict(before=before, hook=hook, after=after, doctor_ok=doctor_ok, doctor_bad=doctor_bad, wip=wip,
+                pip_calls=len(L.calls("pip")), stamp_same=(L.tmp / "stamp").read_text() == stamp_before)
 
 
 @unittest.skipUnless(BASH and GIT, "needs bash and git")
@@ -439,6 +542,16 @@ class TestSessionStartHook(unittest.TestCase):
         # ... and when the link is wrong, sends the engineer to the main checkout's hook
         self.assertRegex(r["doctor_bad"][1],
                          r"FAIL\s+ark\.py\s.*%s" % re.escape(str(lab / ".claude/hooks/session-start.sh")))
+
+    def test_worktree_never_runs_pip_nor_rewrites_the_stamp(self):
+        r = self.r["worktree"]
+        self.assertNotIn("pip install skipped", r["hook"][1], "same files as the stamp: nothing to say")
+        rc, out, err = r["wip"]
+        self.assertEqual(rc, 0, out + err)
+        self.assertIn("film-lab: linked git worktree - pip install skipped and stamp kept", out)
+        self.assertIn("AI Film Lab doctor (quick)", out)
+        self.assertEqual(r["pip_calls"], 1, "only the main checkout's first start ran pip")
+        self.assertTrue(r["stamp_same"])
 
 
 CI_PY_SHIM = """#!/bin/bash

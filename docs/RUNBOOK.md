@@ -187,7 +187,7 @@
 > The upstream API (synchronous image generation) legitimately takes 30–60 s. Please raise or make configurable
 > the upstream timeout for injected-credential hosts.
 
-## CI (bộ test miễn phí)
+## CI (bộ test miễn phí) và doctor
 - Chạy tay ở mọi máy: `tools/ci.sh` (python ≥ 3.10, `bash -n` mọi script, lint bộ compose, toàn bộ unit test). Máy mới:
   `tools/ci.sh --install` (cài `requirements-ci.txt`: numpy, scipy, pillow, PyYAML; không rembg/torch). Chạy vài module:
   `tools/ci.sh -- test_ark test_docs -v`. Không gọi Ark, Drive hay dịch vụ có phí; test cần Chrome, Playwright, rembg,
@@ -202,3 +202,11 @@
 | `ci: FAILED: bash -n: <script>` | Script shell sai cú pháp | Sửa script; `bash -n <script>` để xem dòng lỗi |
 | `test_docs` báo `missing path`, `unknown subcommand` hoặc `unknown option` | Tài liệu (CLAUDE.md, docs, skill, agent) nhắc tới file, lệnh con hoặc cờ không còn trong mã | Sửa tài liệu theo mã. Chỉ khi chưa sửa được ngay mới thêm vào `ALLOW` trong `tests/test_docs.py` kèm lý do |
 | `ImportError`/`PermissionError` trên `/root/...` khi chạy test bằng user thường | Test cũ ghi cứng `/root/.claude/skills/cinecode` | Dùng `helpers.CINECODE` (`$CINECODE_DIR`, mặc định `~/.claude/skills/cinecode`) và `helpers.exists()` |
+| doctor: `FAIL ark-ping Ark host answered, but not with JSON (proxy or error page?)` | Có máy trả lời nhưng không phải Ark: trang lỗi của proxy, `ARK_BASE` trỏ sai | `curl -sS $HTTPS_PROXY/__agentproxy/status`; bỏ `ARK_BASE` nếu đang đặt; chạy lại doctor. Khác với `Ark host unreachable` (không có trả lời) |
+| doctor: `FAIL ark-ping Ark host answered with JSON that is not a model list` | `/models` trả JSON lạ (API đổi, hoặc `ARK_BASE` trỏ dịch vụ khác) | Kiểm `ARK_BASE`; nếu Ark đổi API thì sửa `ark.py ping` và ghi vào đây |
+| doctor (đầy đủ): `FAIL video-model Ark accepted the probe with an answer that is not a task object` | Lệnh thử với độ phân giải sai nhận về 2xx nhưng không phải object JSON: có thể Ark đã tạo task | Mở danh sách task video trong Ark Console, huỷ task vừa tạo nếu có; không chạy lại doctor đầy đủ trước khi rõ |
+| doctor: `FAIL python … is too old` | Python của máy < 3.10 | Dùng python 3.10+ |
+| doctor: `WARN disk only … GB free` | Ổ chứa repo còn dưới 5 GB; bản dựng và clip sẽ hết chỗ giữa chừng | Gói và tải shot đã duyệt lên Drive (`tools/bundle.py`) rồi xoá bản cũ trong `out/` |
+| doctor: `WARN setup-script no stamp …` hoặc `the environment ran setup script vN, the repo has vM` | Môi trường chạy setup script cũ (trước khi có dấu `/opt/film-lab/setup-script.version`) | Dán lại `docs/setup-script.sh` vào Setup script của môi trường (claude.ai: menu môi trường cloud → Edit), mở phiên mới |
+| doctor (đầy đủ): `FAIL chrome-launch headless launch failed` | Chrome qua `CHROME_PATH` không mở được trang: thiếu thư viện, chạy root không `--no-sandbox` | Chạy tay `"$CHROME_PATH" --headless=new --dump-dom about:blank` để xem lỗi; root thì `CHROME_PATH=<repo>/tools/compose/chrome-root.sh`; thiếu thư viện thì chạy lại setup script |
+| hook: `linked git worktree - pip install skipped and stamp kept` | Phiên chạy trong git worktree có `requirements.txt` hoặc hook khác bản đã cài; hook không cài từ worktree (đó là việc của bản chính) | Bình thường. Cần thử gói mới: `python3 -m pip install -r requirements.txt` bằng tay |

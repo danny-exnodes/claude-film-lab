@@ -181,3 +181,67 @@ test('the template shot is a pure function of t (same t twice, frames in reverse
   for (let i = 189, n = forward.length - 1; i >= 0; i -= 3, n--) assert.equal(frame(i), forward[n], `frame ${i} in reverse`);
   assert.equal(g.stack.length, 0, 'save/restore balanced');
 });
+
+test('embers and glow keep the alpha the film set before COMPOSE.stage (a scene fading out fades them too)', async () => {
+  const kit = loadKit();
+  await kit.C.load({ seed: 7, plates: {} });
+  const { g, S } = kit.screen();
+  const run = (alpha, fn) => kit.record(() => { g.globalAlpha = alpha; kit.C.stage(g, S, kit.C.camera(1.3), fn); g.globalAlpha = 1; })
+    .filter((c) => c.op === 'drawImage' && c.on === 'screen');
+  for (const fn of [(st) => kit.C.embers.draw(st, { count: 30 }), (st) => kit.C.glow.sun(st, {})]) {
+    const full = run(1, fn), half = run(0.5, fn);
+    assert.ok(full.length > 1 && half.length === full.length);
+    half.forEach((c, i) => near(c.alpha, full[i].alpha * 0.5, 1e-6));
+  }
+});
+
+test('C.rgb reads hex (3, 4, 6, 8 digits), rgb()/rgba(), arrays and names; an unreadable colour warns and is not black', () => {
+  const { C } = loadKit();
+  assert.deepEqual(C.rgb('#f2ecde'), [242, 236, 222]);
+  assert.deepEqual(C.rgb('#FA0'), [255, 170, 0]);
+  assert.deepEqual(C.rgb('#fa08'), [255, 170, 0]);
+  assert.deepEqual(C.rgb('#b02e2280'), [176, 46, 34]);
+  assert.deepEqual(C.rgb('rgb(10, 20, 30)'), [10, 20, 30]);
+  assert.deepEqual(C.rgb('rgba(255,128,0,0.5)'), [255, 128, 0]);
+  assert.deepEqual(C.rgb('rgb(100% 50% 0%)'), [255, 128, 0]);
+  assert.deepEqual(C.rgb([300, -4, 12.4]), [255, 0, 12]);
+  assert.deepEqual(C.rgb('white'), [255, 255, 255]);
+  assert.deepEqual(C.warnings, []);
+  assert.deepEqual(C.rgb('moss green'), [255, 255, 255]);
+  assert.deepEqual(C.rgb('#12', [1, 2, 3]), [1, 2, 3]);
+  assert.equal(C.warnings.length, 2);
+  assert.match(C.warnings[0], /colour "moss green" is not a colour the kit can read/);
+  // a canvas that knows the colour (the browser) answers for names the kit does not list
+  const kit = loadKit();
+  const real = kit.env.window.document.createElement;
+  kit.env.window.document.createElement = (tag) => {
+    const c = real(tag), ctx = c.getContext('2d');
+    let v = '#000000';
+    Object.defineProperty(ctx, 'fillStyle', { get: () => v, set: (x) => { v = x === 'rebeccapurple' ? '#663399' : x.startsWith('#') ? x : v; } });
+    return c;
+  };
+  assert.deepEqual(kit.C.rgb('rebeccapurple'), [102, 51, 153]);
+});
+
+test('a zero or junk duration never puts NaN on the canvas (blink, breath period, ember life, mist height)', async () => {
+  const kit = loadKit({ sizeOf: () => [1000, 1000] });
+  const { C } = kit;
+  C.ANCHORS = { 'a.png': { eye_tl: [400, 400], eye_br: [500, 460], feet: [500, 1000] } };
+  await C.load({ seed: 7, plates: { L4: { src: 'p/a.png', place: { x: 960, y: 900, h: 600, pivot: 'feet' },
+    rig: { eyes: { eye: { blinks: [{ at: 1, dur: 0 }, { at: 'x' }, null] } }, breath: { period: 0, amp: 'big' } } } } });
+  const { g, S } = kit.screen();
+  for (const t of [0, 1, 1.02, 2]) {
+    const calls = kit.record(() => C.stage(g, S, C.camera(t), (st) => {
+      st.plate('L4');
+      C.embers.draw(st, { count: 10, life: 0 });
+      C.embers.draw(st, { count: 10, life: [0, 'x'] });
+      C.mist.band(st, { h: 0 });
+      C.mist.band(st, { speed: NaN });
+    }));
+    const text = JSON.stringify(calls.map((c) => ({ ...c, img: undefined })));
+    assert.ok(!/null|NaN|Infinity/.test(text), `t=${t}: ${text.slice(0, 300)}`);
+  }
+  assert.ok(C.eyelid.amount(1, { blinks: [{ at: 1, dur: 0 }] }) >= 0);
+  assert.ok(Number.isFinite(C.breath.scale(3, { period: 0 })));
+  assert.ok(C.report().some((l) => /mist band: h 0/.test(l)));
+});

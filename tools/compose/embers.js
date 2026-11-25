@@ -39,10 +39,13 @@
       if (!spr) { C.warn(`embers colour ${o.color} was not prebuilt (spec.embers.colors): default used`); spr = C.embers.sprites[C.embers.defaultColor]; }
       const gain = (o.alpha ?? 1) * (o.fade ? C.clamp(C.track(o.fade, t)) : 1);
       if (gain <= 0.001) return;
-      const count = o.count ?? 50, rise = o.rise || [50, 130], life = o.life || [2.2, 4.5], size = o.size || [2.5, 7];
+      const count = o.count ?? 50, rise = o.rise || [50, 130], size = o.size || [2.5, 7];
+      // a life of 0 (or below) would make every phase NaN: the shortest life drawn is 0.05 s
+      const life = Array.isArray(o.life) ? o.life.map((v) => Math.max(0.05, +v || 0)) : o.life != null ? Math.max(0.05, +o.life || 0) : [2.2, 4.5];
       const drift = o.drift ?? 26, wind = o.wind ?? 6;
       st.layer(o.depth ?? 1, (g) => {
         g.globalCompositeOperation = o.blend || 'lighter';
+        const inherited = g.globalAlpha;                 // a scene fading out (alpha set before COMPOSE.stage) fades them too
         for (let i = 0; i < count; i++) {
           const r = C.rng(seed, salt * 7919 + i);
           const L = C.pick(life, r), ph = r(), x0 = C.range(r, box[0], box[2]), y0 = C.range(r, box[1], box[3]);
@@ -54,7 +57,7 @@
           const a = gain * Math.pow(Math.sin(Math.PI * p), 0.8) * flick;
           if (a < 0.01) continue;
           const sz = s0 * (1 - 0.45 * p) * 4;
-          g.globalAlpha = C.clamp(a);
+          g.globalAlpha = inherited * C.clamp(a);
           g.drawImage(spr, x - sz / 2, y - sz / 2, sz, sz);
         }
       });

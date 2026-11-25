@@ -469,3 +469,54 @@ test('foliage: a value that is not a number, or a negative power, cannot break t
   }
   assert.equal(f.C.foliage.offset(1, NaN, crown.cfg), 0);
 });
+
+test('foliage: the `sway` key holds or overrides the trees of a shot and leaves a strip-warp tail alone', async () => {
+  const anchors = { 'tree.png': { ...TREE['tree.png'], tail_root: [1500, 200], tail_tip: [1900, 200] } };
+  const f = await forest({ warp: { tail: { amp: 20 } }, sway: { crown: {}, bush: {} } }, { anchors });
+  assert.deepEqual(f.C.report(), []);
+  const [tail, crown, bush] = f.C.plates.L2.warps;
+  const of = (calls, w) => draws(calls).filter((c) => c.img === w.crop.label);
+  // sway: false -> every tree still (one crop draw each at its cut), the tail still sways in strips
+  let calls = f.shot(2, { sway: false });
+  for (const w of [crown, bush]) assert.deepEqual(of(calls, w).map((c) => c.args), [[w.x0, w.y0]]);
+  assert.ok(of(calls, tail).length > 10);
+  assert.deepEqual(of(calls, tail).map((c) => c.args), of(f.shot(2), tail).map((c) => c.args));
+  // one tree held, one overridden (bounded as always)
+  calls = f.shot(2, { sway: { crown: false, bush: { amp: 0.03 } } });
+  assert.deepEqual(of(calls, crown).map((c) => c.args), [[crown.x0, crown.y0]]);
+  assert.notDeepEqual(strips(calls, bush), strips(f.shot(2), bush));
+  assert.ok(Math.max(...strips(calls, bush).map((k) => Math.abs(k.dx))) <= 0.03 * bush.cfg.height + 1e-9);
+  // the sway key wins over warp for the trees: warp: false + sway: {} -> the tail holds, the trees move
+  calls = f.shot(2, { warp: false, sway: {} });
+  assert.deepEqual(of(calls, tail).map((c) => c.args), [[tail.x0, tail.y0]]);
+  assert.ok(strips(calls, crown).length > 10);
+  // everything held through either key: the whole plate in one draw
+  assert.deepEqual(draws(f.shot(2, { warp: false, sway: false })).map((c) => c.img), [f.C.plates.L2.canvas.label]);
+  assert.deepEqual(draws(f.shot(2, { warp: { tail: false }, sway: { crown: false, bush: false } })).map((c) => c.img), [f.C.plates.L2.canvas.label]);
+});
+
+test('foliage: root as a point [x, y] in plate px works like a named point; a bad one is a warning', async () => {
+  const named = await forest({ sway: { crown: {} } }, { anchors: { 'tree.png': { ...TREE['tree.png'], crown_root: [500, 700] } } });
+  const given = await forest({ sway: { crown: { root: [500, 700] } } });
+  assert.deepEqual(given.C.report(), []);
+  for (const t of [0, 1.7, 9]) assert.deepEqual(strips(given.shot(t), given.C.plates.L2.warps[0]), strips(named.shot(t), named.C.plates.L2.warps[0]));
+  const bad = await forest({ sway: { crown: { root: [500, 'x'] } } });
+  assert.ok(bad.C.report().some((l) => /sway crown root \[500, x\] is not a point \[x, y\] in plate px: it stays still/.test(l)), JSON.stringify(bad.C.report()));
+  assert.equal(bad.C.plates.L2.warps, undefined);
+  // a sideways branch: root 'left' strips are vertical and move up and down
+  const side = await forest({ sway: { crown: { root: 'left' } } });
+  assert.equal(side.C.plates.L2.warps[0].axis, 'x');
+});
+
+test('foliage: the default salt hashes the plate id and the box: shifted boxes and anagram ids differ', () => {
+  const { C } = loadKit();
+  const s = C.foliage.saltOf;
+  // the old linear fold (x0*73 + y0*19 + w*7 + idSum*131) gave each of these pairs one salt
+  assert.notEqual(s('L2', 200, 100, 800, 900), s('L2', 201, 98, 796, 900));
+  assert.notEqual(s('L2a', 200, 100, 800, 900), s('La2', 200, 100, 800, 900));
+  for (const v of [s('L2', 0, 0, 8, 8), s('x'.repeat(200), 1e5, 1e5, 2e5, 2e5)]) assert.ok(Number.isInteger(v) && v >= 1 && v <= 9973);
+  assert.equal(s('L2', 200, 100, 800, 900), s('L2', 200, 100, 800, 900));
+  const seen = new Set();
+  for (let x = 0; x < 40; x++) for (let y = 0; y < 40; y++) seen.add(s('L3', 100 + x, 200 + y, 500, 600));
+  assert.ok(seen.size > 1400, `1600 neighbouring boxes, ${seen.size} salts`);
+});

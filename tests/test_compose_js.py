@@ -1,4 +1,4 @@
-"""The COMPOSE kit's own tests (tests/js/compose.test.cjs, atmosphere.test.cjs) run under `node --test`. Free: no browser, no API.
+"""The COMPOSE kit's own tests (tests/js/compose.test.cjs, atmosphere.test.cjs, preflight.test.cjs) run under `node --test`. Free: no browser, no API.
 
 Skipped when node is not installed, so `python3 -m unittest discover -s tests` stays the one test command.
 """
@@ -21,6 +21,10 @@ class TestComposeKitJs(unittest.TestCase):
     def test_atmosphere_suite(self):
         """smoke.js, fire.js, foliage.js: the code-only atmosphere of the `layers` method."""
         self.node("atmosphere.test.cjs")
+
+    def test_preflight_suite(self):
+        """COMPOSE.preflight: key lists, anchors needed by each rig, the dry run (the CLI: test_compose_preflight.py)."""
+        self.node("preflight.test.cjs")
 
 
 if __name__ == "__main__":

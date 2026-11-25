@@ -102,6 +102,8 @@ request đầu tiên; ảnh đã có trên đĩa được bỏ qua nên chạy l
 
 Chạy trên `make.py stills` (hai khung cách nhau 1–2 s của mỗi shot) và bản nháp:
 
+- [ ] `python3 $FILM_LAB/tools/compose/inline.py <film.html> --preflight` không còn `ERROR` (khoá gõ sai, thiếu điểm
+      neo, L1 lộ mép, hình người quá 25 %); đã xem các dòng `WARN` (số ngoài khoảng nên dùng).
 - [ ] `EPISODE.md` ghi `method: layers`; film.html không có lớp `seq` nào, không tham chiếu `clips/`.
 - [ ] **Không thân nào trượt**: giữa hai khung của cùng shot, điểm chân của mỗi nhân vật đứng yên so với L3 (chỉ lệch
       theo máy quay, cùng lượng với L3).

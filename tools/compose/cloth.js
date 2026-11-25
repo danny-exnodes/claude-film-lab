@@ -20,7 +20,9 @@
 // never tears from the body and no hard cut shows (where the plate is translucent the first `feather` px are a little
 // denser: body and cloth overlap there). The region is redrawn on a scratch canvas of its own size, then
 // drawn once into the plate: pixels outside the box are never touched (keep transparent space in the box for the
-// swing). Load cloth.js after stage.js, strip-warp.js and eyelid.js (their cut-outs are sampled first).
+// swing). stage.js drawPlate draws the cloth in the plate's own pass, after the strips and before the eyelids; with
+// alpha < 1, a filter or a blend the whole plate is put together first and drawn once (the joint is not composited
+// twice). Load cloth.js after strip-warp.js and eyelid.js (their cut-outs are sampled from the uncut plate first).
 (function (root) {
   'use strict';
   const C = root.COMPOSE = root.COMPOSE || {};
@@ -38,7 +40,6 @@
   }
 
   function prepare(p) {
-    install();
     if (p.seq || !p.rig || !p.rig.cloth) return;
     const list = Array.isArray(p.rig.cloth) ? p.rig.cloth : [p.rig.cloth];
     p.cloths = [];
@@ -162,27 +163,5 @@
     },
   };
 
-  // stage.js draws a plate and its built-in rigs; the cloth is drawn right after it, through the same transform.
-  function install() {
-    if (C.cloth.installed || !C.drawPlate) return;
-    C.cloth.installed = true;
-    const base = C.drawPlate;
-    C.drawPlate = (st, id, o = {}) => {
-      base(st, id, o);
-      const p = C.plates[id];
-      if (!C.cloth.active(p, o)) return;
-      const t = o.t ?? st.t;
-      st.layer(o.depth ?? p.depth, (g) => {
-        g.translate(p.place.ox + (o.dx || 0), p.place.oy + (o.dy || 0));
-        g.scale(p.place.s, p.place.s);
-        if (o.alpha != null) g.globalAlpha *= o.alpha;
-        if (o.blend) g.globalCompositeOperation = o.blend;
-        if (o.filter) g.filter = o.filter;
-        if (C.breath) C.breath.apply(g, p, t, o.breath);
-        C.cloth.draw(g, p, t, o.cloth, { ...(st.wind || {}), ...(o.wind || {}) });
-      }, p.cover ? p : null);
-    };
-  }
   C.onRig('cloth', prepare);
-  install();
 })(typeof window !== 'undefined' ? window : globalThis);

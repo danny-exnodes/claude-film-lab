@@ -36,7 +36,7 @@ async function loadPlates() {
 | `overscan` | nhân thêm kích thước (≥ 1) để máy quay có chỗ di chuyển |
 | `cover` | lớp phải luôn phủ kín khung (mặc định `true` khi không có `place`; lớp `seq` mặc định `false` vì clip đã tách nền không có mép để che và phải trùng khít lớp nó thay thế); lộ mép → tự zoom thêm liên tục + cảnh báo `compose: plate <id> shows its edge` |
 | `anchors` | khoá trong `anchors.json` (mặc định: tên file của `src`) |
-| `rig` | `warp`, `sway`, `eyes`, `breath` (§4); bỏ qua với lớp `seq` |
+| `rig` | `warp`, `sway`, `eyes`, `breath` (§4), `cloth`, `poses` (`layers-character.md`); bỏ qua với lớp `seq`. Khoá lạ (gõ sai) bị bộ mã bỏ qua không báo: `inline.py --preflight` báo `ERROR` (§9) |
 | `seq` | chuỗi PNG thay cho `src`: `pattern` (`{n}` = số khung), `digits` 6, `start` 1, `count`, `fps` 24, `at` (giây phim của khung đầu), `end`: `'hold'` \| `'loop'` \| `'hide'`. Trước `at`: `hold` hiện khung đầu, `loop` quay vòng, `hide` không vẽ gì; sau khung cuối: giữ khung cuối / quay vòng / ẩn. Mọi khung phải cùng kích thước với khung đầu (khác → `load` báo lỗi `plate <id>: frame <i> is WxH, frame 0 is WxH`). Không `place` = phủ sân khấu như khung đầu của `keyframe.py` |
 
 Mọi ảnh được `decode()` và chép sang canvas; mọi texture (sương, tàn lửa, quầng sáng, phần cắt của rig) dựng xong
@@ -72,10 +72,26 @@ COMPOSE.stage(g, S, cam, (st) => { st.plate('L1'); /* ... */ });
   màn hình, 1 đưa vào giữa (mặc định 0.35). `pan`: px sân khấu ở độ sâu 1.
 - Lớp ở độ sâu d thấy zoom `1 + (z − 1)·d` và độ lệch `pos·d`. Rung là dịch/xoay toàn khung, noise có seed.
 - `st.layer(depth, (g) => {...})` vẽ tuỳ ý trong toạ độ sân khấu qua máy quay; `st.screen((g) => {...})` vẽ không qua
-  máy quay; `st.plate(id, o)` vẽ một lớp kèm rig. `o`: `{ t, depth, alpha, blend, filter, dx, dy, breath, warp, eyes }`;
-  `t: Math.floor(t * 12) / 12` cho rig nhân vật bước đôi (12 fps) như recipe ink-wash §5.
+  máy quay; `st.plate(id, o)` vẽ một lớp kèm rig. `o`: `{ t, depth, alpha, blend, filter, dx, dy, breath, warp, sway,
+  eyes, cloth, wind, poses }`; `t: Math.floor(t * 12) / 12` cho rig nhân vật bước đôi (12 fps) như recipe ink-wash §5.
+- Một lớp và mọi rig của nó vẽ trong **một** lượt, theo thứ tự thân → dải `warp`/`sway` → `cloth` → mí mắt (mí luôn nằm
+  trên vải). Lớp có rig mà vẽ với `alpha` < 1, `filter` hay `blend` khác `source-over` thì được ghép trọn trên một canvas
+  phụ cỡ ảnh rồi vẽ một lần: chỗ nối thân–vải không bị chồng hai lần khi mờ dần, `blur` áp cho cả lớp.
+- Khung đang mờ (film đặt `g.globalAlpha` trước `COMPOSE.stage`, vd. chuyển cảnh): mọi lớp, `embers`, `glow` đều mờ theo.
 - `COMPOSE.anchor(id, name)` → điểm neo theo toạ độ sân khấu (trước máy quay).
 
+**Lia cuộn tranh** (handscroll, `styles/<id>/motion.md`: phải sang trái): máy quay lia ngang dài trên một L1 rộng.
+Ở độ sâu d, lia `pan` từ `[+X, 0]` tới `[-X, 0]` dịch L1 tổng cộng `2·X·d` px sân khấu, nên L1 phải rộng hơn khung ít
+nhất chừng đó (thêm phần cho `shake` và `zoom`; ảnh cao đúng 1080 px vẫn cần `overscan` ≥ 1.02 để có lề trên dưới). Hai cách:
+- L1 là ảnh rộng (vd. 2400x1080 hay 2560x1080: rộng hơn khung 16:9 25–33 % khi phủ theo chiều cao), `depth` 0.3–0.5 để
+  lia đủ xa: 2560 thừa 640 px, ở `depth` 0.4 cho `X` ≤ 640 / (2 · 0.4) = 800.
+- Hoặc `overscan` (1.25–1.33) trên ảnh 16:9: phóng cả ảnh nên mất nét hơn; chỉ khi lia ngắn.
+```js
+L1: { src: '../../plates/<tập>_s01_L1_cuon-nui_v01.png', depth: 0.4, overscan: 1.02 },  // ảnh 2560x1080: rộng hơn khung 33 %
+const cam = COMPOSE.camera(t, { from: 0, to: 9, ease: 'inOut', pan: [[700, 0], [-700, 0]] });   // phải sang trái
+```
+`inline.py --preflight` vẽ cả shot và in `overscan` cần có nếu mép L1 lộ (§9). Lớp gần (`L2`, `L3`) lia nhanh hơn L1:
+chúng cũng cần đủ rộng, hoặc `cover: false` và đặt bằng `place` trong vùng luôn thấy.
 ## 4. Rig của lớp
 
 | Rig | Khai trong `rig` | Theo shot (`st.plate(id, { ... })`) |
@@ -83,7 +99,8 @@ COMPOSE.stage(g, S, cam, (st) => { st.plate('L1'); /* ... */ });
 | strip-warp | `warp: { <tên>: { box, root, tip, amp: 16, waves: 0.8, speed: 0.45, power: 1.6, sway: 0.35, lag: 0.35, strip: 4, salt } }` | `warp: false` (đứng yên) hoặc `{ <tên>: {...} \| false }` |
 | eyelid | `eyes: { <tên>: { box, gap: 2, source: 'above' \| [dx, dy], grow: 1.08, close: 0.3, line, lineWidth: 0.07, blinks, keys } }` | `eyes: { <tên>: { blinks: [{ at, dur }], keys: [[t, lid]] } \| false }` |
 | breath | `breath: { amp: 0.008, period: 3.6, pivot: 'bottom', width: 0.25, salt }` | `breath: false` hoặc `{...}` ghi đè |
-| foliage | `sway: { <tên>: { box, root: 'bottom', amp: 0.015, period: 5.5, gust: 0.6, power: 1.6, lag: 0.5, strip: 4, salt } }` | như strip-warp: `warp: false`, `warp: { <tên>: false \| {...} }` |
+| foliage | `sway: { <tên>: { box, root: 'bottom', amp: 0.015, period: 5.5, gust: 0.6, power: 1.6, lag: 0.5, strip: 4, salt } }` | `sway: false` (mọi cây đứng yên) hoặc `{ <tên>: {...} \| false }`; không có khoá `sway` thì khoá `warp` áp cho cả cây |
+| cloth, poses | `cloth: [{ box, root, amp, ... }]`, `poses: { frames, fps, timeline, ... }` | `cloth: false \| { <tên>: ... }`, `wind`, `poses: false \| {...}` (`layers-character.md`) |
 
 - strip-warp: `root` là tên điểm hoặc `'left' | 'right' | 'top' | 'bottom'` (mặc định `<tên>_root`). Gốc→ngọn chủ yếu
   nằm ngang → dải dọc lệch lên xuống; chủ yếu thẳng đứng (tóc, vạt áo) → dải ngang lệch sang bên. `amp` tính bằng px
@@ -206,18 +223,20 @@ nền trong suốt quanh nó; tuỳ chọn điểm `<tên>_root` nếu đường
 | Trường | Mặc định | Khoảng nên dùng | Ý nghĩa |
 |---|---|---|---|
 | `box` | tên vùng | – | tên hộp neo hoặc `[x0, y0, x1, y1]` (px ảnh) |
-| `root` | điểm `<tên>_root` nếu có, không thì `'bottom'` | `'bottom'`, `'top'`, tên điểm | đường gốc (đứng yên): mép dưới hộp; `'top'` cho dây leo / cành rủ; tên điểm → đường ngang qua điểm đó, phần hộp bên kia đường gốc (thân cây) đứng yên |
+| `root` | điểm `<tên>_root` nếu có, không thì `'bottom'` | `'bottom'`, `'top'`, `'left'`, `'right'`, tên điểm, `[x, y]` | đường gốc (đứng yên): mép dưới hộp; `'top'` cho dây leo / cành rủ; `'left'` / `'right'` cho cành mọc ngang từ thân (lay lên xuống); tên điểm hoặc `[x, y]` (px ảnh) → đường ngang qua điểm đó, phần hộp bên kia đường gốc (thân cây) đứng yên |
 | `amp` | 0.015 | 0.005–0.04 | độ lệch ngang lớn nhất ở ngọn, tính bằng **phần chiều cao** từ đường gốc tới ngọn (1.5 %). Chặn ở `COMPOSE.foliage.MAX_AMP` = 0.04 (lớn hơn trông như cao su) + cảnh báo |
 | `period` | 5.5 | 2.5–9 | giây cho một nhịp đung đưa (cỏ nhanh, cây to chậm) |
 | `gust` | 0.6 | 0–1 | phần chuyển động lặng đi giữa hai đợt gió |
 | `power` | 1.6 | 1–2.5 | độ lệch tăng nhanh thế nào khi ra xa gốc |
 | `lag` | 0.5 | 0–1.2 | ngọn trễ sau gốc bao nhiêu giây |
 | `strip` | 4 | 2–8 | bề dày dải, px sân khấu |
-| `salt` | suy từ lớp + hộp | số nguyên | các cây cạnh nhau tự khác nhịp, không cần đặt |
+| `salt` | băm từ id lớp + hộp | số nguyên | các cây cạnh nhau (kể cả hộp chỉ lệch vài px, hay hai lớp có id hoán chữ) tự khác nhịp, không cần đặt |
 
 - Dùng chung bộ máy strip-warp (cắt vùng lúc nạp, vẽ theo dải, mối nối không lộ), chỉ khác luật độ lệch
-  (`COMPOSE.foliage.offset`); vì vậy điều khiển theo shot đi qua khoá `warp` của `st.plate`, và tên vùng `sway` không
-  được trùng tên vùng `warp` trên cùng lớp (trùng → vùng `sway` bị bỏ + cảnh báo).
+  (`COMPOSE.foliage.offset`). Theo shot: `st.plate('L2', { sway: false })` giữ yên mọi cây mà đuôi `warp` cùng lớp vẫn
+  động; `{ sway: { co: false } }` giữ một vùng; không có khoá `sway` thì khoá `warp` cũng áp cho cây (`warp: false` giữ
+  yên mọi vùng của lớp). Tên vùng `sway` không được trùng tên vùng `warp` trên cùng lớp (trùng → vùng `sway` bị bỏ +
+  cảnh báo).
 - Hộp thiếu trong `anchors.json`, hộp nhỏ hơn 8 px, đường gốc nằm sát đầu ngọn → cảnh báo
   `compose: plate <id>: sway <tên> ...` và vùng đó đứng yên (lớp vẫn vẽ bình thường).
 - `period`, `gust`, `power`, `lag`, `strip`, `salt` không phải số hữu hạn (hoặc `power` ≤ 0) → cảnh báo và dùng giá trị
@@ -301,14 +320,22 @@ lượt mép lệch ngẫu nhiên có seed tới `soft` px). `COMPOSE.ink.plan(p
 `COMPOSE.rng(seed, salt)` (dòng số 0–1), `hash(seed, n, salt)`, `noise(seed, x, salt)`, `fbm(seed, x, salt, oct)`,
 `noise2`, `fbm2`, `track(keys, t)`, `ease.{linear,in,out,inOut,sine}`, `smooth`, `clamp`, `lerp`, `fract`,
 `frameOf(plate, t)`, `get(id)`, `DEPTH`, `STAGE`, `seed`, `warnings`. Seed mặc định là `SEED` của film.html.
+`COMPOSE.rgb(màu, dựphòng)` → `[r, g, b]`: đọc `#rgb`, `#rgba`, `#rrggbb`, `#rrggbbaa`, `rgb()` / `rgba()` (số hoặc %),
+mảng, và tên màu CSS (qua canvas của trình duyệt); màu không đọc được → cảnh báo `colour ... is not a colour the kit can
+read` và dùng màu dự phòng (trắng), không bao giờ thành đen.
+
+Thời lượng 0 hay giá trị không phải số không làm hỏng khung: chớp mắt `dur: 0`, `breath.period: 0`, `embers.life: 0`
+được giữ ở mức tối thiểu; `mist.band` có `h` ≤ 0 → cảnh báo, không vẽ; `COMPOSE.pose.sequence` với `hold`/`step`/`at`/
+`repeat` không phải số → cảnh báo `pose.sequence: ... is not a number` và dùng giá trị mặc định.
 
 ## 7. Công cụ đi kèm
 
 | Lệnh | Việc |
 |---|---|
-| `python3 tools/compose/inline.py <film.html> [--init] [--anchors <file>] [--size WxH]` | chèn/cập nhật bộ mã, nối READY, 1920x1080, kiểm tất định; `--lint` chỉ kiểm bộ mã |
+| `python3 tools/compose/inline.py <film.html> [--init] [--anchors <file>] [--size WxH]` | chèn/cập nhật bộ mã, nối READY, 1920x1080, kiểm tất định; `--lint` chỉ kiểm bộ mã. Ghi qua file tạm + đổi tên, giữ kiểu xuống dòng (CRLF/LF); dòng Format của `STATE.md` lấy tỉ lệ từ `--size`; không thấy dòng cỡ mặc định của cinecode → `WARNING` |
+| `python3 tools/compose/inline.py <film.html> --preflight` | chạy thử mọi shot bằng node (§9), không ghi gì; thoát 1 khi có `ERROR` |
 | `python3 tools/compose/keyframe.py <L4.png> <out.png> --x --y --h --pivot [--anchors] --key "#00FF00"` | khung đầu 1920x1080 cho Seedance, nhân vật trên nền key đúng vị trí sân khấu |
-| `python3 tools/compose/demo_plates.py out/demo` | 4 lớp thử + `anchors.json` (Pillow, miễn phí) |
+| `python3 tools/compose/demo_plates.py out/demo` | 4 lớp thử + `anchors.json` (Pillow, miễn phí); `--help` không tạo gì |
 | `tools/compose/chrome-root.sh` | Chrome có `--no-sandbox` cho `CHROME_PATH` khi chạy bằng root |
 | `tools/compose/motions.json` | id chuyển động (style.yaml `motion:`, shots.csv `code_motion`) → lời gọi |
 
@@ -317,4 +344,26 @@ lượt mép lệch ngẫu nhiên có seed tới `soft` px). `COMPOSE.ink.plan(p
 - Tất định: `capture.mjs --verify` → `deterministic: yes`; 6 khung render theo thứ tự xuôi/ngược với 1 và 2 worker:
   trùng từng bit.
 - 1920x1080: ~10 khung/s (8 s phim = 20 s). `make.py draft` 8 s: ~20 s cả kiểm tra. `make.py stills` 4–6 khung: ~3 s.
-- Bộ mã inline ~140 KB (v1.2.0, 16 file); READY (giải mã 4 lớp 2K + dựng texture) ~1–2 s.
+- Bộ mã inline ~150 KB (v1.4.0, 16 file); READY (giải mã 4 lớp 2K + dựng texture) ~1–2 s.
+
+## 9. Preflight: `inline.py <film.html> --preflight` và `COMPOSE.preflight(film)`
+
+Chạy trước mỗi lần `make.py stills` / `draft` (miễn phí, chỉ cần node, không trình duyệt, không ghi file). Nó chạy bộ
+mã **đã chèn trong film.html** (kèm `anchors.json` đã nhúng) với canvas giả, đọc cỡ ảnh từ đầu mỗi file plate (PNG,
+JPEG; đường dẫn tính từ film.html), chạy phần FILM (các hàm phụ của template cinecode như `text()` thành hàm rỗng), rồi:
+1. `COMPOSE.preflight.plates(PLATES, { exists })`: khoá của `PLATES`, `place`, `seq`, `rig` và từng vùng rig; điểm/hộp neo
+   mà `place.pivot`, `warp`, `sway`, `eyes`, `breath.pivot`, `cloth`, `poses` cần; file plate và **mọi** khung `seq`.
+2. `loadPlates()` của film (lỗi ở đây = READY cũng lỗi).
+3. `COMPOSE.preflight.run({ scenes: SCENES, duration: DURATION, fps: 12 })`: vẽ mọi shot ở 12 khung mỗi giây phim, đọc
+   tham số mọi lời gọi (`COMPOSE.camera`, `st.plate`, `mist`, `embers`, `glow`, `smoke`, `fire`, `figure`) và mọi cảnh
+   báo của bộ mã.
+
+| Mức | Khi nào |
+|---|---|
+| `ERROR` (thoát 1) | khoá lạ trong `PLATES`; thiếu điểm/hộp neo; thiếu file plate hay khung `seq` (`2 of 5 frames missing (first …)`); lớp phủ kín lộ mép dưới chuyển động máy quay quá 1 % zoom thêm (in `overscan >= …` cần có); `figure` cao quá 270 px; shot ném lỗi (một dòng mỗi thông điệp, kèm giây); `loadPlates` lỗi; mọi cảnh báo `compose:` làm khung khác với mã (rig đứng yên, giá trị bị chặn, màu mặc định) |
+| `WARN` (thoát 0) | khoá lạ trong tham số một lời gọi (bộ mã bỏ qua); số ngoài cột "Khoảng nên dùng" của file này, `layers-character.md`, `layers-figure.md`; hình người cao quá 25 % khung **trên màn hình** vì máy quay đẩy vào; lộ mép ≤ 1 %; `anchors ... scaled`; film.html mang bộ mã cũ hơn repo (chạy lại `inline.py`) |
+
+Dòng cuối: `preflight: <N> error(s), <M> warning(s); <plates> plate(s), <shots> shot(s), <frames> frame(s) drawn at 12 fps`.
+Preflight chạy chính mã của film.html như một lần render. Phim `method: code` (TOON) chưa được kiểm ở đây.
+`COMPOSE.preflight(film)` (`tools/compose/preflight.js`, không chèn vào film.html) gộp bước 1 và 3 cho kit đã nạp;
+`COMPOSE.preflight.KEYS` / `.RANGES` là danh sách khoá và khoảng nó dùng.

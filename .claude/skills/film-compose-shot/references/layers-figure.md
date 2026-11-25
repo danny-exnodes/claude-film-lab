@@ -70,9 +70,12 @@ COMPOSE.figure.draw(st, { height: 110, salt: 2,
 ```
 
 - `path`: các điểm sân khấu kèm thời điểm. Vị trí trên đường đổi **mỗi khung**; dáng thân đổi theo bậc 12 fps.
-- **Chân không trượt**: bàn chân đã đặt xuống đứng yên tại điểm sân khấu của nó cho tới lúc nhấc lên. Độ dài bước suy
-  từ tốc độ của đường (nhịp tự nhiên 1,8 bước/giây, bước dài 10–38 % chiều cao). Mỗi đoạn giữa hai lần dừng là một số
-  nguyên bước: hình bắt đầu và dừng với hai chân chụm.
+- **Chân không trượt**: bàn chân đã đặt xuống đứng yên tại điểm sân khấu của nó cho tới lúc nhấc lên, kể cả khi
+  `timeline` quay người (`turn`) giữa lúc đi với `view` cố định: chân đang đặt giữ hướng của lúc nó chạm đất. Độ dài
+  bước suy từ tốc độ của đường (nhịp tự nhiên 1,8 bước/giây). Mỗi đoạn giữa hai lần dừng là một số nguyên bước, chọn
+  sao cho **mọi** bước nằm trong 10–38 % chiều cao (đoạn ngắn giữa hai lần dừng không thành một bước dài): hình bắt đầu
+  và dừng với hai chân chụm. Đoạn ngắn hơn một bước ngắn nhất (10 % chiều cao) thành một bước nhỏ, kèm cảnh báo
+  `a stretch of N px between two pauses is shorter than one step`.
 - Đường đòi nhanh hơn 2,6 bước/giây → cảnh báo `impossible stride`: cho đoạn đó thêm thời gian hoặc rút ngắn đường.
   Tốc độ đi vừa: khoảng 0,3–0,7 lần chiều cao hình mỗi giây (hình 110 px: 35–75 px/s).
 - Hai điểm liên tiếp cùng toạ độ = đứng lại (thở, áo vẫn bay). Hai điểm khác toạ độ cùng thời điểm = nhảy cóc → cảnh báo.
@@ -107,6 +110,8 @@ riêng, lệch thời điểm 0,3–1 s.
 - Không tự dịch `x`, `y` của hình theo thời gian trong shot (trượt): muốn hình đổi chỗ thì dùng `path`.
 - Một shot không nên có hình code **và** plate AI của cùng một nhân vật.
 - Trước G3, trên `make.py stills` (hai khung cách 1 s) và bản nháp:
+  - [ ] `inline.py <film.html> --preflight` không báo `ERROR` cho hình (`over the cap`) và không `WARN` hình quá 25 %
+        khung trên màn hình (máy quay đẩy vào làm hình to lên);
   - [ ] hình ≤ 25 % chiều cao khung, không có cảnh báo `over the cap` hay `impossible stride` trong `qc`;
   - [ ] bàn chân nằm trên mặt đứng của lớp nền, không lơ lửng; khi đi, bàn chân đang đặt không trôi theo thân;
   - [ ] hình đọc được là **người mặc áo dài** (đầu, vai, đai, gấu áo, chân), không phải một vệt mực hay một que;

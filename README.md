@@ -39,6 +39,8 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
 | `tools/layers/matte_seq.py` | Tách nền cả clip Seedance thành chuỗi khung, kèm số đo nhấp nháy |
 | `tools/tts/vieneu_tts.py` | Lồng tiếng Việt local trên CPU (VieNeu-TTS v3 Turbo, Apache-2.0); cài sẵn bởi `docs/setup-script.sh` (`requirements-tts.txt`), xem `tools/tts/README.md` |
+| `tools/refs_fetch.py` | Ảnh tham chiếu có giấy phép từ Wikimedia Commons (khâu 3a, `film-iconographer`): tìm, tải ≤ 1600 px, ghi giấy phép/tác giả vào `_credits.jsonl`, từ chối giấy phép không tự do |
+| `tools/assets.py` | Asset CC0 cho Blender `realistic` (Poly Haven, ambientCG): `search`, `plan` (dung lượng, hỏi trước), `fetch --yes` (tải tiếp, kiểm md5, sổ `ASSETS_MANIFEST.csv`) |
 | `tools/drive_sync.py` | Đồng bộ Drive không gọi mạng: chụp dấu sau khi kéo, lập lệnh connector cho file đã đổi, ghi file đã đẩy |
 | `tools/doctor.sh` | Kiểm tra môi trường (không tính phí) |
 | `docs/BACKLOG.md` | Lỗi đã biết chưa sửa và việc hoãn lại sau đợt kiểm toán 2026-11-10 |

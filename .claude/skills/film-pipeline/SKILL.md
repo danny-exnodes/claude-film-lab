@@ -133,7 +133,7 @@ Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở kh�
 | 1 | Nghiên cứu nguồn | đạo diễn (danh sách sinh vật, ảnh sách của chủ dự án – mục 2.2) → `film-researcher` | bảng `## Sinh vật của tập`, `research.md` | – |
 | 2 | Kịch bản, shot list | `film-writer` (skill `film-script`) | `script.md`, `shots.csv` | – |
 | 2b | Máy quay (DoP) | `film-dop` (mục 2.4) | `CAMERA-BIBLE.md`, cột `shot_size`/`camera`/`action` của `shots.csv`, `review/dop-pass.md` | **G1** duyệt kịch bản và máy quay |
-| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` (hình tượng) → đạo diễn (concept local) | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept mỗi sinh vật chính, `CHARACTER.md` `## Concept đã duyệt` | **người dùng chọn concept** (mục 2.2) |
+| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-iconographer` (hình tượng, bối cảnh) → đạo diễn (concept local) | `characters/<slug>/ICONOGRAPHY.md` + `DESIGN-OPTIONS.md`, `locations/<slug>/LOCATION-REFS.md`, 2–3 concept mỗi sinh vật chính, `CHARACTER.md` `## Concept đã duyệt` | **người dùng chọn concept** (mục 2.2) |
 | 3b | Style frame (tập `blender`/`code`) | `film-3d-artist` (blender) / đạo diễn (code) | 5–8 khung (mỗi chương một), contact sheet, bảng màu, `STYLE-FRAMES.md` | **người dùng duyệt, chọn khung chuẩn** (mục 2.3) |
 | 3 | Thiết kế nhân vật, bối cảnh, prompt | `film-art-director` (skill `film-prompt-layers`); tập `blender`: `film-3d-artist` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/*.txt`, dòng `prompts.csv` (chưa có ảnh) | – |
 | 4 | Ảnh khóa + 1 shot mẫu | `film-plate-maker` | ảnh khóa nhân vật, đủ lớp của 1 shot (2K hoặc `--fast`) | **G2** duyệt ảnh khóa và shot mẫu |
@@ -221,7 +221,12 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
   `blender.py lookbook` ở phiên local). `budget.yaml`: `images: 0`, `video_seconds: 0` (trừ khi chọn clip Seedance).
 - **Khâu 3a → 3b → 3:** cổng thiết kế sinh vật (mục 2.2), rồi style frame (mục 2.3), rồi `film-3d-artist` (miễn phí):
   model (preset, GLB có giấy phép hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp
-  `shots3d/s<NN>.json`, đối chiếu khung chuẩn. Nhiều sinh vật: chia đội theo mục 4 ("Đội dựng 3D song song").
+  `shots3d/s<NN>.json`, đối chiếu khung chuẩn. Nhiều sinh vật: chia đội theo mục 4 ("Đội dựng 3D song song"). Look
+  `realistic` cần asset CC0 (HDRI, texture PBR, model scan) trong `out/<project>/assets/` (`asset_root` của
+  `shot3d.json`): đạo diễn lập kế hoạch bằng
+  `python3 tools/assets.py plan <id> ... --asset-root out/<project>/assets` (id từ `assets.py search` hoặc mục 5 của
+  `LOCATION-REFS.md`), đưa người dùng danh sách và tổng dung lượng, chỉ chạy `assets.py fetch ... --yes` khi người dùng
+  đồng ý (ổ đĩa máy chủ lab ít chỗ); asset nào dùng ở shot nào ghi vào `ASSETS.md`.
 - **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm
   turntable, shot mẫu, không vượt trần.
 - **Khâu 5:** `film-3d-artist` render mọi shot không dùng lại (`renders3d/s<NN>/`). Không giao `film-plate-maker`.
@@ -249,24 +254,32 @@ Bảng chung của cả hai bước: `## Sinh vật của tập` trong `EPISODE.
    sách). Con nào sách không có: người dùng xác nhận → `Ảnh sách: không`.
 3. Ảnh nhận được: lưu `out/<project>/assets/refs/<slug>/book/` (không lên git, **không lên Drive**), ghi nguồn (sách,
    bản, trang) vào `out/<project>/assets/refs/<slug>/REFS.md`, đặt `Ảnh sách: có`.
-4. Chỉ khi không còn `chờ` (dòng `OWNER_REFS: ok`) mới giao `film-researcher` vòng nghiên cứu bổ sung. G1 và G2 kiểm lại.
+4. Chỉ khi không còn `chờ` (dòng `OWNER_REFS: ok`) mới giao vòng nghiên cứu bổ sung (`film-researcher` khâu 1,
+   `film-iconographer` khâu 3a). G1 và G2 kiểm lại.
 Ảnh sách có bản quyền: chỉ là **chuẩn tinh thần và chất lượng** ("ít nhất phải như này hoặc hơn"); không chép, không
 làm ảnh tham chiếu `--ref`/img2img, không đưa vào phim; thiết kế của lab là bản riêng.
 
 **Khâu 3a – cổng thiết kế sinh vật** (tập `blender`/`code` có sinh vật chính; trước mọi việc dựng model). Bài học SHK
 Q1·T3: dựng thẳng từ chữ kinh ("其狀如雞") + ảnh thú thật ra gà, công, trâu nước; mất ~3 giờ GPU.
-1. (a) Tư liệu của chủ dự án (khâu 1). (b) `film-researcher` viết `characters/<slug>/ICONOGRAPHY.md` mỗi sinh vật chính
-   theo `templates/project/ICONOGRAPHY.md`: văn bản cổ, hình tượng qua các thời (Hán, Đường, Minh, Thanh…), Việt Nam
-   (vd. phượng thời Lý), phân tích silhouette; nguồn bảo tàng CC0/phạm vi công cộng kèm giấy phép.
+1. (a) Tư liệu của chủ dự án (khâu 1). (b) Đạo diễn chép `templates/research/RESEARCH-BRIEF.md` vào
+   `<tập>/RESEARCH-BRIEF.md` (phân công: mức sâu cho sinh vật chính, mức vừa cho sinh vật phụ, bối cảnh), rồi giao
+   `film-iconographer` (song song được: mỗi agent một nhóm sinh vật hoặc nhóm bối cảnh, `FILM_AGENT` riêng). Đầu ra mỗi
+   sinh vật chính: `characters/<slug>/ICONOGRAPHY.md` (mẫu `templates/research/ICONOGRAPHY.md`: ≥ 3 nguồn văn bản, bảng
+   bộ phận × nguồn, 15–40 ảnh mỹ thuật có giấy phép, ưu tiên mỹ thuật Việt, phân tích tư liệu của chủ dự án không chép)
+   và `characters/<slug>/DESIGN-OPTIONS.md` (2–3 hướng: Prompt EN, lệnh Edit EN, giải phẫu cho 3D); mỗi bối cảnh
+   `locations/<slug>/LOCATION-REFS.md`. Ảnh tham chiếu tải bằng `python3 tools/refs_fetch.py fetch` vào
+   `out/<project>/assets/refs/` (giấy phép trong `_credits.jsonl`; không lên Drive). Agent xong: đẩy các file chữ.
 2. (c) Đạo diễn (phiên local trên máy chủ lab, miễn phí) tạo **2–3 concept** mỗi sinh vật chính bằng Qwen-Image local:
-   `python tools/comfy/comfy.py run qwen-t2i --prompt "<prompt từ ICONOGRAPHY.md>" --out out/<project>/characters/<slug>/concept/<slug>_concept-a_v01.png --ledger out/<project>/ep<NN>/ledger.csv`
+   `python tools/comfy/comfy.py run qwen-t2i --prompt "<Prompt (EN) từ DESIGN-OPTIONS.md>" --out out/<project>/characters/<slug>/concept/<slug>_concept-a_v01.png --ledger out/<project>/ep<NN>/ledger.csv`
+   Concept gần đúng mà sai một chi tiết (thừa sừng, thiếu chân): sửa bằng lệnh Edit (EN) của hướng đó thay vì tạo lại,
+   `python tools/comfy/comfy.py run qwen-edit --image <concept nền>.png --prompt "<Edit (EN)>" --out out/<project>/characters/<slug>/concept/<slug>_concept-a_v02.png --ledger out/<project>/ep<NN>/ledger.csv`.
    (`--dry-run` trước; một việc GPU một lúc, xem `python tools/gpu_run.py status`). Phiên cloud: dừng ở (b), báo người
-   dùng mở phiên local. Không dùng ảnh sách làm đầu vào.
+   dùng mở phiên local. Không dùng ảnh sách hay ảnh tham chiếu tải về làm đầu vào.
 3. (d) Gửi người dùng các concept (ảnh trong hội thoại), **người dùng chọn**. Ghi `Concept: duyệt <ngày> <file>` vào
    bảng và mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md` (file concept, ngày, lời người dùng nguyên
    văn, điểm nào theo nguồn, điểm nào diễn giải). Concept bị chê: làm lại (c), không dựng.
 4. Chỉ sau (d) mới giao `film-3d-artist` (blender) hoặc `film-art-director` (code: spec `creature.js`) dựng model; hợp
-   đồng ghi đường dẫn concept đã duyệt và `ICONOGRAPHY.md`. `status.py --gate G2` báo `[MISSING] approved concept for
+   đồng ghi đường dẫn concept đã duyệt, `ICONOGRAPHY.md` và `DESIGN-OPTIONS.md` (giải phẫu cho 3D). `status.py --gate G2` báo `[MISSING] approved concept for
    every main creature` khi còn sinh vật chính chưa duyệt; `check_episode.py` báo ERROR từ khâu 5.
 
 ### 2.3 Style frame (khâu 3b, tập `blender`/`code`): kinh thư hình ảnh trước khi dựng hàng loạt

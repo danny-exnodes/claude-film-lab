@@ -21,18 +21,23 @@ claude-film-lab/
 ├── styles/<style-id>/            # style pack dùng lại: STYLE.md, style.yaml, prompts/, motion.md, sound.md, examples.md
 ├── templates/episode/            # EPISODE.md, budget.yaml, shots.csv, prompts.csv mẫu
 ├── templates/project/            # PROJECT.md, SERIES.md, README_CauTruc.md, TienDo_SanXuat.csv mẫu (§11)
+├── templates/research/           # RESEARCH-BRIEF.md, ICONOGRAPHY.md, DESIGN-OPTIONS.md, LOCATION-REFS.md (khâu 3a)
 ├── formats/                      # CINECODE_FORMATS (định dạng cinecode đã lưu, xem §9)
-├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, drive_sync.py, episode_id.py, rename_episode.py, layers/, compose/,
+├── tools/                        # ark.py, doctor.sh, check_episode.py, bundle.py, drive_sync.py, episode_id.py, rename_episode.py,
+│                                 #   refs_fetch.py, assets.py, netfetch.py (tải có giấy phép), layers/, compose/,
 │                                 #   toon/, audio/, tts/, blender/ (render 3D local), comfy/ (clip AI local)
 ├── tests/                        # python3 -m unittest discover -s tests
 ├── lambda/ · docs/
 ├── projects/<project>/           # git bỏ qua – bản làm việc CHỈ CHỮ kéo từ Drive (§11):
 │   ├── PROJECT.md                #   manifest: slug, tên, style, ID thư mục Drive
 │   ├── SERIES.md · characters/<c>/CHARACTER.md · locations/<l>/LOCATION.md · style/
+│   │                             #   khâu 3a: characters/<c>/{ICONOGRAPHY,DESIGN-OPTIONS}.md, locations/<l>/LOCATION-REFS.md
 │   ├── <thư mục tập>/            #   ep<NN>-<slug> hoặc q<NN>-t<NN>-<slug> (§2): EPISODE.md, budget.yaml, script.md, ...
 │   └── sources/                  #   tài liệu gốc dạng chữ, kéo về khi cần
 └── out/<project>/                # git bỏ qua – media: <id>/{plates,clips,film,renders,bundles}/, <id>/ledger.csv,
-                                  #   ảnh khóa characters/<c>/, locations/<l>/, tài liệu gốc dạng ảnh sources/
+                                  #   ảnh khóa characters/<c>/, locations/<l>/, tài liệu gốc dạng ảnh sources/,
+                                  #   assets/: refs/<c>/ (ảnh sách, ảnh tham chiếu + _credits.jsonl), asset CC0
+                                  #   hdri/, textures/<id>/, models/<id>/ + ASSETS_MANIFEST.csv (tools/assets.py)
 ```
 `<project>` = slug dự án (ASCII kebab-case, vd. `son-hai-kinh`), cũng là giá trị `series:` trong `SERIES.md`/`EPISODE.md`.
 `<ProjectName>` = tên thư mục dự án trên Drive (PascalCase không dấu, vd. `SonHaiKinh`). Một dự án = một series phim.
@@ -216,6 +221,11 @@ mọi sinh vật/thần vào bảng `## Sinh vật của tập` (§5) và xin �
 lên git, không lên Drive). Sách không có con nào thì chủ dự án xác nhận "không". Ảnh sách có bản quyền: chỉ là chuẩn
 tinh thần và chất lượng, không chép, không đưa vào phim; thiết kế của lab là bản riêng. `status.py` in dòng `OWNER_REFS`;
 G1/G2 cần ảnh (hoặc "không") cho mọi sinh vật của bảng.
+Khâu 3a (`film-iconographer`, mẫu `templates/research/`): `characters/<slug>/ICONOGRAPHY.md` (văn bản ≥ 3 nguồn, bảng
+bộ phận × nguồn, bảng ảnh có giấy phép) và `DESIGN-OPTIONS.md` (2–3 hướng, Prompt EN, Edit EN, giải phẫu cho 3D) mỗi
+sinh vật chính; `locations/<slug>/LOCATION-REFS.md` mỗi bối cảnh. Ảnh tham chiếu (media, không lên git, không lên
+Drive): `out/<project>/assets/refs/<slug>/iconography/` và `out/<project>/assets/refs/locations/<slug>/`, tải bằng
+`tools/refs_fetch.py`, mỗi ảnh một dòng `_credits.jsonl` (giấy phép, tác giả, link).
 `locations/<slug>/LOCATION.md`: như CHARACTER.md cho bối cảnh. `style/`: ghi chú phong cách riêng của dự án và prompt
 mẫu đã duyệt (style pack dùng chung vẫn ở `styles/<id>/` trong repo).
 
@@ -226,6 +236,7 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `EPISODE.md` | đạo diễn | trạng thái tập (§5). **Không đặt tên `STATE.md`** – tên đó thuộc cinecode |
 | `budget.yaml` | đạo diễn | trần chi phí (§7). `tools/check_episode.py` kiểm: thiếu file là ERROR từ khâu 0; chỉ bốn khóa `images`, `video_seconds`, `models`, `ledger_required` (khóa lạ là ERROR: gõ sai tên trần = không có trần); `images` và `video_seconds` bắt buộc, là số ≥ 0 |
 | `research.md` | film-researcher | nguyên văn, link, cách đọc tên; tài liệu gốc dùng tới ghi theo tên file trong `01_TaiLieuGoc/` (§11.4) |
+| `RESEARCH-BRIEF.md` | đạo diễn | (khâu 3a) phân công và chuẩn nghiên cứu hình tượng cho `film-iconographer`; mẫu `templates/research/RESEARCH-BRIEF.md` |
 | `script.md` | film-writer | lời bình theo chương, mỗi câu có mốc `[mm:ss]`; hai mốc liền nhau cách nhau tối thiểu 3 s. Dòng không phải lời bình: tiêu đề `#`, dòng trống, trích dẫn `>`, chú thích `<!-- -->` (kể cả chú thích nằm trong dòng: bị bỏ, phần chữ còn lại vẫn là lời bình), khối code ` ``` `/`~~~`, khối YAML đầu file, đường kẻ `---`/`***`/`___`. Mọi dòng khác đều bị coi là lời bình: ghi chú, bảng, metadata phải đặt trong `>`. Lời bình không dùng dấu gạch ngang (`—`, `–`, `--`: ERROR; trong `>` là WARN), không để chữ Hán hay ký hiệu markdown (`\|`, `` ` ``, `](`, `<`, `>`: WARN, TTS không đọc được) |
 | `shots.csv` | film-writer | §6 |
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
@@ -237,7 +248,7 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
 | `shots3d/s<NN>.json` | film-3d-artist | (`method: blender`) một `shot3d.json` mỗi shot không dùng lại: model, máy quay, look; schema phiên bản 1 trong `tools/blender/README.md` (kiểm bằng `tools/blender/spec.py`), mẫu `templates/episode/shot3d.json`. Bắt buộc từ khâu 5; `seconds` và `camera.move` khớp `shots.csv` (lệch → WARN) |
-| `ASSETS.md` | film-3d-artist | (`method: blender`) nguồn và giấy phép mỗi model 3D (preset hoặc GLB); có thể nằm ở thư mục dự án cho cả series; mẫu `templates/episode/ASSETS.md`. Thiếu: WARN ở khâu 3, ERROR từ khâu 4 |
+| `ASSETS.md` | film-3d-artist | (`method: blender`) nguồn và giấy phép mỗi model 3D (preset hoặc GLB) và asset CC0 nào dùng ở shot nào (sổ chung của dự án: `out/<project>/assets/ASSETS_MANIFEST.csv`, `tools/assets.py`); có thể nằm ở thư mục dự án cho cả series; mẫu `templates/episode/ASSETS.md`. Thiếu: WARN ở khâu 3, ERROR từ khâu 4 |
 
 ## 5. `EPISODE.md`
 

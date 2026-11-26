@@ -101,7 +101,7 @@ Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.j
 - Gốc: `version` (= 1), `size` [w, h] (chẵn), `fps`, `seconds`, `seed`, `look`, `engine` (`eevee|cycles`), `world`,
   `assets`, `camera`, `passes` (`depth, normal, line, mask`), `depth_range` [gần, xa], tuỳ chọn `samples`, `title`, `note`,
   `asset_root` (thư mục asset CC0, tương đối với file spec: `hdri/`, `textures/<id>/`, `models/`; vd.
-  `out/<project>/assets/`), `materials` (look `realistic`: vai trò preset `mountain, rock, ground, water, trunk, foliage,
+  `out/<project>/assets/`; tải bằng `tools/assets.py`, sổ `ASSETS_MANIFEST.csv`), `materials` (look `realistic`: vai trò preset `mountain, rock, ground, water, trunk, foliage,
   prim` → id bộ texture trong `asset_root/textures/` hoặc thư mục, hoặc `{tex, scale, displace}`: `scale` mét mỗi ô lặp,
   mặc định 4; `displace` mét, Cycles).
 - `world`: `paper`, `ink` (màu `#rrggbb`, đè màu của look), `mist` (0–1), `mist_range` [bắt đầu, hết] mét, `sun`

@@ -3,11 +3,12 @@
 Tạo clip có tiếng bằng model **MiniMax H3** chạy trong **ComfyUI trên máy của chủ dự án** (Windows, RTX 5070 Ti 16 GB),
 **miễn phí**, ghi vào ledger của tập như một request Seedance nhưng **chi phí 0** (không trừ trần nào của
 `budget.yaml`). Chỉ dùng được trong **phiên Claude Code local** trên máy đó; phiên cloud không có GPU, không có ComfyUI.
+Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo ảnh concept").
 
 | File | Việc |
 |---|---|
 | `comfy.py` | CLI (chỉ thư viện chuẩn; Pillow để cắt khung hình): `ping`, `start`, `install`, `models`, `workflows`, `run`, `interrupt` |
-| `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model H3 (sha256 chưa ghim: `null`) |
+| `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model H3 và Qwen-Image (sha256 chưa ghim: `null`) |
 | `workflows/<id>.json` | graph ComfyUI dạng **API** (không subgraph, không node bị bypass), giá trị mặc định do lab đặt |
 | `workflows/<id>.meta.json` | bản đồ tham số (node → input), luật khung hình/kích thước, phần tuỳ chọn, ref và guide |
 
@@ -46,6 +47,7 @@ model chung của Desktop. `--offline` chặn các
 |---|---|---|---|
 | `h3-i2v` | `comfy:h3-i2v` | `--image` khung đầu, tuỳ chọn `--last` khung cuối (first-last frame); không `--image` = text-to-video | `minimax_h3_fl2va_pruned_int8_convrot` |
 | `h3-r2v` | `comfy:h3-r2v` | `--ref` 1–9 ảnh tham chiếu (`<Picture 1..n>` trong prompt), tuỳ chọn `--guide GIÂY=ẢNH` neo hình theo thời gian | `minimax_h3_ref2va_pruned_int8_convrot` |
+| `qwen-t2i` | `comfy:qwen-image` (kind `image`) | chỉ chữ: `--prompt`/`--prompt-file` (file chữ UTF-8), `--negative`, `--size WxH` | `qwen_image_2512_fp8_e4m3fn` (mục "Tạo ảnh concept") |
 
 Cả hai dùng chung text encoder `qwen3vl_32b_minimax_h3_nvfp4_awq` (`CLIPLoader` type `minimax`), VAE hình
 `minimax_h3_video_vae_int8_convrot`, VAE tiếng `minimax_h3_audio_vae_fp32`; đầu ra mp4 H.264 có tiếng
@@ -104,6 +106,39 @@ python tools/comfy/comfy.py interrupt --ledger out/<project>/ep01/ledger.csv    
 - `--keep-frames`: tách thêm khung PNG gốc vào `<clips>/<tên clip không đuôi>/raw/000001.png…` (cần ffmpeg) – đúng chỗ
   `check_episode.py` chấp nhận và `tools/layers/matte_seq.py` đọc khung gốc.
 - `--seed` mặc định ngẫu nhiên, luôn in ra và ghi lại; `--timeout` (mặc định 2400 s) quá thì job bị dừng.
+- **Hàng đợi GPU**: `run` (trừ `--dry-run`) giữ khoá GPU chung của lab (`tools/gpu_run.py`) từ ngay trước dòng ledger
+  `pending` tới khi job xong; Blender hay job khác đang giữ thì chờ (in người giữ). `FILM_GPU_WAIT=<giây>` từ chối
+  (mã 2, chưa gửi gì, không dòng ledger) khi chờ quá; `FILM_GPU_QUEUE=0` tắt hàng đợi.
+
+## Tạo ảnh concept (`qwen-t2i`)
+
+Qwen-Image 2512 (fp8) chạy local, miễn phí: ảnh concept (sinh vật, đạo cụ, bối cảnh) để người dùng chọn trước khi dựng
+3D. Model đã có trên máy chủ lab (bộ `qwen-image` trong `comfy.lock.json`): không tải gì.
+
+```bash
+python tools/comfy/comfy.py run qwen-t2i --prompt "..." --size 1664x928 --seed 7 \
+    --out out/<project>/<id>/concepts/<id>_phuong-hoang_v01.png --ledger out/<project>/<id>/ledger.csv --dry-run
+python tools/comfy/comfy.py run qwen-t2i --prompt-file concept.txt --turbo --seed 7 \
+    --out out/<project>/<id>/concepts/<id>_phuong-hoang_draft_v01.png --ledger out/<project>/<id>/ledger.csv
+```
+
+- Graph (node lõi của ComfyUI): `UNETLoader` → `ModelSamplingAuraFlow` (shift 3.1) → `KSampler` (euler/simple, 30 bước,
+  cfg 2.5); `CLIPLoader` `type: qwen_image` (`qwen_2.5_vl_7b_fp8_scaled`); `EmptySD3LatentImage`; `VAEDecode`
+  (`qwen_image_vae`); `SaveImage`. `--turbo` chèn `LoraLoaderModelOnly` (Wuli Turbo LoRA 2 bước, cfg 1): **chỉ nháp**.
+- `--size WxH` bội số 16, mỗi cạnh 256–2048 (mặc định 1664x928); ngoài các khung đã huấn luyện (1328x1328, 1664x928,
+  928x1664, 1472x1104, 1104x1472, 1584x1056, 1056x1584) thì cảnh báo. `--steps`, `--cfg`, `--negative` đè mặc định.
+- Từ chối (2): cờ của video (`--image`, `--last`, `--ref`, `--guide`, `--seconds`, `--res`, `--keep-frames`), `--out`
+  không phải `.png` hoặc đã có (tăng `_v<NN>`), size sai; các luật chung (allow list, server, model, ledger) như clip.
+  Ngược lại `--size`/`--cfg` với workflow H3 cũng bị từ chối.
+- Đầu ra: `<out>.png` + sidecar `<out>.png.json` (prompt, negative, seed, size, bước, cfg, turbo, model, graph, giây GPU).
+  Ledger: `kind image`, `model comfy:qwen-image`, `size WxH`, `count 1`, chi phí 0.
+- Tiến độ: comfy.py nghe websocket `/ws` của ComfyUI (thư viện chuẩn) và in `step <n>/<tổng>` mỗi bước sampler; không
+  mở được websocket thì báo tiến độ theo thời gian ước lượng. `--review BUILD`: build kiểu `image`, mỗi bước sampler
+  là một sự kiện tiến độ, ảnh xong là một `step` (không gửi prompt lên trang công khai).
+- Tốc độ (chủ lab đo, RTX 5070 Ti, model đã nạp): **~135 s cho 30 bước ở 1664x928**; `run` ước lượng theo
+  ~4 s mỗi bước × số điểm ảnh + ~15 s; `--turbo` ~25 s. Lần chạy đầu của phiên thêm thời gian nạp model (20 GB).
+- Graph chưa được xác nhận với `/object_info` của server thật (`"verified": false`); bản thử tạm của chủ lab chạy được
+  với cùng các node lõi.
 
 ### Mã thoát và ledger
 
@@ -130,7 +165,7 @@ chỉ liên lạc `FILM_COMFY_URL` (trừ `install --portable`), không qua prox
 
 ## Kiểm thử
 
-`tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread) và kiểm mọi đường từ chối, lưới
+`tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
 khung/kích thước, cắt ảnh, dry-run, đường thành công (file + sidecar + ledger, không tốn trần), lỗi thực thi, quá giờ →
 `interrupted`, `models --verify`, `install --dry-run`, `start`; `tests/test_comfy_ark.py` kiểm luật chi phí 0 và khoá
 ledger khi không có `fcntl` (Windows). Không cần GPU, chạy được trong WSL. Graph thật chỉ được xác nhận khi chạy với

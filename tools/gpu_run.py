@@ -44,6 +44,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 BUSY_EXIT = 75                  # EX_TEMPFAIL: the GPU stayed busy for --wait seconds, the command never ran
 POLL = 1.0                      # seconds between tries while the GPU is busy
+OWNER_GRACE = 0.5               # seconds to wait for a new holder's owner file before naming it "unknown"
 LABEL_MAX = 60
 LABEL_BAD = re.compile(r"[^A-Za-z0-9 _.:/-]+")
 HELD_ENV = "FILM_GPU_HELD"
@@ -232,6 +233,10 @@ def gpu_lock(label="gpu-job", wait=None, *, on_wait=None, quiet=False):
     try:
         while not _try_lock(f):
             owner = read_owner(lock)
+            waited = time.monotonic() - t0
+            if owner is None and waited < OWNER_GRACE and (wait is None or waited < wait):
+                time.sleep(0.05)            # the holder took the lock a moment ago: its owner file is on the way
+                continue
             key = (owner or {}).get("pid"), (owner or {}).get("label")
             if key != last:
                 last = key

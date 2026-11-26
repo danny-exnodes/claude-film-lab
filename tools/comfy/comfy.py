@@ -14,7 +14,10 @@
   python tools/comfy/comfy.py run <workflow> (--prompt TEXT | --prompt-file F.json|.yaml) --out <clips>/<name>_v<NN>.mp4
                      [--image START.png [--last END.png]] [--ref IMG ...] [--guide SECONDS=IMG ...] [--ref-size match|max]
                      [--seconds 5] [--res 480p|768p] [--seed N] [--steps N] [--turbo] [--timeout 2400] [--keep-frames]
-                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
+  python tools/comfy/comfy.py run qwen-t2i (--prompt TEXT | --prompt-file F.txt) --out <concepts>/<id>_v<NN>.png
+                     [--negative TEXT] [--size 1664x928] [--seed N] [--steps 30] [--cfg 2.5] [--turbo]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
 
 Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.json):
@@ -22,6 +25,11 @@ Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.jso
            no --image = text-to-video. 24 fps, canvas 768p 1344x768 (7:4, the training canvas) or 480p 864x480.
   h3-r2v   MiniMax H3 reference-to-video with audio: --ref IMG (1-9, <Picture 1..n> in the prompt) and optional
            --guide SECONDS=IMG time anchors (MiniMaxH3AddGuide).
+  qwen-t2i Qwen-Image 2512 text-to-image (one PNG; concept art to choose before 3D): --size WxH (multiple of 16,
+           default 1664x928; trained sizes 1328x1328, 1664x928, 928x1664, 1472x1104, 1104x1472, 1584x1056, 1056x1584),
+           30 steps, cfg 2.5, euler/simple, shift 3.1, --negative allowed; --turbo = Wuli Turbo LoRA, 2 steps, cfg 1,
+           drafts only. Ledger kind image, model comfy:qwen-image. --review: the sampler steps as progress and the
+           image as a step of an "image" build.
 H3 rules: length = 17k+5 frames at 24 fps (`--seconds` is snapped up); the start frame is center-cropped to the canvas
 aspect and resized with Lanczos to exactly the canvas in a temp file before upload (the node would stretch it; the source file is
 never touched); CFG-distilled: no negative prompt (--negative is refused); 20 steps; --turbo (Lightning LoRA, few
@@ -38,8 +46,16 @@ FILM_AGENT set).
 Ledger (tools/ark.py's writer and lock): a `pending` row before POST /prompt and a final row after it, kind video,
 model comfy:<workflow>, size WxH, seconds, task_id = the prompt id, usage gpu_s=<n>, note req=<hex>; seed=<n>, status
 ok | failed | interrupted. Local rows cost 0 against every cap of budget.yaml (ark.cost_units), so no --budget here.
-Output: <out> (mp4 with audio, written atomically) + <out>.json sidecar (workflow, sha256 of the filled graph, seed,
-prompt, sizes, frames, model files, ComfyUI/torch versions, GPU seconds).
+Output: <out> (mp4 with audio, or the png of an image workflow, written atomically) + <out>.json sidecar (workflow,
+sha256 of the filled graph, seed, prompt, sizes, frames, model files, ComfyUI/torch versions, GPU seconds).
+GPU queue: `run` (not --dry-run) holds the lab's GPU lock (tools/gpu_run.py) from just before the ledger row to the
+end of the job, waiting while a Blender render or another job holds it; FILM_GPU_WAIT=S refuses after S seconds
+(exit 2, nothing sent), FILM_GPU_QUEUE=0 turns the queue off. Once the lock is taken the output checks run again
+(another run with the same --out may have finished during the wait: exit 2, nothing sent, no ledger row), and the
+download never replaces a file that appeared meanwhile. Before the lock is released: POST /free (unload_models,
+free_memory) so the next holder (a Blender render) gets the 16 GB VRAM (--keep-models skips it, for a batch of
+consecutive comfy runs); when polling lost the server, up to LOST_WAIT (10 min) waiting for our prompt to leave
+ComfyUI's queue (else the ledger note says it may still run).
 
 Env: FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_HOME (Windows default
 %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI: Desktop layout ComfyUI\\.venv\\Scripts\\python.exe + ComfyUI\\main.py;
@@ -50,12 +66,13 @@ FILM_AGENT, FILM_REVIEW_BUILD (= --review BUILD: publish the job's start, progre
 to the review server, tools/review/; offline-safe, never changes the run). No key is needed or read; nothing but
 FILM_COMFY_URL (and the local review ingest port when --review is on) is contacted (except `install --portable`).
 """
-import argparse, glob, hashlib, http.client, io, json, os, re, secrets, shutil, signal, struct, subprocess, sys
-import tempfile, time, urllib.error, urllib.parse, urllib.request, uuid
+import argparse, base64, contextlib, glob, hashlib, http.client, io, json, os, queue, re, secrets, shutil, signal
+import socket, struct, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request, uuid
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import ark  # noqa: E402  (tools/ark.py: the one ledger writer, lock and request ids)
+import gpu_run  # noqa: E402  (tools/gpu_run.py: the lab-wide GPU lock)
 
 LOCK_FILE = os.path.join(HERE, "comfy.lock.json")
 REVIEW_CLIENT = os.path.join(os.path.dirname(HERE), "review", "client.py")
@@ -67,6 +84,9 @@ POLL_SECONDS = 2          # /history polling interval (no websocket dependency)
 PROGRESS_SECONDS = 30     # a progress line at least this often
 POLL_ERRORS = 5           # consecutive failed polls before the job is given up (the server died)
 HTTP_TIMEOUT = 30
+LOST_WAIT = 600           # polling lost the server: seconds to wait for our prompt to leave the queue (GPU lock held)
+LOST_POLL = 5             # seconds between /queue tries during that wait
+FREE_WAIT = 10            # seconds to wait for VRAM to come back after POST /free
 UPLOAD_TIMEOUT = 120
 START_POLL = 2
 # GPU seconds per sampling step for a 124-frame (5.2 s) clip on the owner's RTX 5070 Ti, plus a fixed setup/decode
@@ -74,15 +94,19 @@ START_POLL = 2
 # 480p (~10 s/step) comes from the owner's own Desktop logs. Step time is scaled linearly by the frame count.
 SECONDS_PER_STEP = {"768p": 34.0, "480p": 10.0}
 SETUP_SECONDS = 35.0
-# Every node class a graph sent by `run` may contain: exactly the classes of workflows/h3-*.json plus the nodes `run`
-# adds itself (LoadImage per reference, MiniMaxH3AddGuide per --guide). ComfyUI's paid API/partner nodes (e.g. the
-# Minimax*Node classes of comfy_api_nodes) are not in it, so they can never be queued from here.
+# Every node class a graph sent by `run` may contain: exactly the classes of workflows/*.json plus the nodes `run`
+# adds itself (LoadImage per reference, MiniMaxH3AddGuide per --guide). All are ComfyUI core nodes; ComfyUI's paid
+# API/partner nodes (e.g. the Minimax*Node classes of comfy_api_nodes) are not in it, so they can never be queued.
 ALLOWED_NODES = frozenset({
     "UNETLoader", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader", "LoadImage",
     "MiniMaxH3ImageToVideo", "MiniMaxH3ReferenceToVideo", "MiniMaxH3AddGuide",
     "RandomNoise", "KSamplerSelect", "BasicScheduler", "BasicGuider", "SamplerCustomAdvanced",
     "VAEDecode", "VAEDecodeAudio", "CreateVideo", "SaveVideo",
+    # qwen-t2i (Qwen-Image text-to-image)
+    "ModelSamplingAuraFlow", "CLIPTextEncode", "EmptySD3LatentImage", "KSampler", "SaveImage",
 })
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"       # RFC 6455
+GPU_HOLD = contextlib.ExitStack()                     # the GPU lock of the running `run` (released by main())
 MODEL_INPUTS = {"UNETLoader": "unet_name", "LoraLoaderModelOnly": "lora_name", "CLIPLoader": "clip_name",
                 "VAELoader": "vae_name"}
 MODEL_FOLDER_ALIASES = {"diffusion_models": ("diffusion_models", "unet"), "text_encoders": ("text_encoders", "clip")}
@@ -96,9 +120,10 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # localh
 
 
 class ComfyError(Exception):
-    def __init__(self, msg, status=None, body=None):
+    def __init__(self, msg, status=None, body=None, refused=False):
         super().__init__(msg)
         self.status, self.body = status, body
+        self.refused = refused          # connection refused: nothing listens on the port (the server is down)
 
 
 def refuse(msg):
@@ -208,7 +233,9 @@ def call(method, path, body=None, *, raw=None, ctype=None, timeout=HTTP_TIMEOUT,
         text = e.read().decode("utf-8", "replace")
         raise ComfyError(f"HTTP {e.code}: {text[:600]}", status=e.code, body=text) from None
     except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
-        raise ComfyError(f"network error: {type(e).__name__}: {getattr(e, 'reason', None) or e}") from None
+        why = getattr(e, "reason", None) or e
+        raise ComfyError(f"network error: {type(e).__name__}: {why}",
+                         refused=isinstance(why, ConnectionRefusedError)) from None
     if want == "bytes":
         return payload
     try:
@@ -341,7 +368,7 @@ def dangling(graph):
 def build_graph(template, meta, v):
     """The API graph for one request: template + values `v` (dict), optional parts removed, refs and guides added."""
     g = json.loads(json.dumps(template))
-    for name in ("prompt", "width", "height", "frames", "seed", "steps", "fps", "prefix", "ref_size"):
+    for name in ("prompt", "negative", "width", "height", "frames", "seed", "steps", "cfg", "fps", "prefix", "ref_size"):
         if name in v and name in meta["params"]:
             set_param(g, meta, name, v[name])
     for name in meta.get("images", {}):
@@ -538,6 +565,8 @@ def parse_guide(text):
 
 def check_inputs(a, meta, wid):
     """Every local refusal of `run` that needs no server; returns the plan dict."""
+    if a.size or a.cfg is not None:
+        refuse(f"{wid}: --size/--cfg are for the image workflows (a clip's canvas is --res 480p|768p)")
     if a.negative is not None and meta.get("negative") is False:
         refuse(f"{wid}: --negative is refused: the model is CFG-distilled (BasicGuider, cfg 1) and ignores a "
                "negative prompt; describe what you want in the prompt instead")
@@ -739,14 +768,14 @@ def gpu_seconds(entry, wall):
         return round(wall, 1)
 
 
-def find_output(entry, node):
+def find_output(entry, node, ext=".mp4"):
     outs = entry.get("outputs") or {}
     order = [node] + [k for k in outs if k != node]
     for nid in order:
         for v in (outs.get(nid) or {}).values():
             if isinstance(v, list):
                 for item in v:
-                    if isinstance(item, dict) and str(item.get("filename", "")).lower().endswith(".mp4"):
+                    if isinstance(item, dict) and str(item.get("filename", "")).lower().endswith(ext):
                         return item
     return None
 
@@ -757,14 +786,105 @@ def download_view(item, out):
     data = call("GET", "/view?" + q, want="bytes", timeout=300)
     if not data:
         raise ComfyError("empty file from /view")
-    part = out + ".part"
+    part = f"{out}.{os.getpid()}.part"
     with open(part, "wb") as f:
         f.write(data)
-    os.replace(part, out)
+    try:
+        place_new(part, out)
+    except FileExistsError:
+        with contextlib.suppress(OSError):
+            os.remove(part)
+        raise ComfyError(f"{out} appeared while this job ran (another run with the same --out?): not replaced")
 
 
-def review_hook(a):
-    """A tools/review JobHook for --review BUILD / $FILM_REVIEW_BUILD (not on --dry-run), else None. Never raises."""
+def place_new(src, dst):
+    """Move src to dst, never replacing a file at dst (FileExistsError): a hard link refuses an existing dst on every
+    OS; a filesystem without hard links falls back to a check + rename. An empty dst counts as free (as
+    ark.guard_output)."""
+    with contextlib.suppress(OSError):
+        if os.path.isfile(dst) and os.path.getsize(dst) == 0:
+            os.remove(dst)
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise
+    except OSError:
+        if os.path.exists(dst):
+            raise FileExistsError(dst) from None
+        os.rename(src, dst)
+        return
+    os.remove(src)
+
+
+def outputs_taken(a, frames_dir=None):
+    """The outputs of `run` that exist now: the file (size > 0), its sidecar, a non-empty --keep-frames folder."""
+    taken = [p for p in (a.out, a.out + ".json") if os.path.isfile(p) and (p != a.out or os.path.getsize(p) > 0)]
+    if frames_dir and os.path.isdir(frames_dir) and os.listdir(frames_dir):
+        taken.append(frames_dir)
+    return taken
+
+
+def recheck_outputs(a, frames_dir=None):
+    """The output checks again, once the GPU lock is held: another run with the same --out may have finished while
+    this one waited (hours). Exit 2, nothing sent, no ledger row."""
+    taken = outputs_taken(a, frames_dir)
+    if taken:
+        refuse(f"{', '.join(taken)} appeared while this run waited for the GPU (another run with the same --out; "
+               "versions only go up: use the next _v<NN>); nothing sent, no ledger row")
+
+
+def wait_gone(pid, limit=None):
+    """Polling lost the server: before the GPU lock is released, wait (at most LOST_WAIT s) until our prompt has left
+    ComfyUI's queue, so the next holder does not share the GPU with it. -> a note for the ledger and stderr."""
+    limit = LOST_WAIT if limit is None else limit
+    print(f"comfy: waiting up to {limit / 60:g} min for prompt {pid} to leave ComfyUI's queue before the GPU is "
+          "released", file=sys.stderr, flush=True)
+    t0 = time.monotonic()
+    while True:
+        try:
+            q = call("GET", "/queue", timeout=10)
+            ids = {x[1] for k in ("queue_running", "queue_pending") for x in q.get(k) or []
+                   if isinstance(x, (list, tuple)) and len(x) > 1}
+            if pid not in ids:
+                return "the prompt is no longer queued or running"
+        except ComfyError as e:
+            if e.refused:
+                return "the server is down (connection refused): the prompt no longer runs"
+        if time.monotonic() - t0 >= limit:
+            return (f"the prompt MAY STILL RUN on the GPU (no answer that it left the queue in {limit:g} s): "
+                    f"python tools/comfy/comfy.py interrupt --prompt-id {pid}")
+        time.sleep(LOST_POLL)
+
+
+def vram_free():
+    try:
+        return int(((call("GET", "/system_stats", timeout=5).get("devices") or [{}])[0]).get("vram_free"))
+    except (ComfyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def free_models():
+    """POST /free {unload_models, free_memory} while the GPU lock is still held (a GPU_HOLD callback), so the next
+    holder (a Blender render) is not left 16 GB of VRAM minus ComfyUI's cached models. Waits up to FREE_WAIT s for
+    the VRAM to come back (ComfyUI unloads in its worker thread). Best effort: never raises (--keep-models skips it)."""
+    try:
+        before = vram_free()
+        call("POST", "/free", {"unload_models": True, "free_memory": True}, timeout=10)
+        t0 = time.monotonic()
+        while before is not None and time.monotonic() - t0 < FREE_WAIT:
+            now = vram_free()
+            if now is None or now > before:
+                break
+            time.sleep(0.5)
+        print("comfy: models unloaded (POST /free) before the GPU lock is released", flush=True)
+    except Exception as e:          # noqa: BLE001  (best effort, inside the lock's cleanup)
+        warn(f"could not ask ComfyUI to unload its models ({e}); its VRAM may stay in use until its next job "
+             "(python tools/comfy/comfy.py ping shows VRAM free)")
+
+
+def review_hook(a, kind="clip"):
+    """A tools/review JobHook for --review BUILD / $FILM_REVIEW_BUILD (not on --dry-run), else None. Never raises.
+    kind: the review build kind ("clip" for the video workflows, "image" for an image workflow)."""
     bid = (getattr(a, "review", None) or os.environ.get("FILM_REVIEW_BUILD") or "").strip()
     if not bid or getattr(a, "dry_run", False):
         return None
@@ -773,7 +893,9 @@ def review_hook(a):
         sp = importlib.util.spec_from_file_location("film_review_client", REVIEW_CLIENT)
         mod = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(mod)
-        return mod.job_hook(bid, "comfy", "clip")
+        tags = dict(getattr(mod, "path_tags", lambda *_: {})(getattr(a, "out", None), getattr(a, "ledger", None)),
+                    engine="comfy-qwen" if kind == "image" else "comfy-h3")
+        return mod.job_hook(bid, "comfy", kind, tags=tags, label=getattr(a, "workflow", None))
     except Exception as e:
         warn(f"review publishing off ({type(e).__name__}: {e})")
         return None
@@ -787,9 +909,157 @@ def write_json_atomic(path, obj):
     os.replace(tmp, path)
 
 
+def hold_gpu(wid):
+    """Take the lab's GPU lock (tools/gpu_run.py) until main() returns: waits while a Blender render or another job
+    holds it. Refusal (exit 2, nothing sent, no ledger row) when it stays busy for FILM_GPU_WAIT seconds."""
+    agent = (os.environ.get("FILM_AGENT") or "").strip()
+    label = f"{agent + ': ' if agent else ''}comfy run {wid}"
+    try:
+        GPU_HOLD.enter_context(gpu_run.gpu_lock(label, gpu_run.default_wait()))
+    except gpu_run.GpuBusy as e:
+        refuse(f"{e} (FILM_GPU_WAIT); nothing sent")
+
+
+class StepListener(threading.Thread):
+    """ComfyUI's websocket (/ws?clientId=...) read in a thread with the standard library: the sampler's `progress`
+    messages of our prompt land in .steps as (value, max). Optional: when the socket cannot be opened, .ok is False
+    and the caller falls back to the time estimate. Text frames only (binary preview frames are skipped)."""
+
+    def __init__(self, client_id, node=None):
+        super().__init__(daemon=True)
+        self.client_id, self.node, self.prompt_id = client_id, node, None
+        self.steps = queue.Queue()
+        self.last = None                    # the newest (value, max) seen
+        self.sock, self.buf, self.ok, self._stop = None, b"", False, False
+
+    def connect(self, timeout=5.0):
+        u = urllib.parse.urlparse(base_url())
+        if u.scheme != "http" or not u.hostname:
+            return False
+        try:
+            s = socket.create_connection((u.hostname, u.port or 80), timeout=timeout)
+        except OSError:
+            return False
+        try:
+            key = base64.b64encode(os.urandom(16)).decode()
+            s.sendall((f"GET /ws?clientId={urllib.parse.quote(self.client_id)} HTTP/1.1\r\n"
+                       f"Host: {u.hostname}:{u.port or 80}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                       f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+            head = b""
+            while b"\r\n\r\n" not in head:
+                chunk = s.recv(4096)
+                if not chunk:
+                    raise OSError("closed during the handshake")
+                head += chunk
+                if len(head) > 65536:
+                    raise OSError("handshake too long")
+            head, _, rest = head.partition(b"\r\n\r\n")
+            want = base64.b64encode(hashlib.sha1((key + WS_GUID).encode()).digest())
+            if b" 101" not in head.split(b"\r\n")[0] or want not in head:
+                raise OSError("not a websocket upgrade")
+            s.settimeout(0.5)
+            self.sock, self.buf, self.ok = s, rest, True
+            return True
+        except OSError:
+            s.close()
+            return False
+
+    def _recv(self, n):
+        while len(self.buf) < n:
+            try:
+                chunk = self.sock.recv(65536)
+            except socket.timeout:
+                if self._stop:
+                    raise EOFError
+                continue
+            if not chunk:
+                raise EOFError
+            self.buf += chunk
+        out, self.buf = self.buf[:n], self.buf[n:]
+        return out
+
+    def _send(self, op, payload=b""):
+        mask = os.urandom(4)
+        head = bytes([0x80 | op, 0x80 | len(payload)])          # control frames: payload < 126 bytes
+        self.sock.sendall(head + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(payload)))
+
+    def run(self):
+        text, msg = False, b""
+        try:
+            while not self._stop:
+                b0, b1 = self._recv(2)
+                op, n = b0 & 0x0F, b1 & 0x7F
+                if n == 126:
+                    n = struct.unpack(">H", self._recv(2))[0]
+                elif n == 127:
+                    n = struct.unpack(">Q", self._recv(8))[0]
+                mask = self._recv(4) if b1 & 0x80 else None
+                data = self._recv(n)
+                if mask:
+                    data = bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+                if op == 0x8:
+                    break
+                if op == 0x9:
+                    self._send(0xA, data[:125])
+                    continue
+                if op in (0x1, 0x2):
+                    text, msg = op == 0x1, b""
+                if text and op in (0x0, 0x1):
+                    msg += data
+                    if b0 & 0x80:
+                        self._message(msg)
+                        msg = b""
+        except (EOFError, OSError, ValueError, AttributeError, struct.error):
+            pass
+        finally:
+            self.close()
+
+    def _message(self, raw):
+        try:
+            m = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return
+        if not isinstance(m, dict) or m.get("type") != "progress":
+            return
+        d = m.get("data") or {}
+        if self.prompt_id and d.get("prompt_id") not in (None, self.prompt_id):
+            return
+        if self.node is not None and d.get("node") not in (None, self.node):
+            return
+        try:
+            step = (int(d["value"]), int(d["max"]))
+        except (KeyError, TypeError, ValueError):
+            return
+        self.last = step
+        self.steps.put(step)
+
+    def drain(self):
+        out = []
+        while True:
+            try:
+                out.append(self.steps.get_nowait())
+            except queue.Empty:
+                return out
+
+    def wait_last(self, timeout=1.0):
+        """Wait (a little) until the sampler's last step was read: the socket may trail the /history poll."""
+        t0 = time.monotonic()
+        while self.is_alive() and time.monotonic() - t0 < timeout and not (self.last and self.last[0] >= self.last[1]):
+            time.sleep(0.02)
+
+    def close(self):
+        self._stop = True
+        s, self.sock = self.sock, None
+        if s:
+            with contextlib.suppress(OSError):
+                s.close()
+
+
 def run(a):
     wid = a.workflow
     template, meta, wf_sha = load_workflow(wid)
+    if meta.get("kind") == "image":
+        return run_image(a, wid, template, meta, wf_sha)
     plan = check_inputs(a, meta, wid)
     ledger_args(a)
     has_image = bool(a.image)
@@ -845,6 +1115,8 @@ def run(a):
         refuse(f"/object_info failed ({e}); nothing sent")
     if problems:
         refuse("the server cannot run this graph, nothing sent:\n  " + "\n  ".join(problems))
+    hold_gpu(wid)
+    recheck_outputs(a, plan["frames_dir"] if a.keep_frames else None)
     rid = ark.new_req()
     tmpdir = tempfile.mkdtemp(prefix="film-comfy-")
     try:
@@ -885,13 +1157,12 @@ def run(a):
            "out": a.out, "task_id": pid}
     seed_note = f"seed={plan['seed']}"
     ark.make_out_dir(a.out)
+    hook = None
     ark.reserve(a, req, rid, tag=seed_note)
     t0 = time.monotonic()
     state = {"logged": False}
-    hook = review_hook(a)
-    if hook:
-        hook.key = f"comfy-{pid}"          # the review monitor links ComfyUI's running prompt to this build by it
-        hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
+    if not a.keep_models:
+        GPU_HOLD.callback(free_models)      # runs before the lock is released (ExitStack: last in, first out)
 
     def final(status, note="", usage="", cat=None):
         """The ledger row (full detail). The review server is public: it gets a fixed category only (`cat`), never
@@ -902,7 +1173,11 @@ def run(a):
             if hook and status != "ok":
                 hook.failed(f"{status}: {cat}" if cat else status)
 
-    try:
+    try:                                    # everything after the pending row: an interrupt writes the final row
+        hook = review_hook(a)
+        if hook:
+            hook.key = f"comfy-{pid}"      # the review monitor links ComfyUI's running prompt to this build by it
+            hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
         try:
             r = call("POST", "/prompt", {"prompt": graph, "client_id": "film-lab-" + rid[:12], "prompt_id": pid})
         except ComfyError as e:
@@ -927,9 +1202,9 @@ def run(a):
             except ComfyError as e:
                 errors += 1
                 if errors > POLL_ERRORS:
-                    final("failed", f"polling stopped: {e}", f"gpu_s={round(el, 1)}", cat="server lost")
-                    print(f"lost the server while polling ({e}); prompt {pid} may still run: "
-                          f"python tools/comfy/comfy.py interrupt --prompt-id {pid}", file=sys.stderr)
+                    gone = wait_gone(pid)           # the GPU lock stays held while the prompt may still run
+                    final("failed", f"polling stopped: {e}; {gone}", f"gpu_s={round(el, 1)}", cat="server lost")
+                    print(f"lost the server while polling ({e}); {gone}", file=sys.stderr)
                     return FAILED
                 hist = {}
             entry = hist.get(pid)
@@ -1018,6 +1293,276 @@ def run(a):
             else:
                 final("failed", ark.err_note(e), cat=f"error ({type(e).__name__})")
         raise
+
+
+# --- run: image workflows (qwen-t2i) ----------------------------------------------------------------------------------
+def parse_size(text, meta, wid):
+    m = re.fullmatch(r"\s*(\d+)\s*[xX]\s*(\d+)\s*", str(text))
+    if not m:
+        refuse(f"--size {text!r}: use WxH, e.g. --size 1664x928")
+    w, h = int(m.group(1)), int(m.group(2))
+    mult, lo, hi = meta["size_multiple"], meta["size"]["min"], meta["size"]["max"]
+    if w % mult or h % mult:
+        refuse(f"--size {w}x{h}: {wid} needs multiples of {mult} "
+               f"(e.g. {max(mult, round(w / mult) * mult)}x{max(mult, round(h / mult) * mult)})")
+    if not (lo <= w <= hi and lo <= h <= hi):
+        refuse(f"--size {w}x{h}: each side must be {lo}..{hi}")
+    trained = meta["size"].get("trained") or []
+    if trained and [w, h] not in trained:
+        warn(f"{w}x{h} is not one of {wid}'s trained sizes ({', '.join(f'{x}x{y}' for x, y in trained)})")
+    return w, h
+
+
+def read_text_prompt(a):
+    """--prompt TEXT, or the whole of --prompt-file (UTF-8 text) for an image workflow."""
+    text = a.prompt
+    if a.prompt_file:
+        try:
+            with open(a.prompt_file, encoding="utf-8") as f:
+                text = f.read()
+        except (OSError, UnicodeDecodeError) as e:
+            refuse(f"--prompt-file {a.prompt_file}: cannot read it ({type(e).__name__})")
+    text = (text or "").strip()
+    if not text:
+        refuse("the prompt is empty")
+    return text
+
+
+def check_image_inputs(a, meta, wid):
+    """Every local refusal of `run` for an image workflow; returns the plan dict."""
+    video = [flag for flag, v in (("--image", a.image), ("--last", a.last), ("--ref", a.ref), ("--guide", a.guide),
+                                  ("--ref-size", a.ref_size), ("--seconds", a.seconds), ("--res", a.res),
+                                  ("--keep-frames", a.keep_frames)) if v]
+    if video:
+        refuse(f"{wid} makes one image from text: {', '.join(video)} belong to the video workflows "
+               "(the image size is --size WxH)")
+    if (a.prompt is None) == (a.prompt_file is None):
+        refuse("give exactly one of --prompt TEXT or --prompt-file F.txt")
+    ext = meta["output"].get("ext", ".png")
+    if not a.out.lower().endswith(ext):
+        refuse(f"--out {a.out}: {wid} saves {ext[1:].upper()}: name it <concepts>/<id>_v<NN>{ext}")
+    ark.guard_output(a.out)
+    if os.path.exists(a.out + ".json"):
+        refuse(f"sidecar exists: {a.out}.json (versions only go up)")
+    w, h = parse_size(a.size or "%dx%d" % tuple(meta["size"]["default"]), meta, wid)
+    turbo = meta.get("turbo") if a.turbo else None
+    if a.turbo and not turbo:
+        refuse(f"{wid} has no turbo LoRA")
+    steps = a.steps if a.steps is not None else (turbo["steps"] if turbo else meta["defaults"]["steps"])
+    if steps < 1:
+        refuse("--steps must be >= 1")
+    cfg = a.cfg if a.cfg is not None else (turbo["cfg"] if turbo else meta["defaults"]["cfg"])
+    if not 0 < cfg <= 30:
+        refuse("--cfg must be > 0 and <= 30")
+    if turbo:
+        warn(f"--turbo: {turbo['note']} ({steps} steps, cfg {cfg:g})")
+    seed = a.seed if a.seed is not None else secrets.randbelow(2**32)
+    if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
+        refuse("--seed must be 0..2^64-1")
+    negative = a.negative if a.negative is not None else meta["defaults"].get("negative", "")
+    e = meta.get("estimate") or {}
+    est = steps * e.get("seconds_per_step", 4.0) * (w * h) / e.get("pixels", w * h) + e.get("setup_seconds", 15.0)
+    return {"width": w, "height": h, "steps": steps, "cfg": float(cfg), "seed": seed, "turbo": bool(turbo),
+            "negative": negative, "estimate": est}
+
+
+def run_image(a, wid, template, meta, wf_sha):
+    """`run` for an image workflow: one PNG, a ledger row kind image (cost 0), progress per sampler step."""
+    plan = check_image_inputs(a, meta, wid)
+    ledger_args(a)
+    prompt = read_text_prompt(a)
+    lock = load_lock()
+    w, h, est = plan["width"], plan["height"], plan["estimate"]
+    values = {"prompt": prompt, "negative": plan["negative"], "width": w, "height": h, "seed": plan["seed"],
+              "steps": plan["steps"], "cfg": plan["cfg"], "prefix": f"film-lab/{wid}", "turbo": plan["turbo"]}
+    graph = build_graph(template, meta, values)
+    bad = disallowed(graph) or dangling(graph)
+    if bad:
+        refuse(f"{wid}: filled graph is not runnable: {', '.join(bad)}")
+    models = model_entries(graph, lock)
+    model = meta.get("ledger_model") or MODEL_PREFIX + wid
+    print(f"workflow {wid} ({model}) · {len(graph)} nodes · {w}x{h} · steps {plan['steps']} · cfg {plan['cfg']:g}"
+          f"{' (turbo LoRA)' if plan['turbo'] else ''} · seed {plan['seed']}")
+    print("models: " + ", ".join(f for *_, f in models))
+    print(f"estimate ~{est:.0f} s of GPU (estimate; a session's first run also loads the models)")
+    mdir = models_dir(layout(comfy_home()))
+    if a.dry_run:
+        if mdir and os.path.isdir(mdir):
+            for _, _, _, entry, f in models:
+                if not find_model(mdir, entry["folder"] if entry else "", f):
+                    warn(f"model file not found under {mdir}: {f}")
+        print("prompt:\n  " + prompt.replace("\n", "\n  "))
+        if plan["negative"]:
+            print("negative:\n  " + plan["negative"].replace("\n", "\n  "))
+        print("dry-run: nothing uploaded or queued, no ledger row")
+        return 0
+    stats = system_stats()
+    if stats is None:
+        refuse(f"ComfyUI is not reachable at {base_url()}: start it with `python tools/comfy/comfy.py start` "
+               "(nothing sent)")
+    if not offline_flag(stats):
+        warn("this ComfyUI was not started with --offline: paid partner nodes are loaded (run never queues them: "
+             "allow list)")
+    try:
+        problems = server_problems(graph, models)
+    except ComfyError as e:
+        refuse(f"/object_info failed ({e}); nothing sent")
+    if problems:
+        refuse("the server cannot run this graph, nothing sent:\n  " + "\n  ".join(problems))
+    hold_gpu(wid)
+    recheck_outputs(a)
+    rid = ark.new_req()
+    gsha = graph_sha(graph)
+    pid = str(uuid.uuid4())
+    client_id = "film-lab-" + rid[:12]
+    req = {"kind": "image", "model": model, "size": f"{w}x{h}", "count": 1, "out": a.out, "task_id": pid}
+    seed_note = f"seed={plan['seed']}"
+    ark.make_out_dir(a.out)
+    hook = None
+    steps = StepListener(client_id, meta.get("progress_node"))
+    steps.prompt_id = pid
+    ark.reserve(a, req, rid, tag=seed_note)
+    t0 = time.monotonic()
+    state = {"logged": False}
+    if not a.keep_models:
+        GPU_HOLD.callback(free_models)      # runs before the lock is released (ExitStack: last in, first out)
+
+    def final(status, note="", usage="", cat=None):
+        """Ledger row in full; the public review page gets a fixed category only (as run())."""
+        if not state["logged"]:
+            ark.log_row(a, req, rid, status, "; ".join(x for x in (seed_note, note) if x), usage=usage)
+            state["logged"] = True
+            if hook and status != "ok":
+                hook.failed(f"{status}: {cat}" if cat else status)
+
+    def publish_steps(el):
+        for v, m in steps.drain():
+            print(f"step {v}/{m} elapsed {int(el)}s", flush=True)
+            if hook and m:
+                hook.update(min(0.99, v / m), f"step {v}/{m} · {int(el)} s", force=True, step=v, steps=m,
+                            eta=round(el / v * (m - v), 1) if v else None)
+
+    try:                                    # everything after the pending row: an interrupt writes the final row
+        hook = review_hook(a, "image")
+        if hook:
+            hook.key = f"comfy-{pid}"      # the review monitor links ComfyUI's running prompt to this build by it
+            hook.start(f"{wid} · {w}x{h} · {plan['steps']} steps · ~{est:.0f} s GPU (estimate)")
+        if steps.connect():
+            steps.start()
+        try:
+            call("POST", "/prompt", {"prompt": graph, "client_id": client_id, "prompt_id": pid})
+        except ComfyError as e:
+            detail = e.body or str(e)
+            try:
+                j = json.loads(e.body or "")
+                errs = [f"{n}: " + "; ".join(x.get("message", "") + " " + str(x.get("details", ""))
+                                             for x in v.get("errors", [])) for n, v in (j.get("node_errors") or {}).items()]
+                detail = (j.get("error") or {}).get("message", "") + (" | " + " | ".join(errs) if errs else "")
+            except ValueError:
+                pass
+            final("failed", "prompt refused by ComfyUI: " + " ".join(detail.split())[:300], cat="prompt refused")
+            print(f"ComfyUI refused the prompt: {detail}", file=sys.stderr)
+            return FAILED
+        print(f"queued prompt {pid} (req {rid[:12]})" + ("" if steps.ok else " · no websocket: progress by time"),
+              flush=True)
+        entry, last_state, last_print, errors = None, None, 0.0, 0
+        while True:
+            el = time.monotonic() - t0
+            try:
+                hist = call("GET", f"/history/{pid}")
+                errors = 0
+            except ComfyError as e:
+                errors += 1
+                if errors > POLL_ERRORS:
+                    gone = wait_gone(pid)           # the GPU lock stays held while the prompt may still run
+                    final("failed", f"polling stopped: {e}; {gone}", f"gpu_s={round(el, 1)}", cat="server lost")
+                    print(f"lost the server while polling ({e}); {gone}", file=sys.stderr)
+                    return FAILED
+                hist = {}
+            entry = hist.get(pid)
+            st = (entry or {}).get("status") or {}
+            if entry and (st.get("completed") or st.get("status_str") in ("success", "error")):
+                break
+            if el > a.timeout:
+                note = stop_prompt(pid)
+                final("interrupted", f"timeout after {a.timeout:g}s ({note})", f"gpu_s={round(el, 1)}", cat="timeout")
+                print(f"timeout after {a.timeout:g}s: prompt {pid} stopped ({note})", file=sys.stderr)
+                return FAILED
+            publish_steps(el)
+            if not steps.ok or steps.last is None:
+                s = queue_state(pid)
+                if hook and not steps.last:
+                    hook.update(min(0.99, el / est) if est else 0.0, f"{s} · {int(el)} s / ~{int(est)} s")
+                if s != last_state or el - last_print >= PROGRESS_SECONDS:
+                    print(f"step {s} elapsed {int(el)}s", flush=True)
+                    last_state, last_print = s, el
+            time.sleep(POLL_SECONDS)
+        wall = time.monotonic() - t0
+        steps.wait_last()
+        publish_steps(wall)
+        gpu = gpu_seconds(entry, wall)
+        usage = f"gpu_s={gpu:g}"
+        msgs = exec_messages(entry)
+        if st.get("status_str") != "success" or "execution_error" in msgs or "execution_interrupted" in msgs:
+            if "execution_interrupted" in msgs:
+                final("interrupted", "interrupted on the server", usage, cat="interrupted on the server")
+                print(f"prompt {pid} was interrupted", file=sys.stderr)
+                return FAILED
+            err = msgs.get("execution_error") or {}
+            why = f"{err.get('node_type', '?')} (node {err.get('node_id', '?')}): {err.get('exception_message', st)}"
+            final("failed", "execution error: " + " ".join(str(why).split())[:300], usage, cat="execution error")
+            print(f"ComfyUI execution error: {why}", file=sys.stderr)
+            return FAILED
+        ext = meta["output"].get("ext", ".png")
+        item = find_output(entry, meta["output"]["node"], ext)
+        if not item:
+            final("failed", f"no {ext} in the prompt's history outputs", usage, cat="no output")
+            print(f"the prompt finished but its history lists no {ext} output", file=sys.stderr)
+            return FAILED
+        try:
+            download_view(item, a.out)
+        except (ComfyError, OSError) as e:
+            final("failed", f"download failed: {e}; the image is in ComfyUI's output folder: "
+                            f"{item.get('subfolder', '')}/{item['filename']}", usage, cat="download failed")
+            print(f"DOWNLOAD FAILED ({e}); the image is in ComfyUI's output folder as "
+                  f"{item.get('subfolder', '')}/{item['filename']}", file=sys.stderr)
+            return FAILED
+        sidecar = {
+            "tool": "tools/comfy/comfy.py", "workflow": wid, "model": model, "workflow_file_sha256": wf_sha,
+            "graph_sha256": gsha, "prompt_id": pid, "req": rid, "seed": plan["seed"], "prompt": prompt,
+            "negative": plan["negative"], "width": w, "height": h, "steps": plan["steps"], "cfg": plan["cfg"],
+            "turbo": plan["turbo"], "size": list(image_size(a.out) or (w, h)),
+            "models": [{"file": f, "folder": e["folder"] if e else None, "size": e.get("size") if e else None,
+                        "sha256": e.get("sha256") if e else None} for _, _, _, e, f in models],
+            "comfyui": {"version": stats.get("system", {}).get("comfyui_version"),
+                        "pytorch": stats.get("system", {}).get("pytorch_version"),
+                        "python": (stats.get("system", {}).get("python_version") or "").split(" ")[0],
+                        "device": ((stats.get("devices") or [{}])[0]).get("name"), "offline": offline_flag(stats),
+                        "url": base_url()},
+            "gpu_seconds": gpu, "wall_seconds": round(wall, 1), "output": item, "created": ark.utc_now(),
+            "graph": graph,
+        }
+        write_json_atomic(a.out + ".json", sidecar)
+        final("ok", "", usage)
+        if hook:
+            # The gallery of the review build (#64): the prompt is shown there on purpose (the owner picks concepts
+            # by it); the client scrubs paths out of it. Nothing else of the run leaves the ledger/sidecar.
+            hook.image(a.out, os.path.splitext(os.path.basename(a.out))[0], prompt=prompt, seed=plan["seed"],
+                       model=model + (" turbo" if plan["turbo"] else ""), sampler_steps=plan["steps"], seconds=gpu,
+                       width=w, height=h)
+            hook.finish([], gpu_s=gpu, message=f"{gpu:g} GPU s")
+        print(f"saved {a.out} ({w}x{h}, {gpu:g} GPU s) + {os.path.basename(a.out)}.json")
+        return 0
+    except BaseException as e:
+        if not state["logged"]:
+            if isinstance(e, ark.Interrupted):
+                final("interrupted", f"{e} ({stop_prompt(pid)})", f"gpu_s={round(time.monotonic() - t0, 1)}",
+                      cat="stopped")
+            else:
+                final("failed", ark.err_note(e), cat=f"error ({type(e).__name__})")
+        raise
+    finally:
+        steps.close()
 
 
 # --- other commands ---------------------------------------------------------------------------------------------------
@@ -1288,7 +1833,19 @@ def workflows_cmd(a):
         print(f"{wid}  {meta.get('title', '')}")
         files = [f for *_, f in model_entries(graph, lock)]
         gb = sum((by_file.get(f) or {}).get("size") or 0 for f in files) / 1e9
-        print(f"  model {MODEL_PREFIX}{wid} · set {meta.get('model_set')} · files: {', '.join(files)} ({gb:.1f} GB)")
+        print(f"  model {meta.get('ledger_model') or MODEL_PREFIX + wid} · set {meta.get('model_set')} · "
+              f"files: {', '.join(files)} ({gb:.1f} GB)")
+        if meta.get("kind") == "image":
+            sz, d, e = meta["size"], meta["defaults"], meta.get("estimate") or {}
+            print(f"  inputs: --prompt | --prompt-file (text) · --negative · --size WxH (default "
+                  f"{sz['default'][0]}x{sz['default'][1]}) · --steps (default {d['steps']}; --turbo "
+                  f"{meta['turbo']['steps']}) · --cfg (default {d['cfg']:g}; --turbo {meta['turbo']['cfg']:g}) · --seed")
+            print(f"  constraints: one {meta['output'].get('ext', '.png')} · sides multiple of {meta['size_multiple']}, "
+                  f"{sz['min']}..{sz['max']} · trained sizes " + ", ".join(f"{x}x{y}" for x, y in sz["trained"])
+                  + (f" · {e['note']}" if e.get("note") else ""))
+            print(f"  graph: {len(graph)} nodes · verified against a live /object_info: "
+                  f"{'yes' if meta.get('verified') else 'no (unverified)'}")
+            continue
         flags = [f"{v['flag']}" + (" (needs --image)" if v.get("needs") else "") for v in meta.get("images", {}).values()]
         if meta.get("refs"):
             flags.append(f"--ref IMG x{meta['refs']['min']}..{meta['refs']['max']} (<Picture n>) · --ref-size match|max")
@@ -1390,20 +1947,26 @@ r.add_argument("--ref-size", choices=["match", "max"], default=None, help="h3-r2
 r.add_argument("--guide", action="append", default=None, metavar="SECONDS=IMG",
                help="h3-r2v: anchor IMG at that time of the clip (repeat)")
 r.add_argument("--prompt", default=None)
-r.add_argument("--prompt-file", default=None, help="JSON/YAML with the workflow's prompt fields")
-r.add_argument("--negative", default=None, help="refused for H3 (CFG-distilled)")
+r.add_argument("--prompt-file", default=None,
+               help="video: JSON/YAML with the workflow's prompt fields; image: a UTF-8 text file")
+r.add_argument("--negative", default=None, help="qwen-t2i: negative prompt; refused for H3 (CFG-distilled)")
 r.add_argument("--seconds", type=positive_float, default=None, help="clip length, snapped up to 17k+5 frames (default 5)")
 r.add_argument("--res", default=None, help="480p (864x480 draft) | 768p (1344x768, default)")
 r.add_argument("--seed", type=int, default=None, help="default: random (printed and logged)")
-r.add_argument("--steps", type=int, default=None, help="default 20 (--turbo: the LoRA's steps)")
-r.add_argument("--turbo", action="store_true", help="Lightning LoRA, few steps: drafts only")
-r.add_argument("--out", required=True, help="<clips>/<name>_v<NN>.mp4 (must not exist)")
+r.add_argument("--steps", type=int, default=None, help="default: the workflow's (H3 20, qwen-t2i 30; --turbo: the LoRA's)")
+r.add_argument("--size", default=None, metavar="WxH", help="image workflows: image size (qwen-t2i default 1664x928)")
+r.add_argument("--cfg", type=float, default=None, help="image workflows: CFG scale (qwen-t2i 2.5; --turbo 1)")
+r.add_argument("--turbo", action="store_true", help="the workflow's speed LoRA (few steps): drafts only")
+r.add_argument("--out", required=True, help="<clips>/<name>_v<NN>.mp4 | <concepts>/<id>_v<NN>.png (must not exist)")
 r.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
 r.add_argument("--no-ledger", action="store_true", help="ad-hoc test without a ledger (main session only)")
 r.add_argument("--dry-run", action="store_true", help="validate and print the filled graph summary; send nothing")
 r.add_argument("--timeout", type=positive_float, default=2400, help="seconds before the job is interrupted (2400)")
 r.add_argument("--review", default=None, metavar="BUILD",
-               help="publish progress + the clip to the review server (env FILM_REVIEW_BUILD; tools/review/)")
+               help="publish progress + the clip/image to the review server (env FILM_REVIEW_BUILD; tools/review/)")
+r.add_argument("--keep-models", action="store_true",
+               help="leave the models in VRAM after the job (default: POST /free before the GPU lock is released; "
+                    "for a batch of consecutive comfy runs)")
 r.add_argument("--keep-frames", action="store_true", help="also extract the raw PNG frames to <clips>/<clip stem>/raw/000001.png (ffmpeg; the folder tools/layers/matte_seq.py keys from)")
 t = sp.add_parser("interrupt", help="stop our own job: --prompt-id, or every open comfy job of --ledger")
 t.add_argument("--prompt-id", default=None)
@@ -1430,6 +1993,7 @@ def main(argv=None):
             print(f"{e}: stopped (see the ledger for the request's final row)", file=sys.stderr)
             raise
         finally:
+            GPU_HOLD.close()                # the GPU lock run() took (if any)
             for sig, h in prev.items():
                 signal.signal(sig, h)
     else:

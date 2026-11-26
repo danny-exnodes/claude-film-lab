@@ -28,8 +28,7 @@ DOC_SKIP = ("docs/BACKLOG.md",)
 PREFIXES = (".claude", "tools", "docs", "lambda", "tests", "templates", "styles", "formats")
 
 # "<kind>:<item>" -> reason. Kinds: path, subcommand (<tool> <name>), option (<tool> <--flag>).
-ALLOW = {
-}
+ALLOW = {}
 
 KNOWN_AGENT_TOOLS = {"Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebSearch", "WebFetch",
                      "NotebookEdit", "TodoWrite", "Agent", "Task", "Skill"}

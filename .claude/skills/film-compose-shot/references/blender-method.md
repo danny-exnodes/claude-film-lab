@@ -24,7 +24,11 @@ python tools/blender/blender.py lookbook --out <dir>                  # một kh
 - `--preview` = 960×540, 12 hình/s, ít sample: dùng cho shot mẫu G2 và thử bố cục.
 - Blender tìm theo `FILM_BLENDER`, rồi PATH, rồi thư mục cài mặc định. Chạy Blender: `-b --factory-startup`, mã thoát
   khác 0 khi script lỗi.
-- Một việc GPU một lúc: không render Blender cùng lúc với một clip ComfyUI (16 GB VRAM).
+- Một việc GPU một lúc: không render Blender cùng lúc với một clip ComfyUI (16 GB VRAM). `render|still|turntable|keyframes`
+  tự giữ khoá GPU của lab (chờ khi agent khác đang giữ; `FILM_GPU_QUEUE=0` tắt); lệnh GPU khác (script Blender tự viết,
+  `blender -b … --python`): `python tools/gpu_run.py --label <agent> -- <lệnh>`; xem ai giữ: `python tools/gpu_run.py status`.
+- Blender chỉ có trên Windows: gọi bằng Python/Blender của Windows (`python tools/blender/blender.py …` từ PowerShell
+  hoặc Git Bash), **không qua `bash` của WSL** (WSL không thấy Blender, không thấy GPU).
 
 ## 2. `shot3d.json` (`<tập>/shots3d/s<NN>.json`)
 
@@ -74,7 +78,8 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 |---|---|
 | 0 | người dùng chọn `method: blender` và một style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender` cho hình chân thực); có cử động khó thì chọn thêm `video_engine: comfy` (clip H3 local, miễn phí) hoặc `seedance` (trả tiền); `budget.yaml`: `images: 0` |
 | 2 | `film-writer` viết `shots.csv` theo §5 |
-| 3 | `film-3d-artist`: model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json` (`blender.py check` sạch) |
+| 3a | sinh vật chính: cổng thiết kế (`film-pipeline` mục 2.2): ảnh sách của chủ dự án → `ICONOGRAPHY.md` → 2–3 concept Qwen-Image local → **người dùng chọn** → `CHARACTER.md` `## Concept đã duyệt`. Chưa duyệt thì không dựng model của sinh vật đó |
+| 3 | `film-3d-artist`: model (preset, GLB có giấy phép, hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json` (`blender.py check` sạch); nhiều nhóm sinh vật: đội song song theo `templates/episode/TEAM-3d.md` |
 | 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần); duyệt xong: `bundle.py … --shot <shot mẫu> --with-turntables` (§3) |
 | 5 | `film-3d-artist`: `render` mọi shot không dùng lại (`renders3d/s<NN>/`); Nhật ký ghi phút GPU; mỗi shot duyệt: `bundle.py … --shot s<NN>` (§3) |
 | 6 | chỉ khi có `ai_motion`: `video_engine: comfy` → `film-animator` chạy `comfy.py run h3-i2v` với khung `keyframes` (`local-video.md`); `seedance` → như tập `seedance`; không có thì bỏ qua (Nhật ký: `khâu 6 bỏ qua`) |
@@ -92,6 +97,8 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 
 ## 6. Kiểm trước G2 và G3 (thêm vào danh sách chung)
 
+- [ ] Mọi sinh vật chính của bảng `## Sinh vật của tập` có concept duyệt (`status.py --gate G2`: `approved concept for
+      every main creature`); model khớp concept (silhouette, tỉ lệ, chi), không phải con thú nuôi ngoài đời.
 - [ ] `check_episode.py` sạch (kể cả `shots3d/`, `ASSETS.md`); `status.py` FORECAST: 0 ảnh, giây video đúng dự kiến,
       phút GPU local (ước lượng).
 - [ ] Model trong turntable đúng `ASSETS.md` (nguồn, giấy phép); tỉ lệ giữa các model hợp lý (linh vật `giot` cao 1.0).

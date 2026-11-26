@@ -58,7 +58,7 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
   hoặc server của ứng dụng Comfy Desktop qua `FILM_COMFY_URL` (localhost). **Không bao giờ dùng node API trả tiền** (bản
   cài có node MiniMax trả tiền trong `comfy_api_nodes/`); `comfy.py run` từ chối workflow có node ngoài danh sách cho phép.
 - Lần chạy local vẫn ghi ledger của tập (`--ledger`, `FILM_AGENT` trong agent); dòng `comfy:*`/`blender:*` không tính trần.
-- Một việc GPU một lúc (16 GB VRAM). Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:
+- Một việc GPU một lúc (16 GB VRAM): khoá `tools/gpu_run.py`, lệnh GPU ngoài `blender.py`/`comfy.py run` thì chạy qua nó. Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:
   (`comfy.py start` đặt input/output/temp/user của ComfyUI vào `out/_comfy/` của lab, đổi bằng `FILM_COMFY_WORK`).
 - **Không tải app hay model nào khi chưa hỏi.** Trước hết tìm cái đã cài trên máy (Blender ở `C:\Program Files\Blender
   Foundation\`, Comfy Desktop và model ở `%LOCALAPPDATA%\Comfy-Desktop\`), báo chủ lab, nêu dung lượng, chỉ tải khi được
@@ -87,16 +87,20 @@ python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<proj
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron ... --out <media>/vo --voice "<giọng>" --strict --require-watermark [--check]
 python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio [--stems] [--seed N]   # nhạc dây gảy + tiếng động theo sự kiện, local, miễn phí
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
-python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
+python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--from-file <blob>] [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc]   # method: code, miễn phí: xem style vẽ bằng code, linh vật giot, dị thú 3D
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
 python tools/blender/blender.py find | check <shot3d.json> | render <shot3d.json> --out <dir> [--preview]   # method: blender, chỉ máy chủ lab
 python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> | keyframes <shot3d.json> --out <dir>
+python tools/blender/blender.py turntable <model>.blend#<Collection> --out <dir> --look realistic --frames 72 [--samples N] [--fill 0.7] [--front 180]   # turntable duyệt G2: phông cyc, still_front|34|side|head.png
 python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
 python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
-python tools/review/review.py up [--no-ngrok] | down | url | status        # web app xem trực tiếp (Docker + ngrok), chỉ máy chủ lab
+python tools/comfy/comfy.py run qwen-t2i --prompt "..." [--size 1664x928] [--seed N] [--turbo] --out <concepts>/<id>_v<NN>.png --ledger L [--dry-run]   # ảnh concept Qwen-Image local, ~135 s/ảnh
+python tools/gpu_run.py [--label L] [--wait SEC] -- <lệnh ...> | status   # khoá GPU chung mọi worktree; render Blender, comfy.py run tự lấy khoá
+python tools/review/review.py up [--no-ngrok | --tunnel ngrok|tailscale|cloudflared] | down | url | status   # web app xem trực tiếp (Docker + tunnel), chỉ máy chủ lab
 python tools/review/review.py monitor [--stop|--restart] [--comfy-log PATH]  # monitor.py: số đo máy + tiến độ ComfyUI lên bảng theo dõi (chỉ nhãn job, không dòng lệnh)
+python tools/review/review.py watch <project> [--episode q01t03] [--stop|--restart|--once]  # watch.py: ảnh WIP, mp4, .blend→GLB của out/<project>/ lên bảng
 python tools/review/review.py publish-video <clip>.mp4 --build <id> --label L | publish-model <model>.glb --build <id>
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL
@@ -116,8 +120,11 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
 - Xem trực tiếp (`tools/review/README.md`): `blender.py render|turntable|keyframes` và `comfy.py run` nhận `--review <build>`
   (hoặc `FILM_REVIEW_BUILD`), tắt mặc định, không có server vẫn chạy bình thường. Review chỉ publish file nằm trong
   `out/_review/media/`; URL công khai không đăng nhập = ai có link cũng thấy mọi thứ đã publish (lựa chọn của chủ lab):
-  không publish dữ liệu không muốn lộ, `review.py down` khi không dùng. Không đọc/in cấu hình hay authtoken của ngrok.
-- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`;
+  không publish dữ liệu không muốn lộ, `review.py down` khi không dùng. Không đọc/in cấu hình hay token của tunnel.
+  Thư mục media là `out/_review/media` của checkout chính (cả từ worktree) hoặc `FILM_REVIEW_MEDIA`. Build mang chip
+  `tags` theo `tools/review/tags.json` (`kind`, `engine`, `look`, `project`, `episode`, `subject`, `shot`, `stage`).
+- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`,
+  máy chủ lab: venv trên D: qua `FILM_TTS_PYTHON`, `docs/setup-local-windows.md`;
   bản cuối luôn `--require-watermark`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
@@ -133,10 +140,11 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
 - Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` (tập trên 99 shot: `s<NNN>`) rồi tải zip lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với
-  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải
-  lên riêng (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
+  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng đã nằm trong
+  `_ChuaDuyet/`: duyệt xong chuyển (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
 - Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình (lõi) phải commit + push; dữ liệu dự án phải đẩy lên Drive
-  trước khi kết thúc.
+  trước khi kết thúc. Render, lời bình (`vo/`), âm thanh (`audio/`) đẩy **ngay khi tạo xong**, chưa duyệt, vào
+  `04_SanXuat/<tập>/_ChuaDuyet/`; còn `!!! UNSAVED MEDIA` (`drive_sync.py plan`) / `UNSAVED media` (`status.py`) thì chưa dừng phiên.
 
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.

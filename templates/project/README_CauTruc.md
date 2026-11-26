@@ -19,6 +19,7 @@ Kho mã (GitHub `claude-film-lab`) chỉ chứa công cụ và quy trình dùng 
 | `02_KinhThu/` | `SERIES.md` (quy ước chung), `pronunciation.csv` (bảng phát âm Hán Việt cho lồng tiếng), `NhanVat/` và `BoiCanh/` (mô tả + ảnh khóa đã duyệt), `PhongCach/` | duyệt ảnh khóa |
 | `03_KichBan/<tập>/` | trạng thái tập `EPISODE.md`, ngân sách, nghiên cứu, kịch bản, shot list, prompt, kiểm tra | duyệt kịch bản (G1) |
 | `04_SanXuat/<tập>/<ngày>/` | gói ảnh/clip theo shot, bản nháp, sổ chi phí `ledger.csv` | duyệt shot mẫu (G2), bản nháp (G3) |
+| `04_SanXuat/<tập>/_ChuaDuyet/` | bản dựng, lời bình, âm thanh vừa tạo, **chưa duyệt** (lưu ngay để không mất) | duyệt xong Claude chuyển bản nháp/bản cuối đi |
 | `05_ThanhPham/<tập>/` | bản cuối, thumbnail, nội dung đăng | duyệt bản cuối (G4), tự đăng |
 | `99_LuuTru/` | bản cũ và thứ bỏ đi | không xoá gì: mọi thứ cũ nằm ở đây |
 

@@ -4,6 +4,40 @@
 
 ## [Unreleased]
 
+### Đợt issue #52–#65: thiết kế sinh vật, hàng đợi GPU, Qwen-Image, review có chip tag (2026-11-26)
+- Cổng thiết kế sinh vật (khâu 3a, #52): `ICONOGRAPHY.md` mỗi sinh vật, 2–3 concept Qwen-Image local, người dùng chọn rồi
+  mới dựng 3D; bảng `## Sinh vật của tập` trong `EPISODE.md` và khoá `owner_refs` trong `SERIES.md` (xin ảnh sách của chủ
+  dự án trước vòng nghiên cứu bổ sung, #53); `status.py` có mục `CREATURES`/`OWNER_REFS`, `--gate G2` báo MISSING khi sinh
+  vật chính của tập `blender`/`code` chưa có concept duyệt; `check_episode.py` WARN/ERROR theo khâu.
+- Đội dựng 3D song song (#58): mẫu `templates/episode/TEAM-3d.md`, `film-3d-artist` `maxTurns: 120`, ghi `NOTES.md` trước
+  khi hết lượt, Blender chỉ qua Windows (không WSL).
+- Hàng đợi GPU chung `tools/gpu_run.py` (#57): một khoá cho mọi agent, phiên và worktree (`out/_gpu/gpu.lock` của checkout
+  chính, `gpu.owner` ghi người giữ); `blender.py render|still|turntable|keyframes|lookbook` và `comfy.py run` tự lấy khoá
+  (`FILM_GPU_WAIT`, `FILM_GPU_QUEUE=0`); thẻ Máy của review hiện ai đang giữ GPU.
+- ComfyUI: workflow ảnh `qwen-t2i` (Qwen-Image 2512 local, miễn phí, #54): `--size`, `--seed`, `--cfg`, `--negative`,
+  `--turbo` (nháp 2 bước), ledger `comfy:qwen-image` chi phí 0, tiến độ từng bước sampler qua websocket; ~135 s/ảnh 1664×928.
+- Blender: action trong `.blend`/glTF chạy đúng thời gian khi `--preview` 12 fps (NLA strip theo fps của action, `anim.fps`,
+  #55); `turntable` cho duyệt G2 nhận `<file>.blend#Collection`, `--look realistic`, phông cyc, khung theo bounding box
+  (`--fill`), `--frames`, `--samples`, ảnh tĩnh `still_front|34|side|head.png` (#56). Turntable kiểu quỹ đạo 2 m cũ bỏ.
+- Review: chip tag có màu (`tools/review/tags.json`: kind, engine, look, project, episode, subject, shot, stage), lọc nhiều
+  chip, gom nhóm, bộ lọc trên URL; build cũ được suy tag (DB nâng cấp lên v2, #65). Build `image`/`concept` có thư viện ảnh
+  (so sánh 2–4, đánh dấu được chọn, prompt/seed/model/bước/giây mỗi ảnh); `comfy.py run qwen-t2i --review` đăng từng bước
+  và ảnh vào đó (#64). `blender.py`/`comfy.py --review` tự gắn tag engine/look/dự án/tập/shot.
+- Review: media mount theo checkout chính (cả từ worktree) hoặc `FILM_REVIEW_MEDIA`, `status` cảnh báo khi lệch; image
+  Docker dừng sớm khi thiếu three.js; `up --tunnel ngrok|tailscale|cloudflared`; ảnh lớn gửi JPEG 1280 px q82 (#60);
+  `review.py watch <project>` tự đăng ảnh WIP, mp4 và GLB xuất từ `.blend` vừa lưu (#59).
+- Drive: `drive_sync.py save` đọc được file connector tự lưu (`Binary content … saved to <file>`), thêm `--from-file` (#61);
+  render, lời bình và âm thanh đẩy lên `04_SanXuat/<tập>/_ChuaDuyet/` ngay khi tạo, `plan` in `!!! UNSAVED MEDIA`,
+  `status.py` dòng `UNSAVED media` (#62). Thay đổi hành vi: bản nháp/bản cuối không còn đi thẳng vào thư mục ngày/`05_ThanhPham`.
+- TTS trên máy chủ lab Windows: `FILM_TTS_PYTHON` trỏ venv trên D:, `doctor.sh` kiểm venv đó, `docs/setup-local-windows.md` (#63).
+- Sửa theo review: `comfy.py`/`blender.py` kiểm lại đầu ra sau khi chờ GPU và không bao giờ thay file có sẵn (`.film-claim`
+  giữ chỗ thư mục Blender); dừng Blender/lệnh con trước khi nhả khoá GPU (SIGTERM, Ctrl+Break); `comfy.py run` gọi `/free`
+  trước khi nhả khoá (`--keep-models` cho loạt ảnh liền nhau); turntable không cắt mép ở `--fill` cao; bảng sinh vật nhận mọi
+  dấu cột GFM, ô `Chính` trống tính là sinh vật chính; `drive_sync` chỉ chép file trong thư mục phiên của transcript.
+- Sửa theo review (review): chip dự án/tập/shot chỉ suy từ đường dẫn bên trong lab (không lộ tên thư mục ngoài); `down` tắt mọi
+  tunnel đã mở, URL cloudflared cũ không bị in lại; pid không kiểm được thì giữ file; media được chép (không hard-link);
+  watcher chờ file đứng yên hai lượt quét và không đi theo symlink; tên nhóm tag như `constructor` bị từ chối; seed > 2^53 đúng.
+
 ### Look Blender chân thực: `realistic` + style `chan-thuc-blender` (2026-11-26)
 - `tools/blender`: look `realistic` (Cycles, AgX Medium High Contrast, adaptive sampling, motion blur): trời HDRI
   (`world.hdri`, `hdri_strength`, `hdri_rot`) hoặc trời vật lý theo `world.sun`, đèn mặt trời ấm dần khi thấp

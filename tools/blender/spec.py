@@ -51,6 +51,9 @@ PRESETS = {
         "width": ("num", 1, 5000), "depth": ("num", 1, 5000), "relief": ("num", 0, 50), "seed": ("int", 0, 2 ** 31 - 1)}},
     "giot": {"height": 1.0, "actions": ("idle", "hop", "walk", "wave"), "params": {
         "body": ("color", None, None), "cheek": ("color", None, None)}},
+    "cyc": {"height": 0.0, "actions": (), "params": {
+        "width": ("num", 0.5, 5000), "depth": ("num", 0.5, 5000), "back": ("num", 0.1, 5000),
+        "height": ("num", 0.1, 5000), "radius": ("num", 0.05, 1000)}},
 }
 
 PREVIEW_W, PREVIEW_FPS = 960, 12
@@ -61,7 +64,14 @@ CAMERA_DEFAULTS = {"lens": 35.0, "ease": "inout", "roll": 0.0, "amount": 0.3, "r
 MOVE_DEGREES = {"pan": 20.0, "tilt": 10.0, "orbit": 30.0}
 
 TOP_KEYS = {"version", "title", "note", "size", "fps", "seconds", "seed", "look", "engine", "world", "assets",
-            "camera", "passes", "depth_range", "samples", "asset_root", "materials"}
+            "camera", "passes", "depth_range", "samples", "asset_root", "materials", "turntable"}
+# `turntable` (blender.py turntable writes it): the asset turns in place in front of a fixed camera framed by its
+# bounding box; views of the review stills = degrees the asset is turned from `front` (its front to the camera)
+TURNTABLE_KEYS = {"asset", "fill", "stills", "front", "backdrop", "head_bone", "lens", "studio"}
+TURNTABLE_VIEWS = {"front": 0.0, "34": 35.0, "side": 90.0, "back": 180.0, "head": 35.0}
+TURNTABLE_DEFAULTS = {"fill": 0.7, "stills": [], "front": 0.0, "backdrop": "cyc", "head_bone": "head", "lens": 50.0,
+                      "studio": False}
+BACKDROPS = ("cyc", "none")
 WORLD_KEYS = {"paper", "ink", "mist", "mist_range", "sun", "hdri", "hdri_strength", "hdri_rot", "sun_strength"}
 # look `realistic`: preset roles that get a PBR texture set from `materials` (role -> texture id, folder or object)
 MATERIAL_ROLES = ("mountain", "rock", "ground", "water", "trunk", "foliage", "prim")
@@ -72,7 +82,7 @@ TEXTURE_MAPS = {"diff": ("_diff_", "_diffuse", "_albedo", "_basecolor", "_color"
 IMAGE_EXT = (".jpg", ".jpeg", ".png", ".exr", ".tif", ".tiff")
 HDRI_EXT = (".hdr", ".exr")
 ASSET_KEYS = {"id", "src", "at", "rot", "scale", "fit", "color", "ink", "params", "anim", "mask", "lines", "note"}
-ANIM_KEYS = {"action", "path", "ease", "face_path", "speed"}
+ANIM_KEYS = {"action", "path", "ease", "face_path", "speed", "fps"}
 CAMERA_KEYS = {"move", "from", "to", "target", "target_to", "aim", "lens", "lens_to", "roll", "ease", "t", "amount",
                "degrees", "rise"}
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
@@ -274,6 +284,8 @@ def validate(data, base_dir=None):
     seconds = data.get("seconds", DEFAULTS["seconds"]) if _num(data.get("seconds", 5)) else DEFAULTS["seconds"]
     ids = _validate_assets(err, data.get("assets"), base_dir, seconds)
     _validate_camera(err, data.get("camera"), ids, data.get("assets") if isinstance(data.get("assets"), list) else [])
+    if "turntable" in data:
+        _validate_turntable(err, data["turntable"], ids)
 
     passes = data.get("passes", [])
     if not isinstance(passes, list):
@@ -289,6 +301,33 @@ def validate(data, base_dir=None):
         if not (_vec(dr, 2) and 0 < dr[0] < dr[1]):
             err.add("depth_range", "must be [near, far] metres with 0 < near < far")
     return list(err)
+
+
+def _validate_turntable(err, tt, ids):
+    if not isinstance(tt, dict):
+        err.add("turntable", "must be an object")
+        return
+    _unknown(err, tt, TURNTABLE_KEYS, "turntable")
+    if tt.get("asset") not in ids:
+        err.add("turntable.asset", f"must be the id of an asset ({', '.join(ids) or 'none'})")
+    if "fill" in tt:
+        _range(err, "turntable.fill", tt["fill"], 0.1, 1.0)
+    if "stills" in tt:
+        st = tt["stills"]
+        if not isinstance(st, list) or any(v not in TURNTABLE_VIEWS for v in st):
+            err.add("turntable.stills", f"must be a list of {', '.join(TURNTABLE_VIEWS)}")
+        elif len(set(st)) != len(st):
+            err.add("turntable.stills", "has duplicates")
+    if "front" in tt:
+        _range(err, "turntable.front", tt["front"], -360, 360)
+    if "backdrop" in tt and tt["backdrop"] not in BACKDROPS:
+        err.add("turntable.backdrop", f"{tt['backdrop']!r} is not one of {', '.join(BACKDROPS)}")
+    if "head_bone" in tt and not (isinstance(tt["head_bone"], str) and tt["head_bone"]):
+        err.add("turntable.head_bone", "must be a bone name")
+    if "lens" in tt:
+        _range(err, "turntable.lens", tt["lens"], 10, 300)
+    if "studio" in tt and not isinstance(tt["studio"], bool):
+        err.add("turntable.studio", "must be true or false")
 
 
 def _validate_materials(err, mats, asset_root, base_dir):
@@ -413,6 +452,10 @@ def _validate_anim(err, p, anim, kind, src, seconds):
                 err.add(f"{p}.action", f"{act!r} is not an action of {src} ({', '.join(acts) or 'none'})")
         elif kind == "prim":
             err.add(f"{p}.action", "primitives have no actions (use path)")
+    if "fps" in anim:
+        _range(err, f"{p}.fps", anim["fps"], 1, 240)
+        if kind != "blend":
+            err.add(f"{p}.fps", "only for .blend actions (glTF keys are in seconds; presets are posed in seconds)")
     if "ease" in anim and anim["ease"] not in EASES:
         err.add(f"{p}.ease", f"{anim['ease']!r} is not one of {', '.join(EASES)}")
     if "face_path" in anim and not isinstance(anim["face_path"], bool):
@@ -526,6 +569,9 @@ def normalize(data):
         c.setdefault("degrees", MOVE_DEGREES[c["move"]])
     if "aim" not in c:
         c["aim"] = default_aim(d, c["target"])
+    if "turntable" in d:
+        for k, v in TURNTABLE_DEFAULTS.items():
+            d["turntable"].setdefault(k, json.loads(json.dumps(v)))
     return d
 
 
@@ -561,6 +607,124 @@ def frame_count(seconds, fps):
 def frame_time(frame, fps):
     """Seconds at frame `frame` (1-based): frame 1 is t = 0."""
     return (frame - 1) / float(fps)
+
+
+def action_frame(t, action_fps, start=1.0, speed=1.0):
+    """Frame of an imported action (.blend/glTF) at shot time t seconds: the action starts at the shot's t = 0 and
+    runs at its own fps (the source file's scene fps, or anim.fps), whatever the render fps (--preview: 12)."""
+    return float(start) + float(t) * float(action_fps) * float(speed)
+
+
+def nla_scale(render_fps, action_fps, speed=1.0):
+    """NLA strip scale that plays an action of `action_fps` in real time in a scene rendered at `render_fps`:
+    one scene frame = action_fps * speed / render_fps action frames."""
+    return float(render_fps) / (float(action_fps) * float(speed))
+
+
+def nla_frame(scene_frame, strip_start, scale, action_start):
+    """Blender's NLA time mapping inside a strip (one repeat, forward): the action frame evaluated at scene_frame."""
+    return float(action_start) + (float(scene_frame) - float(strip_start)) / float(scale)
+
+
+def sensor_height(size):
+    """Vertical sensor extent (mm) of a frame with a 36 mm sensor fitted to its longer side (scene.py's camera)."""
+    w, h = size
+    return 36.0 * h / w if w >= h else 36.0
+
+
+def turntable_angle(tt, frame, n):
+    """Degrees the turntable asset is turned at `frame` (1..n): one full turn over the n frames, starting at its front,
+    so frame n + 1 would be frame 1 again (a seamless loop)."""
+    return float(tt.get("front", 0.0)) + 360.0 * (frame - 1) / float(max(1, n))
+
+
+TURNTABLE_EDGE = 0.98      # the turning box stays inside 98 % of the half frame height (a 1 % margin each side)
+TURNTABLE_SIDE = 0.9       # ... and 90 % of the half frame width
+
+
+def turntable_reach(cam, lo, hi, tan_v, tan_h, step=2.0):
+    """(max |x|, max |y|) in half-frame units of the bounding box [lo, hi] over a whole turn about the z axis, seen from
+    the camera cam (pos, target; no roll). The box sweeps a cylinder of its widest corner radius from lo z to hi z;
+    the image of a cylinder is the hull of its top and bottom circles, sampled every `step` degrees (with the nearest
+    and side points exactly)."""
+    c, t = cam["pos"], cam["target"]
+    f = [t[i] - c[i] for i in range(3)]
+    n = math.sqrt(sum(x * x for x in f))
+    f = [x / n for x in f]
+    hz = math.hypot(f[0], f[1])
+    r = [f[1] / hz, -f[0] / hz, 0.0]                                    # right: horizontal, no roll
+    u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]]     # up = right x forward
+    rad = cam["radius"]
+    mx = my = 0.0
+    k = max(4, int(round(360.0 / step)))
+    for z in (lo[2], hi[2]):
+        for i in range(k):
+            a = 2.0 * math.pi * i / k
+            v = [rad * math.cos(a) - c[0], rad * math.sin(a) - c[1], z - c[2]]
+            depth = sum(v[j] * f[j] for j in range(3))
+            if depth <= 1e-6:
+                return float("inf"), float("inf")
+            mx = max(mx, abs(sum(v[j] * r[j] for j in range(3))) / (depth * tan_h))
+            my = max(my, abs(sum(v[j] * u[j] for j in range(3))) / (depth * tan_v))
+    return mx, my
+
+
+def turntable_camera(lo, hi, spec_size, lens=50.0, fill=0.7, render_size=None):
+    """Fixed turntable camera for an asset whose bounding box [lo, hi] (metres) turns about the z axis through
+    x = y = 0: its height at the turn axis fills `fill` of the frame height, its widest turn fits the frame width
+    (90 %), the camera stands in front (-y) a little above the middle and aims at the middle. Then the camera backs
+    off until every corner of the box, over the whole turn and with the camera's height and tilt, stays inside the
+    frame (TURNTABLE_EDGE of the half height, TURNTABLE_SIDE of the half width): a deep or wide asset at a high fill
+    comes nearer the camera as it turns and would be cut. The vertical field of view comes from spec_size (the
+    camera's sensor fit), the width check from render_size (--size). -> {"pos", "target", "lens", "distance",
+    "height", "radius"}."""
+    rw, rh = render_size or spec_size
+    tan_v = sensor_height(spec_size) / (2.0 * lens)
+    tan_h = tan_v * rw / float(rh)
+    height = max(hi[2] - lo[2], 1e-3)
+    radius = max(math.hypot(x, y) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]))
+
+    def at(d):
+        return {"pos": [0.0, -d, lo[2] + 0.58 * height], "target": [0.0, 0.0, lo[2] + 0.5 * height],
+                "lens": float(lens), "roll": 0.0, "distance": d, "height": height, "radius": radius}
+
+    def fits(d):
+        mx, my = turntable_reach(at(d), lo, hi, tan_v, tan_h)
+        return mx <= TURNTABLE_SIDE and my <= TURNTABLE_EDGE
+
+    d = height / fill / (2.0 * tan_v)
+    d = max(d, radius + radius / (0.9 * tan_h), 1.5 * radius + 0.05)
+    if not fits(d):
+        near, far = d, d * 1.25
+        while not fits(far):
+            near, far = far, far * 1.25
+        for _ in range(40):
+            mid = 0.5 * (near + far)
+            near, far = (near, mid) if fits(mid) else (mid, far)
+        d = far
+    return at(d)
+
+
+def cyc_params(cam, spec_size, render_size=None):
+    """preset:cyc params that fill every view of a turntable camera (turntable_camera()): the floor runs under the
+    camera, the curve starts behind the asset's widest turn, wall and floor reach past the frame edges."""
+    rw, rh = render_size or spec_size
+    tan_v = sensor_height(spec_size) / (2.0 * cam["lens"])
+    tan_h = tan_v * rw / float(rh)
+    k = max(cam["height"], 2.0 * cam["radius"], 0.2)
+    back = cam["radius"] + 0.75 * k
+    far = cam["distance"] + back
+    return {"width": round(2.0 * far * tan_h * 1.6 + 2.0 * k, 3), "depth": round(cam["distance"] + 2.0 * k, 3),
+            "back": round(back, 3), "height": round(cam["pos"][2] + far * tan_v * 1.6 + k, 3),
+            "radius": round(0.6 * k, 3)}
+
+
+def closeup_camera(point, size, spec_size, lens=85.0, fill=0.8):
+    """Camera straight in front (-y) of `point` so a region `size` metres tall fills `fill` of the frame height."""
+    tan_v = sensor_height(spec_size) / (2.0 * lens)
+    d = max(size, 1e-3) / fill / (2.0 * tan_v)
+    p = [float(x) for x in point]
+    return {"pos": [p[0], p[1] - d, p[2] + 0.12 * size], "target": p, "lens": float(lens), "roll": 0.0, "distance": d}
 
 
 def preview_size(size):

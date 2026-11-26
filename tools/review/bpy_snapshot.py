@@ -10,7 +10,7 @@
 
 snapshot() exports the scene (or only `objects`, plus their parents) as GLB with bpy.ops.export_scene.gltf straight
 into the build's media folder (no copy), counts vertices/faces of the evaluated meshes, optionally renders a small
-Workbench thumbnail, and posts the step. It never raises: an export or post that fails is reported and returns None.
+Workbench thumbnail (JPEG q82: light on the public tunnel's bandwidth), and posts the step. It never raises: an export or post that fails is reported and returns None.
 """
 import os
 import sys
@@ -65,14 +65,14 @@ def export_glb(path, objects=None, animations=False):
     return path
 
 
-def thumbnail(path, size=320):
-    """A small Workbench render of the scene camera's view to path (png). -> path or None."""
+def thumbnail(path, size=320, quality=82):
+    """A small Workbench render of the scene camera's view to path (a JPEG, quality 82). -> path or None."""
     scene = bpy.context.scene
     if scene.camera is None:
         return None
     r = scene.render
     saved = (r.engine, r.resolution_x, r.resolution_y, r.resolution_percentage, r.filepath,
-             r.image_settings.file_format, r.film_transparent)
+             r.image_settings.file_format, r.film_transparent, r.image_settings.quality)
     try:
         r.engine = "BLENDER_WORKBENCH"
         sh = scene.display.shading
@@ -81,18 +81,19 @@ def thumbnail(path, size=320):
         sh.show_cavity = True
         r.resolution_x = r.resolution_y = size
         r.resolution_percentage = 100
-        r.image_settings.file_format = "PNG"
-        r.film_transparent = True
+        r.image_settings.file_format = "JPEG"
+        r.image_settings.quality = quality
+        r.film_transparent = False                   # JPEG has no alpha: the world colour behind the model
         r.filepath = path
         bpy.ops.render.render(write_still=True)
         return path if os.path.isfile(path) else None
     finally:
         (r.engine, r.resolution_x, r.resolution_y, r.resolution_percentage, r.filepath,
-         r.image_settings.file_format, r.film_transparent) = saved
+         r.image_settings.file_format, r.film_transparent, r.image_settings.quality) = saved
 
 
 def snapshot(review, label, objects=None, *, thumb=False, extra_stats=None, animations=False):
-    """Export step_<NN>.glb (+ step_<NN>.png when thumb) into the build's media folder and post a step.
+    """Export step_<NN>.glb (+ step_<NN>.jpg when thumb) into the build's media folder and post a step.
     -> the step number, or None when nothing could be exported."""
     t0 = time.monotonic()
     n = review.n + 1
@@ -118,7 +119,7 @@ def snapshot(review, label, objects=None, *, thumb=False, extra_stats=None, anim
         image = None
         if thumb:
             try:
-                image = thumbnail(os.path.splitext(glb)[0] + ".png")
+                image = thumbnail(os.path.splitext(glb)[0] + ".jpg")
             except Exception as e:                  # no GPU context in this session: the step goes without one
                 print(f"review: thumbnail skipped ({type(e).__name__}: {e})", file=sys.stderr)
         review.step(label, glb=glb, image=image, stats=stats, n=n)

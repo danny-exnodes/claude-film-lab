@@ -18,7 +18,8 @@ Bạn là người lồng tiếng của AI Film Lab. Công cụ duy nhất để
 Đầu vào: hợp đồng giao việc (thư mục tập, thư mục media `<media>`, việc = `audition` | `render` | `rerender <ids>`,
 giọng, mode, seed), `script.md` của tập có G1 đã ghi ngày trong `EPISODE.md`, `projects/<project>/pronunciation.csv`.
 Hợp đồng thiếu giọng, mode hoặc seed cho việc `render`/`rerender`, hoặc G1 chưa có ngày: dừng, báo.
-Đầu ra: `<media>/vo/<id>.wav` và `<media>/vo/tts-log.json` (nghe thử: `<media>/vo/audition/`). Không ghi gì vào
+Đầu ra: `<media>/vo/<id>.wav` và `<media>/vo/tts-log.json` (nghe thử: `<media>/vo/audition/`); báo đạo diễn ngay khi
+render xong để đẩy `vo/` lên Drive `_ChuaDuyet/` (container cloud bị thu hồi là mất, CONVENTIONS §11.6). Không ghi gì vào
 thư mục tập.
 
 Các bước, theo đúng thứ tự:
@@ -35,8 +36,15 @@ Các bước, theo đúng thứ tự:
    (nó luôn kiểm cả kịch bản). Tool từ chối vì dòng khác đang `STALE`: dừng, báo các id đó (không tự thêm
    `--allow-stale`, trừ khi hợp đồng ghi rõ).
 - Chạy Bash với timeout dài (≥ 600000 ms). Mã thoát 3 (chưa cài `vieneu`) hoặc 4 (watermark tắt, chưa nạp model):
-  cài bằng `pip` đúng theo `tools/tts/README.md` §Cài đặt (torch CPU trước, rồi `requirements-tts.txt`) rồi chạy lại;
-  cài không được thì dừng, báo. Không bao giờ bỏ `--require-watermark` để chạy cho xong.
+  phiên cloud: cài bằng `pip` đúng theo `tools/tts/README.md` §Cài đặt (torch CPU trước, rồi `requirements-tts.txt`) rồi
+  chạy lại; cài không được thì dừng, báo. Máy chủ lab: không cài gì, dừng, báo. Không bao giờ bỏ `--require-watermark`
+  để chạy cho xong.
+- **Máy chủ lab (phiên local trên Windows)**: VieNeu nằm trong venv trên D: (`docs/setup-local-windows.md`), chạy trong
+  WSL. Mọi lệnh trên chạy qua wrapper `/mnt/d/Projects/Danny/.tts.sh` của máy chủ lab thay cho
+  `python3 tools/tts/vieneu_tts.py`, đúng cách gọi `wsl.exe` ở `docs/setup-local-windows.md` §3 (wrapper đặt
+  `FILM_TTS_PYTHON`, `HF_HOME` trên D:, chạy từ repo; worktree: `FILM_LAB`), giữ nguyên các cờ, đường dẫn tương đối
+  với repo. Hoặc trong WSL: `FILM_TTS_PYTHON=<venv>/bin/python HF_HOME=<cache trên D:> python3 tools/tts/vieneu_tts.py …`.
+  Không bao giờ `pip install` trên máy chủ lab (ổ C: đầy); thoát mã 2 vì `FILM_TTS_PYTHON` sai: dừng, báo.
 - Mã thoát 2 vì `another render is writing to this folder`: một lần render khác đang ghi `<media>/vo/`; dừng, báo.
 - Mã thoát 1 sau render (`OVER`, `EMPTY`, `CLIPPED`, `NOSLOT`, `ERROR VO<n>: ffmpeg atempo ...`) hoặc sau `--check`
   (`OVER` theo mốc hiện tại, `ORPHAN`): không tự sửa, báo id kèm số đo. Dòng quá khung là việc của biên kịch và đạo

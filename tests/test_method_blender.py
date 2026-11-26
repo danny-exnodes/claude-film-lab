@@ -521,6 +521,20 @@ class StatusBlender(BlenderEpisode):
                       "(turntable-giot)", out)
         self.assertIn("[ok] one sample shot rendered in renders3d/ (blender.py render, --preview is enough) (s02)", out)
         self.assertIn("[ok] nothing over the budget", out)
+        self.assertIn("[MISSING] creature table ## Sinh vật của tập in EPISODE.md", out)
+        md = self.ep / "EPISODE.md"            # creature design gate (#52): giot's concept approved by the owner
+        md.write_text(md.read_text(encoding="utf-8") + "\n## Sinh vật của tập\n\n| slug | Tên | Chính | Ảnh sách | "
+                      "Concept |\n|---|---|---|---|---|\n| giot | Giọt | có | không | duyệt 2026-11-26 |\n",
+                      encoding="utf-8")
+        code, out, _ = self.status("--gate", "G2")
+        self.assertIn("[MISSING] approved concept for every main creature", out)
+        self.assertIn("giot no '## Concept đã duyệt' in characters/giot/CHARACTER.md", out)
+        (self.ep.parent / "characters" / "giot").mkdir(parents=True)
+        (self.ep.parent / "characters" / "giot" / "CHARACTER.md").write_text(
+            "# Giọt\n\n## Concept đã duyệt\n- concept-b.png, 2026-11-26, chủ dự án chọn\n", encoding="utf-8")
+        code, out, _ = self.status("--gate", "G2")
+        self.assertIn("[ok] approved concept for every main creature", out)
+        self.assertIn("giot  Giọt · main · not in the book · concept approved (characters/giot/CHARACTER.md)", out)
         self.assertIn("Gate G2: READY", out)
         self.assertIn("turntables (renders3d/): turntable-giot", out)
 

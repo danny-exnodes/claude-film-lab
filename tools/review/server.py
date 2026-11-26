@@ -9,10 +9,11 @@ Two listeners:
   public 8790 (read-only: GET/HEAD only, every other method is 405)
       /                      the web app (tools/review/web/), no directory listing
       /api/health            {"ok": true, ...}
-      /api/builds            every build, newest first (summary rows)
+      /api/builds            every build, newest first (summary rows, with tags and a display name)
       /api/builds/<id>       one build with its steps, renders and jobs
       /api/builds/<id>/steps | /renders | /jobs
       /api/renders           every render of every build (the timeline's library)
+      /api/tags              the tag registry (tags.json, merged with <media>/_tags.json): groups, colours, labels
       /api/metrics?window=10m|24h   machine metrics from monitor.py: 2 s samples (10 min, memory) or 1 min averages
                              (24 h, SQLite), plus the latest full sample
       /api/comfy             ComfyUI state from monitor.py: up, queue, current job's steps, last 10 jobs (+ linked build)
@@ -47,12 +48,21 @@ import sqlite3
 import sys
 import threading
 import time
+import unicodedata
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "1.1.0"
+VERSION = "1.2.0"
+SCHEMA_VERSION = 2               # PRAGMA user_version; Store._migrate() brings an older database up to it
 BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
-KINDS = ("model", "render", "clip", "demo")
+KINDS = ("model", "render", "clip", "demo", "image", "concept")     # image/concept: a gallery of generated images
+TAG_GROUP = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
+TAG_VALUE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
+# Group names that are keys of every JavaScript object ({}.constructor ...): refused, the page keys objects by group.
+RESERVED_GROUPS = frozenset({"constructor", "prototype", "__proto__", "tostring", "valueof", "hasownproperty",
+                             "isprototypeof", "tolocalestring"})
+MAX_TAG_GROUPS = 16
+MAX_TAG_VALUES = 8               # per group
 STATUSES = ("queued", "building", "rendering", "done", "failed")
 JOB_TOOLS = ("blender", "comfy")
 JOB_STATUSES = ("queued", "running", "done", "failed")
@@ -92,23 +102,31 @@ WEB_TYPES = {
 }
 
 # Event schema: type -> {field: (kind, required)}. "build" is implied for every type.
-STR, NUM, INT, OBJ, PATH, BOOL = "str", "num", "int", "obj", "path", "bool"
+STR, NUM, INT, OBJ, PATH, BOOL, TAGS = "str", "num", "int", "obj", "path", "bool", "tags"
+# Image metadata of a step (a ComfyUI/Seedream image): stored in steps.meta, shown by the gallery (web/gallery.js).
+STEP_META = {"prompt": STR, "seed": INT, "model": STR, "sampler_steps": INT, "seconds": NUM, "width": INT,
+             "height": INT, "workflow": STR, "item": INT, "items": INT, "chosen": BOOL}
+JOB_DETAIL = {"label": STR, "step": INT, "steps": INT, "item": INT, "items": INT, "eta": NUM}
 EVENTS = {
     "build": {"title": (STR, False), "kind": (STR, False), "project": (STR, False), "expected_steps": (INT, False),
-              "status": (STR, False), "restart": (BOOL, False)},
-    "step": {"label": (STR, True), "n": (INT, False), "glb": (PATH, False), "image": (PATH, False),
-             "stats": (OBJ, False)},
+              "status": (STR, False), "restart": (BOOL, False), "tags": (TAGS, False)},
+    "step": dict({"label": (STR, True), "n": (INT, False), "glb": (PATH, False), "image": (PATH, False),
+                  "stats": (OBJ, False)}, **{k: (t, False) for k, t in STEP_META.items()}),
     "progress": {"progress": (NUM, True), "message": (STR, False), "status": (STR, False)},
     "render": {"label": (STR, True), "video": (PATH, False), "image": (PATH, False), "frames": (INT, False),
                "fps": (NUM, False), "duration": (NUM, False), "engine": (STR, False),
                "seconds_per_frame": (NUM, False)},
-    "job": {"job": (STR, False), "tool": (STR, True), "status": (STR, True), "progress": (NUM, False),
-            "gpu_s": (NUM, False), "message": (STR, False)},
+    "job": dict({"job": (STR, False), "tool": (STR, True), "status": (STR, True), "progress": (NUM, False),
+                 "gpu_s": (NUM, False), "message": (STR, False)}, **{k: (t, False) for k, t in JOB_DETAIL.items()}),
     "done": {"message": (STR, False)},
     "fail": {"message": (STR, False)},
 }
 MAX_STR = {"title": 200, "label": 200, "message": 500, "project": 100, "engine": 60, "job": 100, "kind": 20,
-           "status": 20, "tool": 20}
+           "status": 20, "tool": 20, "prompt": 2000, "model": 120, "workflow": 60}
+# Integer/number ranges of the optional fields (inclusive); the lower bound 0 also covers "must be >= 0".
+RANGES = {"seed": (0, 2 ** 64 - 1), "sampler_steps": (1, 10000), "seconds": (0, 1e7), "width": (1, 65535),
+          "height": (1, 65535), "item": (1, 100000), "items": (1, 100000), "step": (0, 10 ** 7),
+          "steps": (1, 10 ** 7), "eta": (0, 1e8)}
 
 # Anything that looks like an absolute path: UNC (\\server\share\...), a drive (C:\..., D:/...), POSIX (/home/x/...,
 # ~/x/...). A segment before a separator may hold spaces ("C:\Program Files\..."), the last one may not. Stored and
@@ -142,11 +160,12 @@ def scrub_obj(v, depth=0):
         return [scrub_obj(x, depth + 1) for x in v]
     return v
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS builds (
+# kind is checked in validate() (KINDS), not by the table: a new kind never needs a table rebuild again.
+BUILDS_TABLE = """
+CREATE TABLE IF NOT EXISTS {name} (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('model','render','clip','demo')),
+  kind TEXT NOT NULL,
   project TEXT,
   status TEXT NOT NULL CHECK (status IN ('queued','building','rendering','done','failed')),
   progress REAL NOT NULL DEFAULT 0 CHECK (progress >= 0 AND progress <= 1),
@@ -156,8 +175,13 @@ CREATE TABLE IF NOT EXISTS builds (
   thumb TEXT,
   started REAL NOT NULL,
   updated REAL NOT NULL,
-  finished REAL
+  finished REAL,
+  tags TEXT
 );
+"""
+BUILD_COLS = ("id", "title", "kind", "project", "status", "progress", "expected_steps", "current", "message", "thumb",
+              "started", "updated", "finished")
+SCHEMA = BUILDS_TABLE.format(name="builds") + """
 CREATE TABLE IF NOT EXISTS steps (
   id INTEGER PRIMARY KEY,
   build TEXT NOT NULL REFERENCES builds(id) ON DELETE CASCADE,
@@ -167,6 +191,7 @@ CREATE TABLE IF NOT EXISTS steps (
   glb TEXT,
   image TEXT,
   t REAL NOT NULL,
+  meta TEXT,
   UNIQUE (build, n)
 );
 CREATE TABLE IF NOT EXISTS renders (
@@ -193,6 +218,12 @@ CREATE TABLE IF NOT EXISTS jobs (
   message TEXT,
   started REAL NOT NULL,
   t REAL NOT NULL,
+  label TEXT,
+  step INTEGER,
+  steps INTEGER,
+  item INTEGER,
+  items INTEGER,
+  eta REAL,
   UNIQUE (build, job)
 );
 CREATE TABLE IF NOT EXISTS metrics_min (
@@ -266,6 +297,11 @@ def validate(ev):
         elif ftype == PATH:
             if safe_rel(v) is None or not v.startswith(bid + "/"):
                 raise BadEvent(f"{kind}: {name} must be a media path under '{bid}/' (no '..', no absolute path)")
+        elif ftype == TAGS:
+            v = clean_tags(v, f"{kind}: {name}")
+        if name in RANGES and not RANGES[name][0] <= v <= RANGES[name][1]:
+            lo, hi = RANGES[name]
+            raise BadEvent(f"{kind}: {name} must be {lo:g}..{hi:g}")
         out[name] = v
     if kind == "build":
         if "kind" in out and out["kind"] not in KINDS:
@@ -290,10 +326,206 @@ def validate(ev):
             raise BadEvent(f"job: status must be one of {', '.join(JOB_STATUSES)}")
         if "progress" in out and not 0 <= out["progress"] <= 1:
             raise BadEvent("job: progress must be 0..1")
+        if "step" in out and "steps" in out and out["step"] > out["steps"]:
+            raise BadEvent("job: step must be <= steps")
+    if "item" in out and "items" in out and out["item"] > out["items"]:
+        raise BadEvent(f"{kind}: item must be <= items")
     for name in ("fps", "duration", "seconds_per_frame", "gpu_s", "frames"):
         if name in out and out[name] < 0:
             raise BadEvent(f"{kind}: {name} must be >= 0")
     return kind, bid, out
+
+
+def clean_tags(v, where="tags"):
+    """{group: value | [values]} -> {group: [values]} (deduplicated, order kept). Group and value must be slugs (the
+    client normalises them first): nothing but [a-z0-9._-] ever reaches the public page. An empty list removes the
+    group when it is merged into a build's tags. Raises BadEvent."""
+    if not isinstance(v, dict):
+        raise BadEvent(f"{where} must be an object {{group: value or [values]}}")
+    if len(v) > MAX_TAG_GROUPS:
+        raise BadEvent(f"{where}: at most {MAX_TAG_GROUPS} groups")
+    out = {}
+    for group, vals in v.items():
+        if not isinstance(group, str) or not TAG_GROUP.match(group) or group in RESERVED_GROUPS:
+            raise BadEvent(f"{where}: group {str(group)[:30]!r} must match {TAG_GROUP.pattern} "
+                           f"(and not be {', '.join(sorted(RESERVED_GROUPS))})")
+        if isinstance(vals, str):
+            vals = [vals]
+        if not isinstance(vals, list) or len(vals) > MAX_TAG_VALUES:
+            raise BadEvent(f"{where}.{group}: a value or a list of at most {MAX_TAG_VALUES}")
+        clean = []
+        for x in vals:
+            if not isinstance(x, str) or not TAG_VALUE.match(x):
+                raise BadEvent(f"{where}.{group}: value {str(x)[:30]!r} must match {TAG_VALUE.pattern}")
+            if x not in clean:
+                clean.append(x)
+        out[group] = clean
+    return out
+
+
+def public_meta(meta):
+    """Step metadata for the API: `seed` is also given as the string `seed_str` (exact: a browser parses JSON numbers
+    as doubles, which round a seed above 2**53)."""
+    meta = dict(meta or {})
+    if isinstance(meta.get("seed"), int) and not isinstance(meta["seed"], bool):
+        meta["seed_str"] = str(meta["seed"])
+    return meta
+
+
+def merge_tags(stored, given):
+    """The build's tags after an event: each given group replaces the stored one; an empty list removes it."""
+    out = {g: list(v) for g, v in (stored or {}).items()}
+    for g, vals in (given or {}).items():
+        if vals:
+            out[g] = list(vals)
+        else:
+            out.pop(g, None)
+    return dict(list(out.items())[:MAX_TAG_GROUPS])
+
+
+# ------------------------------------------------------------------ tag registry and inference (old builds)
+def fold(text):
+    """Lower case ASCII: 'Phượng hoàng Đỏ' -> 'phuong hoang do' (accents and đ folded)."""
+    text = str(text or "").replace("đ", "d").replace("Đ", "D")
+    return "".join(c for c in unicodedata.normalize("NFKD", text) if not unicodedata.combining(c)).lower()
+
+
+def slugify(text, most=48):
+    s = re.sub(r"[^a-z0-9._-]+", "-", fold(text)).strip("-._")[:most].strip("-._")
+    return s if s and TAG_VALUE.match(s) else None
+
+
+class Registry:
+    """tags.json (shipped with the server) merged with the optional <media>/_tags.json (project labels, e.g. the subjects
+    of a series, kept out of the repo); re-read when either file changes. Never raises: a broken file counts as empty.
+    Labels are public text: scrubbed like every other string."""
+
+    def __init__(self, path, overlay=None):
+        self.paths = [p for p in (path, overlay) if p]
+        self.sig = None
+        self.data = {"version": 1, "groups": {}}
+        self.lock = threading.Lock()
+
+    def get(self):
+        sig = []
+        for p in self.paths:
+            try:
+                st = os.stat(p)
+                sig.append((p, st.st_mtime_ns, st.st_size))
+            except OSError:
+                sig.append((p, None, None))
+        with self.lock:
+            if sig != self.sig:
+                self.sig = sig
+                self.data = {"version": 1, "groups": read_registry([p for p, m, _ in sig if m is not None])}
+            return self.data
+
+
+def read_registry(paths):
+    """Groups of the registry files, later files merged over earlier ones (values added or relabelled)."""
+    groups = {}
+    for p in paths:
+        try:
+            with open(p, encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(doc, dict) or not isinstance(doc.get("groups"), dict):
+            continue
+        for name, g in doc["groups"].items():
+            if not isinstance(g, dict) or not TAG_GROUP.match(str(name)) or name in RESERVED_GROUPS:
+                continue
+            cur = groups.setdefault(name, {"label": name, "color": "#8d9ab2", "values": {}})
+            if isinstance(g.get("values"), dict):
+                cur["values"].update({str(a): scrub(str(b), 60) for a, b in g["values"].items()
+                                      if TAG_VALUE.match(str(a))})
+            for k in ("label", "color"):
+                if isinstance(g.get(k), str):
+                    cur[k] = scrub(g[k], 60)
+            if isinstance(g.get("open"), bool):
+                cur["open"] = g["open"]
+            if isinstance(g.get("pattern"), str):
+                cur["pattern"] = g["pattern"][:200]
+            if isinstance(g.get("labels_re"), list):
+                cur["labels_re"] = [[str(x[0])[:200], scrub(str(x[1]), 60)] for x in g["labels_re"]
+                                    if isinstance(x, list) and len(x) == 2][:10]
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", cur["color"]):
+                cur["color"] = "#8d9ab2"
+    return groups
+
+
+ENGINE_RULES = ((r"blender", "blender"), (r"qwen", "comfy-qwen"), (r"(?<![a-z0-9])h3(?![a-z0-9])|minimax", "comfy-h3"),
+                (r"seedance", "seedance"), (r"seedream", "seedream"), (r"(?<![a-z-])toon(?![a-z-])", "toon"),
+                (r"three\.?js", "three"), (r"(?<![a-z])tts(?![a-z])|vieneu", "tts"))
+LOOK_RULES = ((r"realistic|ta thuc|chan thuc|chan-thuc", "realistic"), (r"ink[- ]?wash|thuy[- ]mac", "ink-wash"),
+              (r"toon[- ]ink", "toon-ink"), (r"(?<![a-z])clay(?![a-z])|dat set", "clay"),
+              (r"gr[ae]y[- ]?layout|layout xam", "grey-layout"))
+STAGE_RULES = ((r"lookdev", "lookdev"), (r"(?<![a-z0-9])g2(?![0-9])", "g2"), (r"(?<![a-z0-9])g3(?![0-9])", "g3"),
+               (r"(?<![a-z])final(?![a-z])|ban cuoi", "final"))
+KIND_RULES = ((r"(?<![a-z])concept(?![a-z])", "concept"), (r"turntable|(?<![a-z0-9])tt(?![a-z0-9])", "turntable"))
+EPISODE = re.compile(r"(?<![a-z0-9])q\s*0*(\d{1,2})\s*[·.\-_ ]?\s*t\s*0*(\d{1,2})(?![0-9])"
+                     r"|(?<![a-z0-9])ep\s*0*(\d{1,3})(?![0-9])")
+SHOT = re.compile(r"(?<![a-z0-9])s(\d{2,3})(?![0-9])")
+
+
+def infer_tags(bid, title, kind, project, registry=None):
+    """Tags of a build that was published without any (old builds, old callers), guessed from its id, title, kind and
+    project: kind, engine, look, stage, episode, shot, project and the registry's subjects. Only what is recognised."""
+    text = fold(f"{bid} {title or ''}").replace("_", " ")
+    tags = {}
+    k = kind if kind in KINDS else None
+    for pat, val in KIND_RULES:
+        if re.search(pat, text):
+            k = val
+            break
+    if k:
+        tags["kind"] = [k]
+    for group, rules in (("engine", ENGINE_RULES), ("look", LOOK_RULES), ("stage", STAGE_RULES)):
+        vals = list(dict.fromkeys(v for pat, v in rules if re.search(pat, text)))
+        if group == "look" and "grey-layout" in vals:
+            vals = ["grey-layout"]
+        if vals:
+            tags[group] = vals[:MAX_TAG_VALUES]
+    m = EPISODE.search(text)
+    if m:
+        tags["episode"] = [f"q{int(m.group(1)):02d}t{int(m.group(2)):02d}" if m.group(1) else f"ep{int(m.group(3)):02d}"]
+    shots = list(dict.fromkeys(f"s{int(x):02d}" for x in SHOT.findall(text)))
+    if shots:
+        tags["shot"] = shots[:MAX_TAG_VALUES]
+    if project and slugify(project):
+        tags["project"] = [slugify(project)]
+    groups = (registry.get() if registry else {}).get("groups") or {}
+    subs = []
+    for slug, label in ((groups.get("subject") or {}).get("values") or {}).items():
+        words = [slug.replace("-", " ").replace("_", " ")] + ([fold(label)] if label else [])
+        if any(w and re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", text.replace("-", " "))
+               for w in words):
+            subs.append(slug)
+    if subs:
+        tags["subject"] = subs[:MAX_TAG_VALUES]
+    return tags
+
+
+def _tag_like(part):
+    p = fold(part).strip()
+    if not p or len(p.split()) > 3:
+        return False
+    if EPISODE.fullmatch(p) or SHOT.fullmatch(p) or p in ("image", "render", "model", "clip"):
+        return True
+    return any(re.search(pat, p) for pat, _ in ENGINE_RULES + LOOK_RULES + STAGE_RULES + KIND_RULES)
+
+
+def display_name(title):
+    """The title without the annotations that are chips now: '(Blender, realistic)', '(Qwen-Image)', ' · Q1·T3'.
+    An annotation goes only when every part of it is recognised; never empty."""
+    t = str(title or "")
+    t2 = re.sub(r"\s*\(([^()]{1,80})\)",
+                lambda m: "" if all(_tag_like(x) for x in m.group(1).split(",")) else m.group(0), t)
+    parts = re.split(r"\s+·\s+", t2)
+    if len(parts) > 1:
+        parts = [parts[0]] + [p for p in parts[1:] if not _tag_like(p)]
+    out = " · ".join(parts).strip(" ·-")
+    return out or t
 
 
 # --- machine metrics and ComfyUI state (monitor.py). The public page shows them: names are tightly limited so a path,
@@ -305,6 +537,7 @@ PROC_LABELS = frozenset({"blender", "ComfyUI Desktop", "ComfyUI (python)", "ffmp
 DISK_NAME = re.compile(r"^(?:[A-Z]:|/)$")
 GPU_NAME = re.compile(r"^[A-Za-z0-9 ._()+-]{1,60}$")
 PROMPT_ID = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+GPU_OWNER = re.compile(r"^[A-Za-z0-9 _.:/-]{1,60}$")     # monitor.py's gpu_owner_label() gives exactly this
 BIG = 1e16
 GPU_FIELDS = {"util": (0, 100), "mem_used": (0, BIG), "mem_total": (0, BIG), "temp": (-50, 200), "power": (0, 5000)}
 CURRENT_FIELDS = {"step": (0, 1e7), "total": (1, 1e7), "pct": (0, 100), "s_per_step": (0, 1e7), "elapsed": (0, 1e8),
@@ -347,11 +580,19 @@ def validate_sys(ev):
     """A metrics or comfy event of monitor.py -> (type, clean dict). Raises BadEvent."""
     kind = ev.get("type")
     if kind == "metrics":
-        _sys_keys("metrics", ev, ("type", "t", "cpu", "ram_used", "ram_total", "gpus", "disks", "procs"))
+        _sys_keys("metrics", ev, ("type", "t", "cpu", "ram_used", "ram_total", "gpus", "disks", "procs", "gpu_owner"))
         out = {"cpu": _sys_num("metrics: cpu", ev.get("cpu"), 0, 100),
                "ram_used": _sys_num("metrics: ram_used", ev.get("ram_used"), 0, BIG, True),
                "ram_total": _sys_num("metrics: ram_total", ev.get("ram_total"), 0, BIG, True),
-               "gpus": [], "disks": [], "procs": []}
+               "gpus": [], "disks": [], "procs": [], "gpu_owner": None}
+        owner = ev.get("gpu_owner")
+        if owner is not None:           # who holds the GPU lock (tools/gpu_run.py): a free-text label, tightly limited
+            _sys_keys("metrics: gpu_owner", owner, ("label", "since"))
+            label = owner.get("label")
+            if not isinstance(label, str) or not GPU_OWNER.fullmatch(label):
+                raise BadEvent(f"metrics: gpu_owner.label must match {GPU_OWNER.pattern}")
+            out["gpu_owner"] = {"label": scrub(label, 60),
+                                "since": _sys_num("metrics: gpu_owner.since", owner.get("since"), 0, 1e11)}
         for i, g in enumerate(_sys_list("metrics: gpus", ev.get("gpus"), 8)):
             _sys_keys(f"metrics: gpus[{i}]", g, ("name",) + tuple(GPU_FIELDS))
             name = g.get("name")
@@ -450,20 +691,79 @@ def downsample(rows, bucket=MINUTE):
 
 
 # ------------------------------------------------------------------ storage
+def load_tags(text):
+    try:
+        d = json.loads(text) if text else {}
+    except ValueError:
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def effective_tags(b):
+    """The tags of a build row for the API: the stored tags, plus kind and project from their columns when the tags do
+    not name them (every card gets a kind chip)."""
+    tags = load_tags(b.get("tags"))
+    if not tags.get("kind") and b.get("kind"):
+        tags = dict({"kind": [b["kind"]]}, **tags)
+    if not tags.get("project") and b.get("project") and slugify(b["project"]):
+        tags["project"] = [slugify(b["project"])]
+    return tags
+
+
 class Store:
     """The SQLite database (one connection, one lock: this process is its only user)."""
 
-    def __init__(self, path):
+    def __init__(self, path, registry=None):
         if path != ":memory:":
             os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.lock = threading.Lock()
+        self.registry = registry
         with self.lock:
             self.db.execute("PRAGMA journal_mode=WAL")
-            self.db.execute("PRAGMA foreign_keys=ON")
             self.db.execute("PRAGMA busy_timeout=5000")
             self.db.executescript(SCHEMA)
+            self._migrate()
+            self.db.execute("PRAGMA foreign_keys=ON")
+
+    def _migrate(self):
+        """Bring a database of an older server up to SCHEMA_VERSION (idempotent, one transaction).
+        v2: builds loses the CHECK on kind (new kinds image/concept) and gains tags, back-filled by infer_tags() from
+        the id, title, kind and project; steps gains meta; jobs gains label/step/steps/item/items/eta.
+        Foreign keys are off while builds is rebuilt (its steps, renders and jobs must not cascade away)."""
+        db = self.db
+        if db.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+            return
+
+        def cols(table):
+            return {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        db.execute("PRAGMA foreign_keys=OFF")
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            sql = db.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='builds'").fetchone()[0]
+            if "kind IN" in sql or "tags" not in cols("builds"):
+                keep = ", ".join(c for c in BUILD_COLS if c in cols("builds"))
+                db.execute("DROP TABLE IF EXISTS builds_v2")
+                db.execute(BUILDS_TABLE.format(name="builds_v2"))
+                db.execute(f"INSERT INTO builds_v2 ({keep}) SELECT {keep} FROM builds")
+                db.execute("DROP TABLE builds")
+                db.execute("ALTER TABLE builds_v2 RENAME TO builds")
+            if "meta" not in cols("steps"):
+                db.execute("ALTER TABLE steps ADD COLUMN meta TEXT")
+            have = cols("jobs")
+            for col, typ in (("label", "TEXT"), ("step", "INTEGER"), ("steps", "INTEGER"), ("item", "INTEGER"),
+                             ("items", "INTEGER"), ("eta", "REAL")):
+                if col not in have:
+                    db.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
+            for r in db.execute("SELECT id, title, kind, project FROM builds WHERE tags IS NULL").fetchall():
+                tags = infer_tags(r["id"], r["title"], r["kind"], r["project"], self.registry)
+                db.execute("UPDATE builds SET tags=? WHERE id=?", (json.dumps(tags), r["id"]))
+            db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK")
+            raise
 
     def close(self):
         with self.lock:
@@ -473,7 +773,11 @@ class Store:
     def _summary(self, row):
         b = dict(row)
         bid = b["id"]
+        b["tags"] = effective_tags(b)
+        b["name"] = display_name(b["title"])
         b["steps"] = self.db.execute("SELECT COUNT(*) FROM steps WHERE build=?", (bid,)).fetchone()[0]
+        b["images"] = self.db.execute("SELECT COUNT(*) FROM steps WHERE build=? AND image IS NOT NULL",
+                                      (bid,)).fetchone()[0]
         b["renders"] = self.db.execute("SELECT COUNT(*) FROM renders WHERE build=?", (bid,)).fetchone()[0]
         last = self.db.execute("SELECT glb FROM steps WHERE build=? AND glb IS NOT NULL ORDER BY n DESC LIMIT 1",
                                (bid,)).fetchone()
@@ -484,7 +788,7 @@ class Store:
 
     def builds(self):
         with self.lock:
-            rows = self.db.execute("SELECT * FROM builds ORDER BY updated DESC").fetchall()
+            rows = self.db.execute("SELECT * FROM builds ORDER BY updated DESC, rowid DESC").fetchall()
             return [self._summary(r) for r in rows]
 
     def build(self, bid):
@@ -502,11 +806,14 @@ class Store:
         out = []
         for r in rows:
             d = dict(r)
-            if "stats" in d:
-                try:
-                    d["stats"] = json.loads(d["stats"]) if d["stats"] else {}
-                except ValueError:
-                    d["stats"] = {}
+            for col in ("stats", "meta"):
+                if col in d:
+                    try:
+                        d[col] = json.loads(d[col]) if d[col] else {}
+                    except ValueError:
+                        d[col] = {}
+            if isinstance(d.get("meta"), dict):
+                d["meta"] = public_meta(d["meta"])
             out.append(d)
         return out
 
@@ -514,14 +821,15 @@ class Store:
     def _ensure(self, bid, now, kind="model"):
         row = self.db.execute("SELECT id FROM builds WHERE id=?", (bid,)).fetchone()
         if not row:
-            self.db.execute("INSERT INTO builds (id, title, kind, status, progress, started, updated) "
-                            "VALUES (?, ?, ?, 'building', 0, ?, ?)", (bid, bid, kind, now, now))
+            tags = json.dumps(infer_tags(bid, bid, kind, None, self.registry))
+            self.db.execute("INSERT INTO builds (id, title, kind, status, progress, started, updated, tags) "
+                            "VALUES (?, ?, ?, 'building', 0, ?, ?, ?)", (bid, bid, kind, now, now, tags))
             self._prune_builds(bid)
 
     def _prune_builds(self, keep):
         """Retention: at most MAX_BUILDS builds; the least recently updated go (their rows cascade). Never `keep`."""
-        self.db.execute("DELETE FROM builds WHERE id IN (SELECT id FROM builds WHERE id != ? ORDER BY updated DESC "
-                        "LIMIT -1 OFFSET ?)", (keep, max(0, MAX_BUILDS - 1)))
+        self.db.execute("DELETE FROM builds WHERE id IN (SELECT id FROM builds WHERE id != ? ORDER BY updated DESC, "
+                        "rowid DESC LIMIT -1 OFFSET ?)", (keep, max(0, MAX_BUILDS - 1)))
 
     def _prune_rows(self, table, bid, newest_first, most):
         """Retention: at most `most` rows of one build in steps/renders/jobs (the rest of `newest_first` go)."""
@@ -546,10 +854,15 @@ class Store:
         if kind == "build":
             row = db.execute("SELECT * FROM builds WHERE id=?", (bid,)).fetchone()
             if row is None:
+                title, kind = f.get("title") or bid, f.get("kind") or "model"
+                if "tags" in f:
+                    tags = merge_tags({}, f["tags"])
+                else:               # an old caller: guess them (kind, engine, look, episode... from id and title)
+                    tags = infer_tags(bid, title, kind, f.get("project"), self.registry)
                 db.execute("INSERT INTO builds (id, title, kind, project, status, progress, expected_steps, started, "
-                           "updated) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
-                           (bid, f.get("title") or bid, f.get("kind") or "model", f.get("project"),
-                            f.get("status") or "building", f.get("expected_steps"), now, now))
+                           "updated, tags) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)",
+                           (bid, title, kind, f.get("project"), f.get("status") or "building",
+                            f.get("expected_steps"), now, now, json.dumps(tags)))
                 self._prune_builds(bid)
             else:
                 sets, vals = ["updated=?"], [now]
@@ -557,6 +870,9 @@ class Store:
                     if col in f:
                         sets.append(f"{col}=?")
                         vals.append(f[col])
+                if "tags" in f:
+                    sets.append("tags=?")
+                    vals.append(json.dumps(merge_tags(load_tags(row["tags"]), f["tags"])))
                 if f.get("status") in ("queued", "building", "rendering"):
                     sets.append("finished=NULL")
                 if f.get("restart"):            # a new run of the same build: its old steps and jobs go
@@ -574,10 +890,12 @@ class Store:
             if n is None:
                 n = db.execute("SELECT COALESCE(MAX(n), 0) + 1 FROM steps WHERE build=?", (bid,)).fetchone()[0]
             stats = json.dumps(f.get("stats") or {}, ensure_ascii=False)
-            db.execute("INSERT INTO steps (build, n, label, stats, glb, image, t) VALUES (?, ?, ?, ?, ?, ?, ?) "
+            meta = {k: f[k] for k in STEP_META if k in f}
+            db.execute("INSERT INTO steps (build, n, label, stats, glb, image, t, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                        "ON CONFLICT(build, n) DO UPDATE SET label=excluded.label, stats=excluded.stats, "
-                       "glb=excluded.glb, image=excluded.image, t=excluded.t",
-                       (bid, n, f["label"], stats, f.get("glb"), f.get("image"), now))
+                       "glb=excluded.glb, image=excluded.image, t=excluded.t, meta=excluded.meta",
+                       (bid, n, f["label"], stats, f.get("glb"), f.get("image"), now,
+                        json.dumps(meta, ensure_ascii=False) if meta else None))
             self._prune_rows("steps", bid, "n DESC", MAX_STEPS)
             exp = db.execute("SELECT expected_steps FROM builds WHERE id=?", (bid,)).fetchone()[0]
             prog = min(1.0, n / exp) if exp else None
@@ -592,7 +910,7 @@ class Store:
                 vals.append(f["image"])
             db.execute(f"UPDATE builds SET {', '.join(sets)} WHERE id=?", vals + [bid])
             return {"build": bid, "n": n, "label": f["label"], "stats": f.get("stats") or {}, "glb": f.get("glb"),
-                    "image": f.get("image"), "t": now}
+                    "image": f.get("image"), "t": now, "meta": public_meta(meta)}
         if kind == "progress":
             sets, vals = ["progress=?", "updated=?"], [f["progress"], now]
             if "message" in f:
@@ -624,13 +942,15 @@ class Store:
             return dict({c: f.get(c) for c in cols}, id=rid, build=bid, t=now)
         if kind == "job":
             key = f.get("job") or f["tool"]
-            db.execute("INSERT INTO jobs (build, job, tool, status, progress, gpu_s, message, started, t) "
-                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(build, job) DO UPDATE SET "
+            detail = tuple(JOB_DETAIL)
+            db.execute(f"INSERT INTO jobs (build, job, tool, status, progress, gpu_s, message, started, t, "
+                       f"{', '.join(detail)}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, {', '.join('?' * len(detail))}) "
+                       "ON CONFLICT(build, job) DO UPDATE SET "
                        "tool=excluded.tool, status=excluded.status, progress=COALESCE(excluded.progress, progress), "
                        "gpu_s=COALESCE(excluded.gpu_s, gpu_s), message=COALESCE(excluded.message, message), "
-                       "t=excluded.t",
+                       "t=excluded.t, " + ", ".join(f"{c}=COALESCE(excluded.{c}, {c})" for c in detail),
                        (bid, key, f["tool"], f["status"], f.get("progress"), f.get("gpu_s"), f.get("message"),
-                        now, now))
+                        now, now) + tuple(f.get(c) for c in detail))
             self._prune_rows("jobs", bid, "t DESC, id DESC", MAX_JOBS)
             sets, vals = ["updated=?"], [now]
             if f["status"] == "running":
@@ -682,12 +1002,17 @@ class Store:
         return out
 
     def comfy_build(self, prompt_id):
-        """The build whose comfy.py job ran this prompt (comfy.py --review names the job comfy-<prompt id>)."""
+        """The build whose comfy.py job ran this prompt (comfy.py --review names the job comfy-<prompt id>), with the
+        job's workflow label and batch position (image k/N) when comfy.py sent them."""
         with self.lock:
-            row = self.db.execute("SELECT j.build, b.title FROM jobs j JOIN builds b ON b.id = j.build "
+            row = self.db.execute("SELECT j.build, b.title, b.kind, j.label, j.item, j.items, j.step, j.steps "
+                                  "FROM jobs j JOIN builds b ON b.id = j.build "
                                   "WHERE j.tool = 'comfy' AND j.job = ? ORDER BY j.t DESC LIMIT 1",
                                   ("comfy-" + prompt_id,)).fetchone()
-        return {"id": row[0], "title": row[1]} if row else None
+        if not row:
+            return None
+        return {"id": row[0], "title": display_name(row[1]), "kind": row[2], "workflow": row[3], "item": row[4],
+                "items": row[5], "step": row[6], "steps": row[7]}
 
 
 # ------------------------------------------------------------------ live events
@@ -820,17 +1145,19 @@ class Machine:
     def set_comfy(self, state, now=None):
         now = self.clock() if now is None else now
         state = dict(state, t=round(now, 2))
-        state["build"] = self.link(state.get("prompt_id"))
+        state["build"] = self.link(state.get("prompt_id"), fresh=True)
         for h in state.get("history") or []:
             h["build"] = self.link(h.get("prompt_id"))
         with self.lock:
             self.comfy = state
         return state
 
-    def link(self, pid):
+    def link(self, pid, fresh=False):
+        """The build of a prompt. fresh: the running prompt, read again each time (its image k/N moves on); finished
+        prompts come from the cache."""
         if not pid:
             return None
-        if pid in self.links:
+        if pid in self.links and not fresh:
             return self.links[pid]
         b = self.store.comfy_build(pid)
         if b:
@@ -946,10 +1273,15 @@ class Reaper:
                     pass
 
 
+DEFAULT_TAGS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tags.json")
+OVERLAY_TAGS = "_tags.json"        # in the media root: project labels (never a build folder: ids start [A-Za-z0-9])
+
+
 class App:
     def __init__(self, db, media, web, host="0.0.0.0", public_port=8790, ingest_port=8791, quiet=False,
-                 ingest_hosts=()):
-        self.store = Store(db)
+                 ingest_hosts=(), tags=None):
+        self.registry = Registry(tags or DEFAULT_TAGS, os.path.join(os.path.abspath(media), OVERLAY_TAGS))
+        self.store = Store(db, self.registry)
         self.hub = Hub()
         self.reaper = Reaper()
         self.ingest_hosts = {h.strip().lower() for h in ingest_hosts if h.strip()}
@@ -1130,6 +1462,8 @@ class PublicHandler(Base):
             return self.send_json({"comfy": st["comfy"], "age": st["comfy_age"], "online": st["comfy_online"]})
         if parts == ["builds"]:
             return self.send_json({"builds": store.builds()})
+        if parts == ["tags"]:
+            return self.send_json(self.app.registry.get())
         if parts == ["renders"]:
             builds = {b["id"]: b for b in store.builds()}
             rows = store.rows("renders")
@@ -1355,12 +1689,14 @@ def main(argv=None):
     p.add_argument("--public-port", type=int, default=8790)
     p.add_argument("--ingest-port", type=int, default=8791)
     p.add_argument("--quiet", action="store_true")
+    p.add_argument("--tags", default=os.environ.get("REVIEW_TAGS", DEFAULT_TAGS),
+                   help="tag registry (default tags.json next to server.py); <media>/_tags.json is merged over it")
     p.add_argument("--ingest-host", action="append", default=(os.environ.get("REVIEW_INGEST_HOSTS") or "").split(","),
                    help="another accepted Host of the ingest port (host:port), e.g. when it is published on another "
                         "port; 127.0.0.1|localhost|[::1]:<ingest port> are always accepted")
     a = p.parse_args(argv)
     mimetypes.init()
-    app = App(a.db, a.media, a.web, a.host, a.public_port, a.ingest_port, a.quiet, a.ingest_host).start()
+    app = App(a.db, a.media, a.web, a.host, a.public_port, a.ingest_port, a.quiet, a.ingest_host, a.tags).start()
     print(f"film-lab-review {VERSION}: public :{app.public_port} (read-only) · ingest :{app.ingest_port} · "
           f"db {a.db} · media {a.media}", flush=True)
     try:

@@ -50,6 +50,11 @@ CC BY-NC 4.0) are not offered. The library's audio watermark (resemble-perth) is
 
 Not installed? docs/setup-script.sh installs vieneu==3.8.3 and the watermark (requirements-tts.txt); by hand see
 tools/tts/README.md. Without vieneu the tool prints the hint and exits 3.
+
+Interpreter: FILM_TTS_PYTHON=<python of a venv that holds vieneu> (the Windows lab host keeps one on D:, see
+docs/setup-local-windows.md) makes `python3 tools/tts/vieneu_tts.py ...` run itself again under that interpreter, same
+arguments and environment (FILM_TTS_REEXEC=1 marks the child, so it never loops); a value that is not an executable
+file is an input error (exit 2). Unset = the current interpreter, as before.
 """
 import argparse, csv, hashlib, json, math, os, re, shutil, subprocess, sys, time, unicodedata, wave
 try:
@@ -58,6 +63,8 @@ except ImportError:             # pragma: no cover
     fcntl = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+TTS_PYTHON_ENV = "FILM_TTS_PYTHON"   # interpreter (venv) that has vieneu: the tool runs itself again under it
+REEXEC_ENV = "FILM_TTS_REEXEC"       # set to 1 in the child: never re-run twice
 LAB = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.dirname(HERE))
 import check_episode  # noqa: E402  (tools/check_episode.py: the one script.md parser)
@@ -1178,6 +1185,38 @@ def build_parser():
     return p
 
 
+def reexec_command(argv, env=None, current=None):
+    """[interpreter, this script, *argv] when FILM_TTS_PYTHON names another interpreter than the current one and this
+    process is not already the re-run (FILM_TTS_REEXEC=1); None to run here. ValueError when FILM_TTS_PYTHON is set
+    but is not an executable file. Paths are compared without resolving symlinks: a venv's python is often a link
+    to the system one, and only the path it is started by selects the venv."""
+    env = os.environ if env is None else env
+    py = (env.get(TTS_PYTHON_ENV) or "").strip().strip('"')
+    if not py or env.get(REEXEC_ENV) == "1":
+        return None
+    if not (os.path.isfile(py) and os.access(py, os.X_OK)):
+        raise ValueError(f"{TTS_PYTHON_ENV}={py}: not an executable interpreter (docs/setup-local-windows.md); "
+                         f"unset it to use {current or sys.executable}")
+    norm = lambda p: os.path.normcase(os.path.abspath(p))
+    if norm(py) == norm(current or sys.executable):
+        return None
+    return [py, os.path.abspath(__file__), *argv]
+
+
+def run(argv=None):
+    """Command line entry: run again under FILM_TTS_PYTHON when it names another interpreter, else main()."""
+    argv = sys.argv[1:] if argv is None else list(argv)
+    try:
+        cmd = reexec_command(argv)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return EXIT_INPUT
+    if cmd is None:
+        return main(argv)
+    sys.stdout.flush()
+    return subprocess.run(cmd, env=dict(os.environ, **{REEXEC_ENV: "1"})).returncode
+
+
 def main(argv=None, make_engine=None):
     a = build_parser().parse_args(argv)
     make_engine = make_engine or (lambda args: VieneuEngine(args.mode, args.precision, args.threads))
@@ -1206,4 +1245,4 @@ def main(argv=None, make_engine=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(run())

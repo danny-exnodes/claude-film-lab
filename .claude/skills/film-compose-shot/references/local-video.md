@@ -20,7 +20,9 @@ của tập này: dừng, ghi Nhật ký, báo người dùng mở phiên local.
   cuối `ok|failed|interrupted`, model `comfy:h3-i2v` / `comfy:h3-r2v`, `usage` = `gpu_s=<n>`. Không chạy lại một request
   đã gửi mà chưa xem `/history`; `comfy.py interrupt` chỉ dừng prompt của mình.
 - Không ghi đè: `--out` đã có → mã 2, tăng `_v<NN>`. Mã thoát như `ark.py`: 0 xong · 2 từ chối tại chỗ · 1 đã gửi và lỗi.
-- Một việc GPU một lúc: không chạy clip khi Blender đang render.
+- Một việc GPU một lúc: không chạy clip khi Blender đang render. `comfy.py run` tự giữ khoá GPU của lab và chờ khi việc
+  khác đang giữ (`FILM_GPU_QUEUE=0` tắt); ai đang giữ: `python tools/gpu_run.py status`; lệnh GPU khác:
+  `python tools/gpu_run.py --label <agent> -- <lệnh>`.
 
 ## 2. Lệnh
 

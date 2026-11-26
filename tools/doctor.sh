@@ -79,9 +79,18 @@ v=$(python3 -c "import yaml; print(yaml.__version__)" 2>/dev/null) && ok pyyaml 
 # requirements-tts.txt and installed by docs/setup-script.sh. Quick mode looks the modules up, full mode imports them.
 # Missing = WARN (only narration needs them); the watermark is a FAIL with --episode DIR once G3 is dated and the
 # episode has narration: a final take without it must be read again (#37).
+# FILM_TTS_PYTHON (the lab host's venv on D:, docs/setup-local-windows.md): both lines look into that interpreter, the
+# one tools/tts/vieneu_tts.py runs itself under; set but not an executable file = WARN (FAIL for the watermark as above).
 tts_hint="pip install --break-system-packages -r requirements-tts.txt, CPU torch first (tools/tts/README.md)"
+tts_py=python3; tts_venv=""
+if [ -n "${FILM_TTS_PYTHON:-}" ]; then
+  tts_venv=" in FILM_TTS_PYTHON"
+  if [ -f "$FILM_TTS_PYTHON" ] && [ -x "$FILM_TTS_PYTHON" ]; then tts_py=$FILM_TTS_PYTHON
+  else tts_py=""; tts_hint="FILM_TTS_PYTHON=$FILM_TTS_PYTHON is not an executable interpreter: fix or unset it (docs/setup-local-windows.md)"; fi
+fi
 pymods() {  # <distributions a,b> <modules...>: "a X + b Y" or exit 1 with why (quick: looked up, full: imported)
-  python3 - "$QUICK" "$@" 2>&1 <<'PY'
+  [ -n "$tts_py" ] || { echo "FILM_TTS_PYTHON not usable"; return 1; }
+  "$tts_py" - "$QUICK" "$@" 2>&1 <<'PY'
 import importlib.metadata as m, importlib.util as u, sys
 quick, mods = sys.argv[1] == "1", sys.argv[3:]
 if quick:
@@ -107,12 +116,12 @@ tts_pin=$(sed -n -E 's/^vieneu==([^[:space:]#]+).*/\1/p' "$LAB/requirements-tts.
 hub="${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}"
 if ls -d "$hub"/models--pnnbao-ump--VieNeu-TTS-v3-Turbo/snapshots/*/ >/dev/null 2>&1; then model="v3 Turbo model cached"
 else model="v3 Turbo model not cached (~300 MB on first use; FILM_TTS_PREFETCH=1 in docs/setup-script.sh)"; fi
-if [ $rc != 0 ]; then warn tts "$(echo "$v" | tail -1 | cut -c1-60): narration needs it; $tts_hint"
-elif [ "${v%% (imported)}" = "vieneu $tts_pin" ]; then ok tts "$v, $model"
-else warn tts "$v, pinned $tts_pin in requirements-tts.txt; $model"; fi
+if [ $rc != 0 ]; then warn tts "$(echo "$v" | tail -1 | cut -c1-60)$tts_venv: narration needs it; $tts_hint"
+elif [ "${v%% (imported)}" = "vieneu $tts_pin" ]; then ok tts "$v$tts_venv, $model"
+else warn tts "$v$tts_venv, pinned $tts_pin in requirements-tts.txt; $model"; fi
 v=$(pymods resemble-perth,torch perth torch); rc=$?
 read -r ep_g3 ep_lines <<< "$(echo "${EP_INFO:-- 0}" | tail -1)"
-if [ $rc = 0 ]; then ok tts-watermark "$v"
+if [ $rc = 0 ]; then ok tts-watermark "$v$tts_venv"
 elif [ "$ep_g3" != "-" ] && [ "${ep_lines:-0}" -gt 0 ]; then
   bad tts-watermark "$(echo "$v" | tail -1 | cut -c1-50); $EPISODE passed G3 ($ep_g3) with narration: final takes need it; $tts_hint"
 else warn tts-watermark "$(echo "$v" | tail -1 | cut -c1-50): narration drafts read without it; $tts_hint"; fi

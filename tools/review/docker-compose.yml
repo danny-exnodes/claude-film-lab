@@ -1,7 +1,9 @@
 # Film Lab review web app: python tools/review/review.py up [--no-ngrok]  (README.md in this folder).
 # Both ports are published on 127.0.0.1 only: ngrok on the host tunnels 8790 (read-only); 8791 (ingest) is never public.
 # The SQLite database lives in the named volume review-db; only this container opens it.
-# Media: <lab>/out/_review/media, mounted read-only (out/ is git-ignored).
+# Media: $FILM_REVIEW_MEDIA_MOUNT (review.py up sets it to FILM_REVIEW_MEDIA, else out/_review/media of the lab's
+# MAIN checkout, the folder every client writes to), else <this checkout>/out/_review/media; mounted read-only.
+# The image build fails early when web/vendor/three is missing (python tools/review/vendor_three.py --from ...).
 name: film-lab-review
 
 services:
@@ -16,7 +18,7 @@ services:
       - "127.0.0.1:8791:8791"
     volumes:
       - review-db:/data
-      - ../../out/_review/media:/media:ro
+      - ${FILM_REVIEW_MEDIA_MOUNT:-../../out/_review/media}:/media:ro
     read_only: true
     tmpfs:
       - /tmp

@@ -54,7 +54,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <đường dẫn> --size <fileSize>` (đọc kết quả
    trong bản ghi phiên, kiểm kích thước, đánh dấu đã kéo; nhiều file một lệnh được). **Không bao giờ chép lại base64
    bằng tay.** Mỗi file vẫn tốn ≈ 1,33 × kích thước của nó trong ngữ cảnh: vẫn kéo theo khâu. Lệch kích thước hay
-   không thấy kết quả → tải lại; file do agent con tải → `--transcript <glob>` (CONVENTIONS §11.6 bước 2).
+   không thấy kết quả → tải lại; file do agent con tải → `--transcript <glob>` (CONVENTIONS §11.6 bước 2). Phiên local:
+   connector trả `Binary content (…) saved to <file>` → `save` tự đọc file đó; cần thì `--from-file <file> --size <fileSize>`.
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
    ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
    `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –
@@ -72,9 +73,12 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 **Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
 1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (không gọi mạng).
    Mã thoát 1 = có thư mục thiếu ID (`MISSING – create folder … under <ID cha> first`) hoặc file UNMAPPED: tạo thư mục
-   (`create_file` folder), ghi ID vào `drive.folders` của `PROJECT.md`, chạy lại `plan`. Media trong danh sách
-   (gói shot, bản nháp, bản cuối, ảnh khóa) chỉ đẩy khi người dùng đã duyệt; `[sheet]` `TienDo_SanXuat` theo bước 3.
-   Báo người dùng danh sách trước khi tải.
+   (`create_file` folder), ghi ID vào `drive.folders` của `PROJECT.md`, chạy lại `plan`. Gói shot và ảnh khóa chỉ đẩy
+   khi người dùng đã duyệt. **Render (bản nháp, bản cuối), lời bình `vo/`, âm thanh `audio/` đẩy ngay khi tạo xong**,
+   chưa cần duyệt, vào `04_SanXuat/ep<NN>-<slug>/_ChuaDuyet/` (`plan` đã ánh xạ sẵn): container cloud bị thu hồi là mất
+   (SHK Q1·T3, 11/2026: mất cả bản 600 s chờ G4). `plan` in `!!! UNSAVED MEDIA` (cả khi không có `--include-out`) khi
+   còn file như vậy chưa lên Drive, và `status.py` có dòng `UNSAVED media`: không dừng phiên khi còn dòng đó.
+   `[sheet]` `TienDo_SanXuat` theo bước 3. Báo người dùng danh sách trước khi tải.
 2. Mỗi file đúng theo `plan`: với file CHANGED, trước khi tải chạy câu `search_files` của nó – kết quả có
    `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về, gộp trước.
    `create_file` (`title`, `parentId`, `contentMimeType`, `base64Content=sha256:<hex>:<đường dẫn tuyệt đối>`,
@@ -90,6 +94,7 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy
    lại phải in `Nothing to push.` trừ file cố ý chưa đẩy (`Nothing to push (text). N plate/clip file(s) are in no
    bundle…` = chữ đã đẩy hết nhưng còn plate/clip chỉ có trong container: báo người dùng trước khi dừng). Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+   Trước khi dừng phiên cloud: `plan` không còn dòng `!!! UNSAVED MEDIA` cho render/`vo/`/`audio/`.
 
 ## 1. Việc đầu tiên mỗi phiên
 
@@ -104,7 +109,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    ngắt giữa chừng: đã tính vào ngân sách, báo người dùng, không tự tạo lại; `MISSING` = file đã trả tiền không còn
    trong container (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu
    là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
-4. Báo người dùng các dòng `STAGE` / `METHOD` / `BUDGET` / `FORECAST` / `NEXT` (3–6 dòng). Rồi làm `## Việc tiếp theo`.
+4. Báo người dùng các dòng `STAGE` / `METHOD` / `BUDGET` / `FORECAST` / `NEXT` (3–6 dòng), và `OWNER_REFS` / `CREATURES`
+   khi có (mục 2.2), `UNSAVED media` khi khác `none` (mục 7). Rồi làm `## Việc tiếp theo`.
    `METHOD` = phương pháp dựng của tập (`method:` trong EPISODE.md: `layers` | `seedance` | `code` | `blender`; thiếu
    khóa = `seedance`), kèm `video_engine` khi tập ghi khóa đó (`comfy` = clip H3 local). Dòng `LOCAL` trong `BUDGET` =
    lần chạy Blender/ComfyUI (miễn phí, không tính trần); `local GPU` trong `FORECAST` = phút GPU còn phải chạy (ước lượng).
@@ -123,9 +129,10 @@ Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở kh�
 | # | Khâu | Ai làm | Đầu ra | Cổng |
 |---|---|---|---|---|
 | 0 | Mở tập | đạo diễn | `EPISODE.md`, `budget.yaml` (chép từ `templates/episode/`) | người dùng chốt độ dài, style, trần chi phí |
-| 1 | Nghiên cứu nguồn | `film-researcher` | `research.md` | – |
+| 1 | Nghiên cứu nguồn | đạo diễn (danh sách sinh vật, ảnh sách của chủ dự án – mục 2.2) → `film-researcher` | bảng `## Sinh vật của tập`, `research.md` | – |
 | 2 | Kịch bản, shot list | `film-writer` (skill `film-script`) | `script.md`, `shots.csv` | **G1** duyệt kịch bản |
-| 3 | Thiết kế nhân vật, bối cảnh, prompt | `film-art-director` (skill `film-prompt-layers`) | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/*.txt`, dòng `prompts.csv` (chưa có ảnh) | – |
+| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` (hình tượng) → đạo diễn (concept local) | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept mỗi sinh vật chính, `CHARACTER.md` `## Concept đã duyệt` | **người dùng chọn concept** (mục 2.2) |
+| 3 | Thiết kế nhân vật, bối cảnh, prompt | `film-art-director` (skill `film-prompt-layers`); tập `blender`: `film-3d-artist` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/*.txt`, dòng `prompts.csv` (chưa có ảnh) | – |
 | 4 | Ảnh khóa + 1 shot mẫu | `film-plate-maker` | ảnh khóa nhân vật, đủ lớp của 1 shot (2K hoặc `--fast`) | **G2** duyệt ảnh khóa và shot mẫu |
 | 5 | Tạo lớp tranh | `film-plate-maker`, tối đa 3 song song, mỗi agent một nhóm shot | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
 | 6 | Clip AI | `film-animator` (chạy nền) | `out/.../clips/` (720p trước) | – |
@@ -193,7 +200,7 @@ Việc của đạo diễn theo khâu:
 - **Khâu 0:** nêu lựa chọn thứ ba cùng lượt: "vẽ hoàn toàn bằng code, 0 đồng, nhân vật nhất quán tuyệt đối, chất hoạt
   hình (không phải tranh vẽ chi tiết)". Cho người dùng xem lookbook (`python3 tools/toon/toon.py lookbook --draft`, miễn
   phí, gửi `sheet.png` và video) để chọn một trong 11 style `engine: code`. `budget.yaml`: `images: 0`, `video_seconds: 0`.
-- **Khâu 3:** `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
+- **Khâu 3:** (dị thú chính: cổng thiết kế sinh vật mục 2.2 trước) `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
   theo `tools/toon/rig.js` `T.DEFAULTS`) và mục **Thông số model** trong `CHARACTER.md`; bối cảnh `E-<slug>` = tham số
   `env` (cây, đá, mây, đồi) và bảng màu của style.
 - **Khâu 4 → G2:** đạo diễn tự chạy (miễn phí) `python3 tools/toon/toon.py turntable --character <...>/character.json
@@ -208,7 +215,9 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
 - **Khâu 0:** nêu lựa chọn thứ tư cùng lượt: "model 3D render bằng Blender trên máy của anh/chị, 0 đồng, máy quay 3D
   thật và bố cục nhất quán; cần phiên local". Style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender`; xem thử bằng
   `blender.py lookbook` ở phiên local). `budget.yaml`: `images: 0`, `video_seconds: 0` (trừ khi chọn clip Seedance).
-- **Khâu 3:** `film-3d-artist` (miễn phí): model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json`.
+- **Khâu 3a → 3:** cổng thiết kế sinh vật (mục 2.2) trước; rồi `film-3d-artist` (miễn phí): model (preset, GLB có giấy
+  phép hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json`. Nhiều sinh vật: chia
+  đội theo mục 4 ("Đội dựng 3D song song").
 - **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm
   turntable, shot mẫu, không vượt trần.
 - **Khâu 5:** `film-3d-artist` render mọi shot không dùng lại (`renders3d/s<NN>/`). Không giao `film-plate-maker`.
@@ -222,6 +231,39 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
   `video_engine: comfy`; `video_seconds` để 0 được. Tập `blender` có `ai_motion` bắt buộc chọn `comfy` hoặc `seedance`.
 - **Khâu 6:** chỉ ở phiên local, sau `comfy.py ping` thành công: `film-animator` chạy `comfy.py run h3-i2v` (tập `blender`:
   hai khung của `blender.py keyframes`), vẫn với `--ledger`. ComfyUI luôn offline; không bao giờ node API trả tiền.
+
+### 2.2 Sinh vật: tư liệu của chủ dự án (khâu 1) và cổng thiết kế (khâu 3a)
+
+Bảng chung của cả hai bước: `## Sinh vật của tập` trong `EPISODE.md` (mẫu `templates/episode/EPISODE.md`, CONVENTIONS §5):
+`| slug | Tên | Chính | Ảnh sách | Concept |`, `slug` = `characters/<slug>/` = model `A-<slug>` (blender) / `C-<slug>` (code).
+`python3 tools/status.py <tập>` in mục `CREATURES`, dòng `OWNER_REFS` khi `SERIES.md` có `owner_refs.required: true`.
+
+**Khâu 1 – tư liệu của chủ dự án trước nghiên cứu bổ sung** (khi `owner_refs.required: true`; không bắt buộc thì vẫn lập bảng):
+1. Từ kinh văn/`research.md` cũ, liệt kê **mọi** sinh vật/thần của tập vào bảng (`Ảnh sách: chờ`, `Concept: chờ`; đánh
+   dấu sinh vật chính).
+2. Gửi người dùng danh sách, xin **ảnh chụp trang** tương ứng trong tư liệu `owner_refs.source` (một câu hỏi, cả danh
+   sách). Con nào sách không có: người dùng xác nhận → `Ảnh sách: không`.
+3. Ảnh nhận được: lưu `out/<project>/assets/refs/<slug>/book/` (không lên git, **không lên Drive**), ghi nguồn (sách,
+   bản, trang) vào `out/<project>/assets/refs/<slug>/REFS.md`, đặt `Ảnh sách: có`.
+4. Chỉ khi không còn `chờ` (dòng `OWNER_REFS: ok`) mới giao `film-researcher` vòng nghiên cứu bổ sung. G1 và G2 kiểm lại.
+Ảnh sách có bản quyền: chỉ là **chuẩn tinh thần và chất lượng** ("ít nhất phải như này hoặc hơn"); không chép, không
+làm ảnh tham chiếu `--ref`/img2img, không đưa vào phim; thiết kế của lab là bản riêng.
+
+**Khâu 3a – cổng thiết kế sinh vật** (tập `blender`/`code` có sinh vật chính; trước mọi việc dựng model). Bài học SHK
+Q1·T3: dựng thẳng từ chữ kinh ("其狀如雞") + ảnh thú thật ra gà, công, trâu nước; mất ~3 giờ GPU.
+1. (a) Tư liệu của chủ dự án (khâu 1). (b) `film-researcher` viết `characters/<slug>/ICONOGRAPHY.md` mỗi sinh vật chính
+   theo `templates/project/ICONOGRAPHY.md`: văn bản cổ, hình tượng qua các thời (Hán, Đường, Minh, Thanh…), Việt Nam
+   (vd. phượng thời Lý), phân tích silhouette; nguồn bảo tàng CC0/phạm vi công cộng kèm giấy phép.
+2. (c) Đạo diễn (phiên local trên máy chủ lab, miễn phí) tạo **2–3 concept** mỗi sinh vật chính bằng Qwen-Image local:
+   `python tools/comfy/comfy.py run qwen-t2i --prompt "<prompt từ ICONOGRAPHY.md>" --out out/<project>/characters/<slug>/concept/<slug>_concept-a_v01.png --ledger out/<project>/ep<NN>/ledger.csv`
+   (`--dry-run` trước; một việc GPU một lúc, xem `python tools/gpu_run.py status`). Phiên cloud: dừng ở (b), báo người
+   dùng mở phiên local. Không dùng ảnh sách làm đầu vào.
+3. (d) Gửi người dùng các concept (ảnh trong hội thoại), **người dùng chọn**. Ghi `Concept: duyệt <ngày> <file>` vào
+   bảng và mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md` (file concept, ngày, lời người dùng nguyên
+   văn, điểm nào theo nguồn, điểm nào diễn giải). Concept bị chê: làm lại (c), không dựng.
+4. Chỉ sau (d) mới giao `film-3d-artist` (blender) hoặc `film-art-director` (code: spec `creature.js`) dựng model; hợp
+   đồng ghi đường dẫn concept đã duyệt và `ICONOGRAPHY.md`. `status.py --gate G2` báo `[MISSING] approved concept for
+   every main creature` khi còn sinh vật chính chưa duyệt; `check_episode.py` báo ERROR từ khâu 5.
 
 ## 3. Mở tập (khâu 0)
 
@@ -267,10 +309,20 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 - Ảnh pro/4K (Lambda đã triển khai 2026-11-10): chỉ ở phiên chính, luôn qua `ark.py lambda-job prepare` → Invoke → `lambda-job finish`
   (`lambda/README.md`); không Invoke bằng payload tự viết.
 - Song song: tối đa **3** `film-plate-maker`, mỗi agent một nhóm shot không trùng. `film-animator` chạy nền.
-  Engine local (Blender, ComfyUI) dùng chung một GPU: một `film-3d-artist` hoặc một clip H3 tại một thời điểm.
+  Engine local (Blender, ComfyUI) dùng chung một GPU (16 GB): một việc GPU tại một thời điểm, xếp hàng qua khoá GPU của
+  lab (`blender.py render|still|turntable|keyframes` và `comfy.py run` tự giữ khoá; lệnh GPU khác:
+  `python tools/gpu_run.py --label <agent> -- <lệnh>`; ai đang giữ: `python tools/gpu_run.py status`).
   Mỗi agent song song nhận `FILM_AGENT` riêng (vd. `film-plate-maker-s01-s04`) và hợp đồng ghi rõ: dùng thư mục scratch
   riêng đặt theo `FILM_AGENT`, không dùng chung script phụ (script chung bị ghi đè làm ledger ghi sai agent).
   Chỉ **một** `film-compositor` mỗi tập.
+- **Đội dựng 3D song song** (tập `blender` có nhiều sinh vật/bối cảnh; chỉ sau cổng thiết kế 3a): chia theo **nhóm
+  sinh vật** (vd. chim: phượng, loan; thú: huỷ, hổ giao; bối cảnh), mỗi `film-3d-artist` một nhóm, `FILM_AGENT` riêng
+  (`film-3d-artist-chim`). Chép `templates/episode/TEAM-3d.md` vào `<tập>/TEAM-3d.md`, điền bảng phân công (model, thư
+  mục, shot) và đưa đường dẫn vào mọi hợp đồng. Agent không sửa `ASSETS.md`, `shots.csv`, file của nhóm khác; mỗi model
+  một `characters/<slug>/NOTES.md` (đã xong / còn lại / nguồn, giấy phép / phút GPU). Render xếp hàng một GPU (khoá
+  `gpu_run.py`), nên đội song song chủ yếu cho phần dựng model, không cho render. Agent hết lượt giữa chừng: đọc
+  `NOTES.md` của nó rồi giao tiếp đúng phần "còn lại", không giao lại từ đầu. Xong cả đội: **đạo diễn** gộp các
+  `NOTES.md` vào `ASSETS.md` (một người sửa một file), chạy `check_episode.py`.
 - Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.
 - `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-v<N>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
@@ -301,14 +353,22 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 
 ## 7. Lưu media lên Drive
 
-Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot, G3/G4 cho bản dựng):
+**Ngay khi tạo xong, chưa duyệt (mọi phiên, bắt buộc ở phiên cloud):** bản nháp, bản cuối và file khác trong `renders/`,
+lời bình `vo/` (trừ `_stale/`), âm thanh `audio/` → `04_SanXuat/ep<NN>-<slug>/_ChuaDuyet/` (`vo/`, `audio/` giữ thư mục
+con), theo đúng `drive_sync.py plan … --include-out out/<project>` rồi `record`. Agent tạo ra chúng (`film-compositor`,
+`film-narrator`) báo đạo diễn ngay khi xong để đẩy, không chờ hết khâu. `status.py` dòng `UNSAVED media: none` = đã lên
+Drive hết. Khi người dùng duyệt: bản nháp → `update_file` (ID trong `.pushed.log`) `parentId` = thư mục ngày
+`04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối → `05_ThanhPham/ep<NN>-<slug>/` (chuyển, không tải lại; `plan` in
+sẵn đích ở dòng `note`); `vo/`, `audio/` ở lại `_ChuaDuyet/` (nguyên liệu, tiếng đã nằm trong bản cuối).
+
+Gói shot và ảnh khóa chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot):
 1. `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → `out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
    (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot; tập `blender`: `renders3d/s03*/` gồm `beauty.mp4` +
    `render.json` + khung `_keys`, không chuỗi PNG; G2 thêm `--with-turntables`; `blender-method.md` §3). Lệnh in sẵn
    tham chiếu `sha256:<hex>:<đường dẫn>`. Khôi phục: kéo zip về, giải nén trong `out/<project>/ep<NN>/` (file về đúng chỗ).
 2. Tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (tạo thư mục ngày nếu chưa có,
-   ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp duyệt
-   (`renders/*_draft_*.mp4`) vào cùng thư mục ngày; bản cuối (`renders/*_final_*.mp4`) vào `05_ThanhPham/ep<NN>-<slug>/`.
+   ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp và bản
+   cuối đã nằm trong `_ChuaDuyet/`: duyệt xong chỉ chuyển (đoạn trên).
    Ảnh khóa nhân vật/bối cảnh duyệt ở G2 → `02_KinhThu/NhanVat/<c>/`, `02_KinhThu/BoiCanh/<l>/`.
 3. Ghi `drive_link` và `approved=yes` vào `prompts.csv`, ghi Nhật ký, đẩy chữ (mục 0).
 

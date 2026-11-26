@@ -146,6 +146,7 @@ STYLE_REQUIRED_CODE = ["id", "name", "status", "base", "engine", "render", "pale
 STYLE_OPTIONAL_CODE = STYLE_OPTIONAL + ["name_en"]
 # engine: blender (a style rendered by Blender, tools/blender/; method: blender): render = {look, palette, line, mist, engine}
 STYLE_REQUIRED_BLENDER = STYLE_REQUIRED_CODE
+STYLE_EXTRA = ["grade"]   # any engine, never required: two-layer grade of tools/compose/grade.py
 STYLE_ENGINES = {"image", "code", "blender"}
 BLENDER_RENDER_KEYS = {"look", "palette", "line", "mist", "engine"}
 BLENDER_RENDER_ENGINES = {"eevee", "cycles"}
@@ -1700,8 +1701,10 @@ def check_style(style_dir, rep):
         if k not in y and k not in ("engine", "name_en"):
             rep.warn(W, f"optional key '{k}' missing (inherited from base recipe?)")
     for k in y:
-        if k not in required and k not in optional:
+        if k not in required and k not in optional and k not in STYLE_EXTRA:
             rep.warn(W, f"unknown key '{k}'" + (f" (not used by an engine: {engine} style)" if no_model else ""))
+    if "grade" in y:
+        check_grade(y["grade"], rep)
     if "id" in y:
         if y["id"] != sid:
             rep.error(W, f"id '{y['id']}' != folder name '{sid}'")
@@ -1761,6 +1764,21 @@ def check_style(style_dir, rep):
         check_style_prompts(style_dir, rep)
     if not os.path.isfile(os.path.join(style_dir, "STYLE.md")):
         rep.warn("STYLE.md", "missing")
+
+
+def check_grade(g, rep):
+    """The grade: block of a style pack, with the schema of tools/compose/grade.py (ERROR per problem)."""
+    import importlib.util
+    path = os.path.join(LAB, "tools", "compose", "grade.py")
+    try:
+        spec = importlib.util.spec_from_file_location("film_grade", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    except (OSError, ImportError) as e:
+        rep.warn("style.yaml", f"grade: not checked (tools/compose/grade.py cannot be loaded: {e})")
+        return
+    for e in mod.validate(g):
+        rep.error("style.yaml", e)
 
 
 def style_engine(style_dir):

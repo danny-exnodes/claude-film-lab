@@ -260,6 +260,10 @@ Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compo
 | Log Blender: `Warning: edge N - M appears twice, correcting` | Freestyle dựng mesh nét | Vô hại (`blender.py` không in ra) |
 | Pass normal/depth ra xám đều hoặc bị cong sRGB | Blender 5.x áp view transform lên File Output | `scene.py` đặt `save_as_render = False` + `color_management = OVERRIDE`, `Non-Color`; sửa `scene.py` thì giữ hai dòng đó |
 | Hai lần render cùng khung ra byte khác nhau | PNG mang metadata ngày giờ | `scene.py` tắt mọi `use_stamp_*`; đừng bật lại |
+| `grade.py`: `--subject X: no mask pass …` hoặc `note: no depth pass: no mist` | Render không có pass `mask`/`depth` (spec mặc định `passes: []`) | Thêm `"passes": ["depth", "mask"]` vào `shots3d/s<NN>.json` hoặc `blender.py render … --passes depth mask`, render lại `_v<NN>` |
+| `grade.py`: `--depth …: depth_range unknown` | Pass depth nằm ngoài thư mục render (không có `render.json` bên cạnh) | Thêm `--depth-range NEAR FAR` đúng `depth_range` của `shot3d.json` |
+| `grade.py`: `ffmpeg is not installed` khi IN hoặc OUT là video | Máy chủ lab chưa có `ffmpeg` trên PATH (Blender chỉ có thư viện FFmpeg bên trong) | Grade chuỗi PNG (`renders3d/s<NN>/` → `graded/s<NN>/`, không cần ffmpeg); cần mp4 thì đặt `FILM_FFMPEG` tới `ffmpeg.exe` (có `ffprobe.exe` cùng thư mục) |
+| `grade.py` từ chối: `…style.yaml: grade.scene.tone.black: … out of range` | Khóa sai hoặc ngoài khoảng trong `grade:` hay `--params` | Sửa theo `blender-method.md` §7; `python3 tools/compose/grade.py --check --style …` kiểm mà không ghi gì |
 
 ## ComfyUI (`tools/comfy/`, clip MiniMax H3 local, `video_engine: comfy`)
 

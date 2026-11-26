@@ -45,6 +45,11 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   PATH (mp4 do encoder của Blender làm; nhánh ffmpeg và nhánh EEVEE→Cycles mới thử bằng fake); look phẳng trong Cycles
   không đổ bóng.
 - `check_episode.py`: kiểm nội dung `ASSETS.md` (mỗi `A-<asset>` trong `shots.csv` có một dòng nguồn + giấy phép).
+- Grade thuỷ mặc (`tools/compose/grade.py`, issue #70): tham số `grade:` của `chan-thuc-blender` là điểm khởi đầu, chưa
+  duyệt trên render Cycles thật; chưa thử pass depth/mask thật của Blender (chỉ pass giả cùng định dạng). Còn nợ: dựng lại
+  mask khi khung đã sửa bằng model ảnh (hình lệch khỏi mask Blender: ROI + tương phản + hình thái học, bản tham khảo cần
+  scipy); chạy song song nhiều khung (~0,6 s/khung 1080p, một lõi); mp4 đầu ra không cùng byte giữa hai lần (x264), chỉ
+  chuỗi PNG được bảo đảm.
 
 ## Lỗi reviewer xác nhận nhưng chưa sửa
 

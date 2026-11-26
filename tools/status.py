@@ -15,7 +15,10 @@ every shot, clips, orphan plates), FORECAST (what the episode will still cost, f
 alone: images to make, Seedance seconds planned, each against what is left under budget.yaml: `fits` or
 `OVER by N`; CONFLICT lines for ai_motion shots in a `method: layers` episode), MEDIA (files in no bundle,
 renders, and `UNSAVED media`: renders, vo/ takes and audio/ stems with no line of their current hash in the project's
-.pulled.sha256, i.e. not pushed to Drive 04_SanXuat/<episode>/_ChuaDuyet/ yet – tools/drive_sync.py), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
+.pulled.sha256, i.e. not pushed to Drive 04_SanXuat/<episode>/_ChuaDuyet/ yet – tools/drive_sync.py), CREATURES (the
+`## Sinh vật của tập` table of EPISODE.md: main creature, owner's book photo, concept; an `OWNER_REFS` line when
+SERIES.md has owner_refs.required: true; shown when the table exists, owner_refs is required or the method is blender
+or code), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
 of the local engines (model comfy:* or blender:*), free: they count against no cap and are never OPEN/MISSING paid
 requests (tools/ark.py skips them the same way); FORECAST adds the local GPU minutes still to run (estimates).
 
@@ -655,6 +658,67 @@ def unsaved_text(m):
     return out
 
 
+# ---------------------------------------------------------------- creatures ---
+def creatures_section(ep_dir, body, method, media, notes):
+    """The `## Sinh vật của tập` table (check_episode.read_creatures), SERIES.md owner_refs, the main creatures
+    without an approved concept and the creatures still waiting for the owner's book photo."""
+    tab = check_episode.read_creatures(body)
+    refs, problem = check_episode.owner_refs(ep_dir)
+    if problem:
+        notes.append(f"SERIES.md: {problem}")
+    rows = tab["rows"] if tab else []
+    notes += [p for p in (tab or {}).get("problems", [])]
+    for r in rows:
+        r["concept_file"] = check_episode.concept_record(ep_dir, r["slug"]) if r["concept"] == "approved" else None
+    refs_dir = os.path.join(os.path.dirname(os.path.abspath(media)), "assets", "refs") if media else None
+    here = [r["slug"] for r in rows if r["book"] == "yes" and refs_dir
+            and not listdir_files(os.path.join(refs_dir, r["slug"], "book"))]
+    if here:
+        notes.append(f"book photo of {', '.join(here)} not on this machine ({show(refs_dir)}/<slug>/book/; never on "
+                     "Drive or git): fine in a cloud session, needed on the lab host before modelling")
+    return {"present": tab is not None, "rows": rows, "owner_refs": refs,
+            "required": bool(refs and refs["required"]),
+            "missing_book": [r["slug"] for r in rows if r["book"] == "pending"],
+            "concept_gaps": [{"slug": s_, "why": w} for s_, w in check_episode.concept_gaps(ep_dir, rows)],
+            "gated": method in check_episode.CREATURE_METHODS}
+
+
+def owner_refs_text(c):
+    """The OWNER_REFS line (only when SERIES.md owner_refs.required)."""
+    src = c["owner_refs"]["source"] or "the owner's material (SERIES.md owner_refs.source)"
+    if not c["present"]:
+        return (f"OWNER_REFS: no '{check_episode.CREATURE_HEADING}' table in EPISODE.md: list every creature/deity of "
+                f"the episode and ask the owner for the pages of {src} before the research round")
+    if c["missing_book"]:
+        return (f"OWNER_REFS: book photo missing for {', '.join(c['missing_book'])}: ask the owner for the pages of "
+                f"{src} (or 'không' when the book has none) before the research round")
+    have = sum(1 for r in c["rows"] if r["book"] == "yes")
+    return (f"OWNER_REFS: ok ({len(c['rows'])} creature(s): {have} with a book photo, "
+            f"{len(c['rows']) - have} not in the book)")
+
+
+def creatures_text(c, notes):
+    if not (c["present"] or c["required"] or c["gated"]):
+        return notes_text(notes)
+    out = [f"CREATURES ({check_episode.CREATURE_HEADING})" if c["present"]
+           else f"CREATURES  no '{check_episode.CREATURE_HEADING}' table in EPISODE.md"]
+    book = {"yes": "book photo yes", "none": "not in the book", "pending": "book photo PENDING"}
+    for r in c["rows"]:
+        concept = ("concept approved" + (f" ({r['concept_file']})" if r["concept_file"] else
+                                         " (not recorded in CHARACTER.md)")
+                   if r["concept"] == "approved" else "concept pending")
+        out.append(f"  {r['slug']}  {r['name'] or '-'} · {'main' if r['main'] else 'secondary'} · {book[r['book']]} · "
+                   f"{concept}")
+    if c["present"] and not c["rows"]:
+        out.append("  (no creature listed)")
+    if c["required"]:
+        out.append("  " + owner_refs_text(c))
+    if c["gated"] and c["concept_gaps"]:
+        out.append("  concept gate (before any 3D/code model): "
+                   + "; ".join(f"{g['slug']} {g['why']}" for g in c["concept_gaps"]))
+    return out + notes_text(notes)
+
+
 # --------------------------------------------------------------------- gate ---
 def run_check(ep_dir, media):
     """Run tools/check_episode.py on the episode in a subprocess: (exit code, its Summary line)."""
@@ -731,6 +795,23 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
          (f" ({'; '.join(b['text'] for b in d['blocked'])})" if d["blocked"] else ""))
     rc, summary = run_check(ep_dir, media)
     need(rc == 0, f"check_episode: {summary}")
+    c = d.get("creatures")
+    if c and c["required"] and gate in ("G1", "G2"):
+        # SERIES.md owner_refs.required: the owner's book pages come before the research round (stage 1)
+        need(c["present"] and not c["missing_book"],
+             "OWNER_REFS: a book photo (or the owner's 'không') for every creature of "
+             f"{check_episode.CREATURE_HEADING}" + (f" (missing: {', '.join(c['missing_book'])})" if c["missing_book"]
+                                                    else "" if c["present"] else " (no table)"))
+    if c and c["gated"] and gate == "G2":
+        # method blender/code: no creature model is built before the owner picked its concept (stage 3a)
+        if not c["present"]:
+            need(False, f"creature table {check_episode.CREATURE_HEADING} in EPISODE.md (empty table when the "
+                        "episode has none)")
+        else:
+            gaps = c["concept_gaps"]
+            need(not gaps, "approved concept for every main creature (A-<slug>/C-<slug>: Concept 'duyệt' + "
+                           f"{check_episode.CONCEPT_HEADING} in characters/<slug>/CHARACTER.md)"
+                 + (f" (not yet: {'; '.join(g['slug'] + ' ' + g['why'] for g in gaps)})" if gaps else ""))
     shots = [s for s in d["shots"]["shots"] if not s["reuse_of"]]
     n_open = len(d["attention"]["open"])
     if gate == "G1":
@@ -858,6 +939,8 @@ def episode_text(d, notes):
     out += notes_text(notes["stage"])
     out.append(f"METHOD {method_text(d['method'], d.get('video_engine'))}")
     out += notes_text(notes["method"])
+    if d.get("creatures"):
+        out += creatures_text(d["creatures"], notes["creatures"])
     out.append("NEXT")
     out += d["next"] or ["  (nothing under '## Việc tiếp theo')"]
     out += budget_text(d, notes["budget"])
@@ -942,7 +1025,7 @@ def main(argv=None):
     except Usage as e:
         print(f"error: {e}", file=sys.stderr)
         return USAGE_EXIT
-    notes = {"stage": [], "method": [], "budget": [], "shots": [], "forecast": [], "media": []}
+    notes = {"stage": [], "method": [], "creatures": [], "budget": [], "shots": [], "forecast": [], "media": []}
     if not isinstance(meta.get("gates"), dict):
         notes["stage"].append("EPISODE.md: gates is not a mapping {G1: ..., G4: ...}: every gate counts as not passed")
     media = media_dir(meta, a.media)
@@ -962,6 +1045,7 @@ def main(argv=None):
     d["shots"] = shots_section(a.episode, media, notes["shots"], d["method"]["name"])
     d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"],
                                      d["video_engine"])
+    d["creatures"] = creatures_section(a.episode, body, d["method"]["name"], media, notes["creatures"])
     d["media"] = media_section(media, bundled, notes["media"])
     if d["media"]["exists"]:
         d["media"]["unsaved"] = unsaved_section(a.episode, media, notes["media"])

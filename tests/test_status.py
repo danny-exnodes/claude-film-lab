@@ -349,7 +349,7 @@ class BudgetTest(StatusCase):
         code, out = self.run_status()
         jcode, d = self.data()
         self.assertEqual(code, jcode)
-        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "forecast", "gate", "gates", "local", "media",
+        self.assertEqual(sorted(d), ["attention", "blocked", "budget", "creatures", "forecast", "gate", "gates", "local", "media",
                                      "method", "next", "notes", "shots", "stage", "video_engine"])
         for c in d["budget"]["caps"]:
             self.assertIn(f"{c['name']} {c['used']:g}/{c['cap']:g} ({c['left']:g} left)", out)
@@ -968,6 +968,119 @@ class NarrationWatermarkTest(StatusCase):
         self.put("clips", "ep01_s03_seedance25_v01.mp4")
         code, g = self.gate("--gate", "G3")
         self.assertEqual(self.requirement(g), [])
+
+
+
+CREATURE_TABLE = """
+## Sinh vật của tập
+
+<!-- slug = characters/<slug>/ = model A-<slug> -->
+| slug | Tên | Chính | Ảnh sách | Concept |
+|---|---|---|---|---|
+{rows}
+"""
+
+
+class CreatureTest(StatusCase):
+    """EPISODE.md `## Sinh vật của tập` (#52, #53): OWNER_REFS from SERIES.md, the concept gate of blender/code."""
+
+    def series(self, owner_refs):
+        (self.ep.parent / "SERIES.md").write_text(f"---\nseries: test-series\n{owner_refs}\n---\n# Series\n",
+                                                  encoding="utf-8")
+
+    def table(self, *rows):
+        md = self.ep / "EPISODE.md"
+        s = md.read_text(encoding="utf-8").split("\n## Sinh vật của tập", 1)[0]
+        md.write_text(s + CREATURE_TABLE.format(rows="\n".join(rows)), encoding="utf-8")
+
+    def method(self, name):
+        md = self.ep / "EPISODE.md"
+        md.write_text(md.read_text(encoding="utf-8").replace("stage: ", f"method: {name}\nstage: ", 1),
+                      encoding="utf-8")
+
+    def concept(self, slug, text="- concept-b.png, 2026-11-26, chủ dự án chọn"):
+        d = self.ep.parent / "characters" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "CHARACTER.md").write_text(f"# {slug}\n\n## Concept đã duyệt\n<!-- file, ngày -->\n{text}\n",
+                                        encoding="utf-8")
+
+    def test_nothing_shown_without_table_refs_or_creature_method(self):
+        code, out = self.run_status()
+        self.assertNotIn("CREATURES", out)
+        self.assertNotIn("OWNER_REFS", out)
+        code, d = self.data()
+        self.assertFalse(d["creatures"]["present"])
+
+    def test_owner_refs_line_and_g1(self):
+        self.series('owner_refs: {source: "Sách tranh SHK (Lương Siêu)", required: true}')
+        self.episode(stage=2)
+        code, out = self.run_status()
+        self.assertIn("OWNER_REFS: no '## Sinh vật của tập' table in EPISODE.md", out)
+        self.assertIn("Sách tranh SHK (Lương Siêu)", out)
+        self.assertIn("[MISSING] OWNER_REFS: a book photo (or the owner's 'không') for every creature", out)
+        self.table("| phuong-hoang | Phượng hoàng | có | có | chờ |", "| huy | Huỷ | có | chờ | chờ |",
+                   "| ty-huu | Tỳ hưu | không | | chờ |")
+        code, out = self.run_status()
+        self.assertIn("OWNER_REFS: book photo missing for huy, ty-huu", out)
+        self.assertIn("(missing: huy, ty-huu)", out)
+        self.assertIn("huy  Huỷ · main · book photo PENDING · concept pending", out)
+        self.assertRegex(out, r"note: book photo of phuong-hoang not on this machine")
+        self.table("| phuong-hoang | Phượng hoàng | có | có | chờ |", "| huy | Huỷ | có | không | chờ |",
+                   "| ty-huu | Tỳ hưu | không | không có | chờ |")
+        book = self.media.parent / "assets" / "refs" / "phuong-hoang" / "book"
+        book.mkdir(parents=True)
+        (book / "p12.jpg").write_bytes(b"x")
+        code, out = self.run_status("--gate", "G1")
+        self.assertIn("OWNER_REFS: ok (3 creature(s): 1 with a book photo, 2 not in the book)", out)
+        self.assertIn("[ok] OWNER_REFS", out)
+        self.assertNotIn("not on this machine", out)
+        self.assertNotIn("concept gate", out)                   # seedance: no concept gate
+        code, g = self.gate("--gate", "G3")
+        self.assertFalse(any("OWNER_REFS" in r["text"] for r in g["requirements"]))
+
+    def test_owner_refs_not_required(self):
+        self.series('owner_refs: {source: "Sách tranh", required: false}')
+        self.table("| huy | Huỷ | có | chờ | chờ |")
+        code, out = self.run_status("--gate", "G1")
+        self.assertIn("CREATURES (## Sinh vật của tập)", out)
+        self.assertNotIn("OWNER_REFS", out)
+
+    def test_bad_owner_refs_and_bad_cells_are_notes(self):
+        self.series("owner_refs: yes please")
+        self.table("| Huy | Huỷ | maybe | ? | ok |")
+        code, out = self.run_status()
+        self.assertRegex(out, r"note: SERIES.md: owner_refs must be")
+        self.assertRegex(out, r"note: ## Sinh vật của tập row 1 \(Huy\): chính 'maybe' is not có \| không")
+        code, d = self.data()
+        self.assertTrue(d["creatures"]["rows"][0]["main"])      # unreadable: counted as main, the gate applies
+
+    def test_concept_gate_of_blender_g2(self):
+        self.method("blender")
+        code, g = self.gate("--gate", "G2")
+        self.assertIn("creature table ## Sinh vật của tập in EPISODE.md (empty table when the episode has none)",
+                      self.missing(g))
+        self.table("| phuong-hoang | Phượng hoàng | có | có | chờ |", "| A-rong | Rồng | không | không | chờ |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("concept gate (before any 3D/code model): phuong-hoang concept not 'duyệt' in the table", out)
+        self.assertIn("[MISSING] approved concept for every main creature", out)
+        self.assertNotIn("rong concept", out)                   # secondary creature: no gate
+        self.table("| phuong-hoang | Phượng hoàng | có | có | Duyệt 2026-11-26 (concept-b) |",
+                   "| A-rong | Rồng | không | không | chờ |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("phuong-hoang no '## Concept đã duyệt' in characters/phuong-hoang/CHARACTER.md", out)
+        self.assertIn("concept approved (not recorded in CHARACTER.md)", out)
+        self.concept("phuong-hoang", text="")                   # an empty section is not a record
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("[MISSING] approved concept for every main creature", out)
+        self.concept("phuong-hoang")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("[ok] approved concept for every main creature", out)
+        self.assertIn("concept approved (characters/phuong-hoang/CHARACTER.md)", out)
+
+    def test_seedance_g2_has_no_concept_gate(self):
+        self.table("| phuong-hoang | Phượng hoàng | có | có | chờ |")
+        code, g = self.gate("--gate", "G2")
+        self.assertFalse(any("concept" in r["text"] for r in g["requirements"]))
 
 
 if __name__ == "__main__":

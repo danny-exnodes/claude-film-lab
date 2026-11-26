@@ -53,7 +53,8 @@ Hậu kỳ ghép được với mọi look (vd. `lowpoly-90s` + `riso`): style m
 |---|---|
 | 0 | người dùng chọn `method: code` và một style `engine: code` (cho xem lookbook); `budget.yaml`: `images: 0`, `video_seconds: 0` |
 | 2 | `film-writer` viết `shots.csv` theo §4 (không `ai_motion`) |
-| 3 | `film-art-director` viết `characters/<slug>/character.json` (nhân vật rig) hoặc spec dị thú (`creature.js`) + `CHARACTER.md` mục **Thông số model** (§8, thay prompt lớp) và tham số bối cảnh `E-<slug>` (`env` của look) |
+| 3a | dị thú chính: cổng thiết kế sinh vật (`film-pipeline` mục 2.2): ảnh sách của chủ dự án → `ICONOGRAPHY.md` → 2–3 concept (Qwen-Image local ở phiên local, hoặc `toon.py turntable` nhiều spec thử, miễn phí) → **người dùng chọn** → `CHARACTER.md` `## Concept đã duyệt`. `status.py --gate G2` báo `[MISSING]` khi chưa duyệt |
+| 3 | `film-art-director` viết `characters/<slug>/character.json` (nhân vật rig) hoặc spec dị thú (`creature.js`, theo concept đã duyệt) + `CHARACTER.md` mục **Thông số model** (§8, thay prompt lớp) và tham số bối cảnh `E-<slug>` (`env` của look) |
 | 4 | đạo diễn chạy `toon.py turntable --character … --style … --out review/turntable-<slug>.png` (dị thú: `--creature characters/<slug>/character.json`, style mặc định `thuy-mac-3d`) và một clip shot mẫu → **G2** (`status.py --gate G2` kiểm `character.json`, turntable, chi phí 0) |
 | 5–6 | bỏ qua (Nhật ký: `khâu 5–6 bỏ qua (method code)`) |
 | 7–10 | `film-compositor`: `inline.py film.html --init --toon`, mỗi shot một hàng `SHOTS`, render như mọi tập |

@@ -40,6 +40,18 @@ drive: "ClaudeFilmLab/<ProjectName>/03_KichBan/q01-t01-<slug>"   # thư mục ch
 
 <!-- Danh sách việc cụ thể cho khâu hiện tại, việc đầu tiên ở trên cùng. -->
 
+## Sinh vật của tập
+
+<!-- Mọi sinh vật/thần của tập (khâu 1, trước vòng nghiên cứu bổ sung; docs/CONVENTIONS.md §5). Tập không có sinh vật: để
+     bảng trống. slug = thư mục characters/<slug>/ = mã model A-<slug> (blender) hoặc C-<slug> (code).
+     Chính: có | không (sinh vật chính cần concept duyệt trước khi dựng model, tập blender/code).
+     Ảnh sách: có (ảnh chụp trang trong out/<project>/assets/refs/<slug>/book/) | không (chủ dự án xác nhận sách không có)
+     | chờ. Concept: chờ | duyệt <ngày> <file> (chủ dự án chọn; ghi thêm vào characters/<slug>/CHARACTER.md
+     mục "## Concept đã duyệt"). status.py: OWNER_REFS, cổng G1/G2. -->
+
+| slug | Tên | Chính | Ảnh sách | Concept |
+|---|---|---|---|---|
+
 ## Nhật ký
 
 <!-- Mỗi khâu một dòng: ngày | khâu | kết quả | giờ đẩy Drive (YYYY-MM-DD HH:MM UTC, hoặc "chưa"). -->

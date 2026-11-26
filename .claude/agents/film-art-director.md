@@ -34,7 +34,9 @@ Phương pháp dựng (đọc `method` trong `EPISODE.md` trước; skill mục 
   `T.DEFAULTS`: `body` drop|blob|box, `eyes`, `proportions`, `tuft`, `palette`, `seed`) và mục **Thông số model** trong
   `CHARACTER.md` (tỉ lệ, số chi, bảng màu, seed, lý do); bối cảnh `E-<slug>` = khối `env` + màu của style. Kiểm hình
   bằng `python3 tools/toon/toon.py turntable --character <file> --style <id> --out <tập>/review/turntable-<slug>.png`
-  (miễn phí). `.claude/skills/film-compose-shot/references/code-method.md`.
+  (miễn phí). `.claude/skills/film-compose-shot/references/code-method.md`. Dị thú chính (bảng `## Sinh vật của tập`):
+  chỉ viết spec khi hợp đồng ghi concept đã duyệt (`CHARACTER.md` `## Concept đã duyệt`, cổng 3a); spec theo concept và
+  `ICONOGRAPHY.md`, không theo ảnh thú thật.
 - `method: blender`: không prompt, không ảnh. Model 3D, `ASSETS.md` và `shots3d/*.json` do `film-3d-artist` làm; bạn chỉ
   viết `CHARACTER.md`/`LOCATION.md` (nguồn, giải phẫu, tỉ lệ, bảng màu) khi đạo diễn giao, làm đầu vào cho model.
 

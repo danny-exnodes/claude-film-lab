@@ -1223,6 +1223,181 @@ def check_assets(ep_dir, meta, rep):
     (rep.error if stage >= ASSETS_STAGE else rep.warn)("ASSETS.md", msg)
 
 
+# --- creature table (EPISODE.md `## Sinh vật của tập`, docs/CONVENTIONS.md §5; issues #52, #53) ------------------
+# One row per creature/deity of the episode: the owner's book photo (SERIES.md owner_refs) and the approved concept
+# (creature design gate, stage 3a) live here. slug = characters/<slug>/ = the model id A-<slug> (blender) / C-<slug>.
+CREATURE_HEADING = "## Sinh vật của tập"
+CREATURE_COLS = {"slug": "slug", "tên": "name", "chính": "main", "ảnh sách": "book", "concept": "concept"}
+CREATURE_NEED = ("slug", "main", "book", "concept")
+CREATURE_VALUES = {   # first word of the cell, lower case -> value; an empty cell is the first value listed last
+    "main": {"có": True, "yes": True, "x": True, "không": False, "no": False, "": False},
+    "book": {"có": "yes", "yes": "yes", "không": "none", "no": "none", "chờ": "pending", "pending": "pending",
+             "": "pending"},
+    "concept": {"duyệt": "approved", "approved": "approved", "chờ": "pending", "pending": "pending", "": "pending"},
+}
+CREATURE_HELP = {"main": "có | không", "book": "có | không | chờ", "concept": "chờ | duyệt"}
+CONCEPT_HEADING = "## Concept đã duyệt"      # characters/<slug>/CHARACTER.md: which concept the owner picked, when
+CREATURE_METHODS = ("blender", "code")       # methods that build creature models: concept approved before G2
+CONCEPT_STAGE = 5                            # past G2 (closes stage 4): an unapproved main creature is an ERROR
+RE_TABLE_SEP = re.compile(r"^:?-{3,}:?$")
+RE_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
+def cell_word(v):
+    """First word of a table cell, lower case, without trailing punctuation ('Duyệt 2026-11-26' -> 'duyệt')."""
+    w = nfc(v).strip().split()
+    return w[0].lower().strip(".,;:()") if w else ""
+
+
+def section_lines(body, heading):
+    """Lines of the `## ` section named heading (HTML comments removed), or None when the section is missing."""
+    lines, on, found = [], False, False
+    for line in RE_COMMENT.sub("", nfc(body)).splitlines():
+        if line.startswith("## "):
+            if on:
+                break
+            on = line.rstrip() == heading
+            found = found or on
+        elif on:
+            lines.append(line)
+    return lines if found else None
+
+
+def read_creatures(body):
+    """The creature table of an EPISODE.md body: None when the section is missing, else {"rows": [...],
+    "problems": [...]}; each row {"slug", "name", "main": bool, "book": yes|none|pending,
+    "concept": approved|pending, "concept_text": the cell as written}. Rows with a bad value keep the default."""
+    lines = section_lines(body, CREATURE_HEADING)
+    if lines is None:
+        return None
+    out = {"rows": [], "problems": []}
+    table = [l.strip() for l in lines if l.strip().startswith("|")]
+    if not table:
+        return out
+    cells = lambda l: [c.strip() for c in l.strip().strip("|").split("|")]
+    head = [CREATURE_COLS.get(" ".join(nfc(c).lower().split()).strip("`*")) for c in cells(table[0])]
+    missing = [CREATURE_COLS_INV[k] for k in CREATURE_NEED if k not in head]
+    if missing:
+        out["problems"].append(f"{CREATURE_HEADING}: column(s) {', '.join(missing)} missing (header: "
+                               f"| slug | Tên | Chính | Ảnh sách | Concept |)")
+        return out
+    body_rows = table[1:]
+    if body_rows and all(RE_TABLE_SEP.match(c) for c in cells(body_rows[0]) if c):
+        body_rows = body_rows[1:]
+    for n, line in enumerate(body_rows, 1):
+        vals = dict(zip(head, cells(line)))
+        if not any(v.strip() for v in vals.values()):
+            continue
+        slug = nfc(vals.get("slug", "")).strip().strip("`")
+        if slug.startswith(("A-", "C-")):
+            slug = slug[2:]
+        row = {"slug": slug, "name": vals.get("name", "").strip(), "concept_text": vals.get("concept", "").strip()}
+        if not RE_SLUG.match(slug):
+            out["problems"].append(f"{CREATURE_HEADING} row {n}: slug '{slug}' is not a lower-case slug "
+                                   "(characters/<slug>/, model A-<slug>)")
+        for key, table_ in CREATURE_VALUES.items():
+            word = cell_word(vals.get(key, ""))
+            if word in table_:
+                row[key] = table_[word]
+            else:
+                row[key] = True if key == "main" else table_[""]     # unreadable "main": the gate still applies
+                out["problems"].append(f"{CREATURE_HEADING} row {n} ({slug}): {CREATURE_COLS_INV[key]} "
+                                       f"'{vals.get(key, '').strip()}' is not {CREATURE_HELP[key]}")
+        out["rows"].append(row)
+    return out
+
+
+CREATURE_COLS_INV = {v: k for k, v in CREATURE_COLS.items()}
+
+
+def concept_record(ep_dir, slug):
+    """Path (relative to the project folder) of the characters/<slug>/CHARACTER.md that records the approved concept
+    in a non-empty `## Concept đã duyệt` section (episode folder first, then the project), or None."""
+    ep = os.path.abspath(ep_dir)
+    project = os.path.dirname(ep)
+    for base in (ep, project):
+        path = os.path.join(base, "characters", slug, "CHARACTER.md")
+        try:
+            text = read_text(path)
+        except (OSError, CheckError):
+            continue
+        lines = section_lines(text, CONCEPT_HEADING)
+        if lines and any(l.strip() for l in lines):
+            return os.path.relpath(path, project).replace(os.sep, "/")
+    return None
+
+
+def concept_gaps(ep_dir, rows):
+    """[(slug, why)] for every main creature whose concept is not approved, or approved in the table but not recorded
+    in its CHARACTER.md."""
+    gaps = []
+    for r in rows:
+        if not r.get("main"):
+            continue
+        if r.get("concept") != "approved":
+            gaps.append((r["slug"], "concept not 'duyệt' in the table"))
+        elif not concept_record(ep_dir, r["slug"]):
+            gaps.append((r["slug"], f"no '{CONCEPT_HEADING}' in characters/{r['slug']}/CHARACTER.md"))
+    return gaps
+
+
+def owner_refs(ep_dir):
+    """(config, problem) from `owner_refs:` in the front matter of SERIES.md beside the episode folder: config is
+    {"source": str, "required": bool} or None (no SERIES.md, no key); problem is a message or None."""
+    path = os.path.join(os.path.dirname(os.path.abspath(ep_dir)), "SERIES.md")
+    if not os.path.isfile(path):
+        return None, None
+    try:
+        import yaml
+        fm, _ = split_front_matter(read_text(path))
+        meta = yaml.safe_load(fm) if fm else None
+    except Exception as e:                       # unreadable file, bad YAML
+        return None, f"front matter unreadable ({str(e).splitlines()[0] if str(e) else type(e).__name__})"
+    if not isinstance(meta, dict) or meta.get("owner_refs") is None:
+        return None, None
+    v = meta["owner_refs"]
+    if not isinstance(v, dict) or not isinstance(v.get("required", False), bool):
+        return None, ("owner_refs must be {source: \"<the owner's material>\", required: true|false}"
+                      f" (got {v!r})")
+    return {"source": str(v.get("source") or "").strip(), "required": v.get("required", False)}, None
+
+
+def check_creatures(ep_dir, meta, rep):
+    """The creature table: well-formed; book photos when SERIES.md owner_refs.required; an approved concept for every
+    main creature of a method blender/code episode (WARN at stages 3-4, ERROR from stage 5, after G2)."""
+    W = "EPISODE.md"
+    try:
+        _, body = split_front_matter(read_text(os.path.join(ep_dir, "EPISODE.md")))
+    except (OSError, CheckError):
+        return
+    stage = meta.get("stage") if isinstance(meta.get("stage"), int) else -1
+    method = episode_method(meta)[0]
+    refs, problem = owner_refs(ep_dir)
+    if problem:
+        rep.warn("SERIES.md", problem)
+    required = bool(refs and refs["required"])
+    tab = read_creatures(body)
+    if tab is None:
+        if (method in CREATURE_METHODS and stage >= 3) or (required and stage >= 1):
+            rep.info(f"{W}: no '{CREATURE_HEADING}' table (creatures, book photos, approved concepts: "
+                     "templates/episode/EPISODE.md); status.py --gate asks for it")
+        return
+    for msg in tab["problems"]:
+        rep.warn(W, msg)
+    if required and stage >= 2:
+        pend = [r["slug"] for r in tab["rows"] if r["book"] == "pending"]
+        if pend:
+            rep.warn(W, f"owner_refs.required (SERIES.md): no book photo yet for {', '.join(pend)}: ask the owner for "
+                        "the page, or write 'không' when the owner says the book has none")
+    if method in CREATURE_METHODS and stage >= 3:
+        gaps = concept_gaps(ep_dir, tab["rows"])
+        if gaps:
+            (rep.error if stage >= CONCEPT_STAGE else rep.warn)(
+                W, f"main creature(s) without an approved concept: "
+                   + "; ".join(f"{s} ({why})" for s, why in gaps)
+                   + f" – creature design gate before any {method} model (film-pipeline stage 3a)")
+
+
 def ledger_head(path, rep):
     """First line of ledger.csv (a BOM is not part of it), or None after reporting an unreadable file."""
     try:
@@ -1453,6 +1628,7 @@ def cmd_episode(a, rep=None):
     shots = check_shots(ep_dir, meta, rep)
     check_shots3d(ep_dir, meta, shots, rep)
     check_assets(ep_dir, meta, rep)
+    check_creatures(ep_dir, meta, rep)
     check_script(ep_dir, meta, rep)
     files = check_prompts(ep_dir, meta, shots, rep)
     media = a.media

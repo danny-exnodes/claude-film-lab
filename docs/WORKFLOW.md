@@ -34,8 +34,9 @@ flowchart TD
 | # | Khâu | Ai làm | Đầu ra | Cổng |
 |---|---|---|---|---|
 | 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, **phương pháp dựng**, trần chi phí |
-| 1 | Nghiên cứu nguồn | `film-researcher` | `research.md` (nguyên văn, link, cách đọc tên) | – |
+| 1 | Nghiên cứu nguồn | đạo diễn → `film-researcher` | bảng `## Sinh vật của tập` (khi `SERIES.md` có `owner_refs.required`: xin ảnh sách của chủ dự án **trước**), `research.md` (nguyên văn, link, cách đọc tên) | – |
 | 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
+| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept Qwen-Image local, `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
 | 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
@@ -115,12 +116,12 @@ video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản
 | Agent | Vai | Skill nạp sẵn | Công cụ | Model | Ghi chú |
 |---|---|---|---|---|---|
 | *(phiên chính)* | Đạo diễn | `film-pipeline` | tất cả | – | giữ cổng, nói chuyện với người dùng, cập nhật EPISODE.md, kéo/đẩy Drive |
-| `film-researcher` | Nghiên cứu nguồn | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` |
+| `film-researcher` | Nghiên cứu nguồn; hình tượng sinh vật (khâu 3a) | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` (và `ICONOGRAPHY.md` ở khâu 3a) |
 | `film-writer` | Biên kịch | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash |
 | `film-art-director` | Thiết kế, prompt lớp | `film-prompt-layers` | Read, Write, Edit, Glob, Grep | opus | `memory: project`, không tạo ảnh |
 | `film-plate-maker` | Tạo, tách lớp tranh | `film-prompt-layers` | Bash, Read, Write, Edit, Glob, Grep | sonnet | `FILM_AGENT`, `--ledger/--budget` |
 | `film-animator` | Clip AI (Seedance, hoặc H3 local khi `video_engine: comfy`) | – | Bash, Read, Write, Glob | sonnet | `background: true`, `--ledger/--budget`; `method: seedance` hoặc `blender` |
-| `film-3d-artist` | Model 3D, `shot3d.json`, render Blender (khâu 3–5 của `method: blender`) | – | Bash, Read, Write, Edit, Glob, Grep | sonnet | chỉ phiên local; không gọi dịch vụ trả tiền |
+| `film-3d-artist` | Model 3D, `shot3d.json`, render Blender (khâu 3–5 của `method: blender`) | – | Bash, Read, Write, Edit, Glob, Grep | sonnet | chỉ phiên local; không gọi dịch vụ trả tiền; `maxTurns: 120`; chỉ dựng sinh vật có concept duyệt; đội song song theo `templates/episode/TEAM-3d.md` |
 | `film-compositor` | Dựng, âm thanh, render | `film-compose-shot`, `cinecode` | Bash, Read, Write, Edit, Glob, Grep | opus | một agent mỗi tập; không gọi ark.py |
 | `film-reviewer` | Kiểm tra độc lập | – | Read, Write, Edit, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode; chỉ ghi `review/qc-*.md` và MEMORY.md |
 | `film-publisher` | Xuất bản YouTube | – | Read, Write, Edit, Glob, Grep | sonnet | `publish.md`, không tự đăng |

@@ -189,10 +189,19 @@ style: thuy-mac
 audience: ...
 language: vi
 format: {width: 1920, height: 1080, fps: 24}
+owner_refs: {source: "Sách tranh SHK (Lương Siêu / Sam Trạch / An Lạc)", required: true}   # tuỳ chọn
 ---
 ```
 `series:` = slug dự án = tên thư mục `projects/<project>/`. `characters/<slug>/CHARACTER.md`: nguồn nguyên văn + link,
-cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa.
+cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa; sinh
+vật chính của tập `blender`/`code` thêm mục `## Concept đã duyệt` (file concept chủ dự án chọn, ngày, nguồn/diễn giải –
+khâu 3a, `film-pipeline`).
+`owner_refs` (tuỳ chọn): tư liệu riêng của chủ dự án (sách tranh…). `required: true` → ở khâu 1 mỗi tập, đạo diễn liệt kê
+mọi sinh vật/thần vào bảng `## Sinh vật của tập` (§5) và xin ảnh chụp trang tương ứng **trước** vòng nghiên cứu bổ sung;
+ảnh nằm ở `out/<project>/assets/refs/<slug>/book/`, nguồn ghi trong `out/<project>/assets/refs/<slug>/REFS.md` (không
+lên git, không lên Drive). Sách không có con nào thì chủ dự án xác nhận "không". Ảnh sách có bản quyền: chỉ là chuẩn
+tinh thần và chất lượng, không chép, không đưa vào phim; thiết kế của lab là bản riêng. `status.py` in dòng `OWNER_REFS`;
+G1/G2 cần ảnh (hoặc "không") cho mọi sinh vật của bảng.
 `locations/<slug>/LOCATION.md`: như CHARACTER.md cho bối cảnh. `style/`: ghi chú phong cách riêng của dự án và prompt
 mẫu đã duyệt (style pack dùng chung vẫn ở `styles/<id>/` trong repo).
 
@@ -260,6 +269,16 @@ Một khóa ghi hai lần trong khối YAML (vd. `method: layers` rồi `method:
 (cũng vậy với `budget.yaml`).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
+
+Mục `## Sinh vật của tập` (mẫu có sẵn; bảng trống khi tập không có sinh vật): mỗi sinh vật/thần một dòng
+`| slug | Tên | Chính | Ảnh sách | Concept |`. `slug` = `characters/<slug>/` = mã model `A-<slug>` (blender) / `C-<slug>`
+(code); `Chính` = `có` | `không`; `Ảnh sách` = `có` (ảnh trang sách trong `out/<project>/assets/refs/<slug>/book/`) |
+`không` (chủ dự án xác nhận sách không có) | `chờ`; `Concept` = `chờ` | `duyệt <ngày> <file>` (chỉ chữ đầu được đọc).
+Concept được tính là duyệt khi bảng ghi `duyệt` **và** `characters/<slug>/CHARACTER.md` (thư mục tập hoặc dự án) có mục
+`## Concept đã duyệt` không trống. `tools/check_episode.py`: giá trị lạ, thiếu cột → WARN; `owner_refs.required` mà còn
+`chờ` từ khâu 2 → WARN; tập `blender`/`code` có sinh vật chính chưa duyệt concept → WARN ở khâu 3–4, ERROR từ khâu 5
+(sau G2). `tools/status.py` in mục `CREATURES` (và `OWNER_REFS` khi bắt buộc); `--gate G2` của tập `blender`/`code` cần
+bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thiếu).
 
 ## 6. CSV (RFC 4180, UTF-8, có header, trường có dấu phẩy/xuống dòng phải đặt trong ngoặc kép)
 

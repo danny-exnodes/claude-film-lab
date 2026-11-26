@@ -260,6 +260,9 @@ Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compo
 | Log Blender: `Warning: edge N - M appears twice, correcting` | Freestyle dựng mesh nét | Vô hại (`blender.py` không in ra) |
 | Pass normal/depth ra xám đều hoặc bị cong sRGB | Blender 5.x áp view transform lên File Output | `scene.py` đặt `save_as_render = False` + `color_management = OVERRIDE`, `Non-Color`; sửa `scene.py` thì giữ hai dòng đó |
 | Hai lần render cùng khung ra byte khác nhau | PNG mang metadata ngày giờ | `scene.py` tắt mọi `use_stamp_*`; đừng bật lại |
+| `mesh-prep`: cảnh báo `blender: QuadriFlow failed (...): decimated ...` | QuadriFlow cần lưới kín, pháp tuyến cùng chiều; `--voxel 0` hoặc voxel quá thô để lại lỗ | Giữ `--voxel auto` (hoặc nhỏ hơn); bản giảm mặt vẫn dùng làm nền điêu khắc, retopo tay khi cần vòng cạnh rig |
+| `mesh-prep`/`mesh-check`: IoU < 0,85 hoặc `proportions drift` lớn | Mesh trôi khỏi concept (con nhiều chi: thân dài hơn, chân ngắn hơn), hoặc mặt concept không phải góc nhìn trước của mesh | Đối chiếu số chân/sừng/cổ với `CHARACTER.md`; thử seed khác hoặc ảnh vào khác; `mesh-check --view side` khi concept là góc nghiêng khác |
+| `mesh-prep`: `.blend` nặng (vài chục MB) | Bản gốc 1M tam giác giữ ẩn trong collection `source` để bake | Bình thường; không đẩy `.blend` lên Drive khi chưa cần |
 
 ## ComfyUI (`tools/comfy/`, clip MiniMax H3 local, `video_engine: comfy`)
 
@@ -285,6 +288,9 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | Ảnh `qwen-t2i` đầu tiên của phiên lâu hơn ~135 s nhiều | Nạp model 20 GB từ đĩa vào RAM/VRAM | Bình thường cho lần đầu; các ảnh sau ~135 s (30 bước, 1664x928) |
 | `run ... --review` ảnh: `review: not published (HTTP 400: build: kind must be one of …)` | Server review chưa biết kiểu build `image` | Không ảnh hưởng ảnh và ledger; cập nhật server review lên bản có kiểu `image` |
 | `queued prompt … · no websocket: progress by time` | Không mở được `/ws` (server cũ, proxy, URL https) | Ảnh vẫn ra bình thường; tiến độ chỉ theo thời gian ước lượng |
+| `comfy.py run hunyuan3d` thoát 2: `the background is not plain white or the subject touches the edge` | Ảnh vào có nền màu/cảnh, hoặc thân bị cắt ở mép | Làm bản nền trắng, đủ thân bằng Qwen-Image-Edit; `--allow-bg` chỉ để thử (mesh sẽ kém) |
+| `comfy.py run hunyuan3d` thoát 2: `model hunyuan_3d_v2.1.safetensors … is not in ComfyUI's checkpoints/ list` | Checkpoint chưa có trong `models/checkpoints` mà server thấy | `comfy.py models`; không tải khi chưa hỏi chủ lab (7,4 GB) |
+| Mesh Hunyuan3D mất đầu/đuôi | Ảnh vào rộng, `CLIPVisionEncode` cắt giữa | `run` đã đệm vuông (vật 85 % cạnh); kiểm sidecar `input.bbox`; ảnh tự cắt sát mép thì làm lại ảnh vào |
 
 ## Xem trực tiếp (`tools/review/`, web app review)
 

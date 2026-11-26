@@ -1,0 +1,26 @@
+{
+  "id": "hunyuan3d",
+  "title": "Hunyuan3D 2.1 image-to-3D: an untextured sculpt blank (GLB) from an approved white-background concept",
+  "source": "https://github.com/Comfy-Org/workflow_templates (MIT, Copyright (c) 2023-present Comfy Org; THIRD_PARTY.md): template 3d_hunyuan3d-v2.1.json (its subgraph), flattened to API format; node classes, input names and wiring from the template, values ours (as tried on the owner's PC, issue #69)",
+  "verified": false,
+  "kind": "mesh",
+  "model_set": "hunyuan3d-2.1",
+  "ledger_model": "comfy:hunyuan3d",
+  "licence": "Tencent Hunyuan 3D 2.1 Community License: not valid in the EU, the UK or South Korea; commercial use has conditions (monthly active users, attribution): read the licence that ships with the model before publishing",
+  "input": {"size": 1024, "fill": 0.85, "white": 235, "border": 0.02, "border_white": 0.98},
+  "defaults": {"steps": 30, "cfg": 5.0, "octree": 256},
+  "octree": {"256": {"num_chunks": 8000}, "512": {"num_chunks": 32000}},
+  "estimate": {"seconds_per_step": 0.62, "decode_seconds": {"256": 21, "512": 150},
+               "note": "owner's RTX 5070 Ti 16 GB: octree 256 + 30 steps ~40 s (peak ~8.8 GB VRAM for the whole card), octree 512 + 50 steps ~3 min (~9.8 GB)"},
+  "progress_node": "7",
+  "params": {
+    "image": [["1", "image"]],
+    "seed": [["7", "seed"]],
+    "steps": [["7", "steps"]],
+    "cfg": [["7", "cfg"]],
+    "octree": [["8", "octree_resolution"]],
+    "num_chunks": [["8", "num_chunks"]],
+    "prefix": [["10", "filename_prefix"]]
+  },
+  "output": {"node": "10", "type": "mesh", "ext": ".glb"}
+}

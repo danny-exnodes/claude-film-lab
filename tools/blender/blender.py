@@ -15,8 +15,19 @@
         (look realistic: Cycles, three studio lamps on a grey sky, or --hdri)
   python tools/blender/blender.py keyframes <shot3d.json> --out <dir> [--size 1344x768] [--look L]
   python tools/blender/blender.py lookbook --out <dir> [--spec S] [--frame N] [--size 960x540]
+  python tools/blender/blender.py mesh-prep <raw.glb> --out <dir> [--concept concept.png] [--voxel auto|SIZE|0]
+                                         [--quad-faces 20000 | --decimate N] [--min-island 0.002] [--no-turntable]
+                                         [--stills front,34,side] [--frames N] [--front DEG] [--preview] [--samples N]
+        an image-to-3D blank (tools/comfy/comfy.py run hunyuan3d) -> a sculpt base: mesh report of the raw GLB (holes,
+        non-manifold edges, loose parts), voxel remesh + loose debris removed + QuadriFlow quads (or decimate) ->
+        <name>_prep.glb + <name>_prep.blend (raw mesh kept hidden as bake source) + prep.json, a clay turntable of it
+        (turntable/), silhouettes from the concept's view and their IoU against --concept, compare.png,
+        mesh_report.json. Blender runs (meshprep.py, then the turntable) under one GPU turn.
+  python tools/blender/blender.py mesh-check <mesh.glb> [--concept concept.png] [--view front|side|back]
+                                         [--sheet compare.png] [--json report.json]
+        the same mesh report and silhouette IoU without Blender or GPU (numpy + Pillow, tools/blender/meshcheck.py)
 
-Every render command also takes --engine, --dry-run (print the Blender command, render nothing) and --timeout S.
+Every render command (and mesh-prep) also takes --engine, --dry-run (print the Blender command, render nothing) and --timeout S.
 render, turntable and keyframes take --review BUILD (or env FILM_REVIEW_BUILD): publish the job's start, progress
 (at most every 2 s) and end, with the mp4/keyframes as renders, to the review server (tools/review/; offline-safe).
 --out must not exist or be an empty folder (still: the png must not exist): nothing is ever overwritten.
@@ -55,6 +66,7 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCENE = os.path.join(HERE, "scene.py")
+MESHPREP = os.path.join(HERE, "meshprep.py")
 DEMO = os.path.join(HERE, "demo")
 LOOKBOOK_SPEC = os.path.join(DEMO, "lookbook.json")
 KEYFRAME_SIZE = "1344x768"
@@ -310,6 +322,7 @@ def gpu_label(a):
             "still": lambda: os.path.splitext(os.path.basename(a.spec))[0],
             "keyframes": lambda: os.path.splitext(os.path.basename(a.spec))[0],
             "turntable": lambda: asset_label(a.asset),
+            "mesh-prep": lambda: os.path.splitext(os.path.basename(a.glb))[0],
             "lookbook": lambda: ""}.get(a.cmd, lambda: "")()
     agent = (os.environ.get("FILM_AGENT") or "").strip()
     return gpu.clean_label(f"{agent + ': ' if agent else ''}blender {a.cmd} {what}")
@@ -687,6 +700,23 @@ def cmd_turntable(a):
 
 
 def _turntable_claimed(a, look, stills, data):
+    path, extra, ff, mp4 = _turntable_files(a, data)
+    stem = os.path.splitext(asset_label(a.asset).replace("preset:", "").split("#")[0])[0]
+    hook = review_hook(a, kind="turntable", subject=stem)
+    info = with_review(hook, f"turntable {asset_label(a.asset)} ({look})",
+                       lambda: _turntable_render(a, look, stills, path, data["engine"], extra, ff, mp4, stem, hook))
+    if info is None:
+        return 0
+    tt = info.get("turntable") or {}
+    print(f"turntable {asset_label(a.asset)} ({look}) {info['frame_count']} frames · "
+          f"{info['mean_seconds_per_frame']} s/frame"
+          + (f" · camera {tt['camera_distance_m']} m, {tt.get('height_m')} m tall" if tt.get("camera_distance_m") else "")
+          + (f" · stills {', '.join(stills)}" if stills else "") + f" -> {a.out}")
+    return 0
+
+
+def _turntable_files(a, data):
+    """turntable.json in the (claimed) --out, the scene.py flags, ffmpeg (or Blender's encoder) and the mp4 path."""
     path = os.path.join(tempfile.gettempdir() if a.dry_run else a.out, "turntable.json")
     write_json(path, data)
     extra = ["--preview"] if a.preview else []
@@ -698,35 +728,26 @@ def _turntable_claimed(a, look, stills, data):
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
     if not ff:
         extra += ["--mp4", mp4]
-    stem = os.path.splitext(asset_label(a.asset).replace("preset:", "").split("#")[0])[0]
-    hook = review_hook(a, kind="turntable", subject=stem)
+    return path, extra, ff, mp4
 
-    def work():
-        info = render_into(path, a.out, extra, data["engine"], a, keep=("turntable.json",), hook=hook)
-        if info is None:
-            return None, []
-        missing = [v for v in stills if not os.path.isfile(os.path.join(a.out, f"still_{v}.png"))]
-        if missing:
-            raise Failed(f"Blender finished without still_{missing[0]}.png")
-        if ff:
-            encode_ffmpeg(ff, os.path.join(a.out, "beauty"), 1, info["fps"], mp4)
-            info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
-            write_json(os.path.join(a.out, "render.json"), info)
-        eng = f"blender {info.get('engine', '')}".strip()
-        renders = [render_entry(a.out, info, f"turntable {stem} ({look})")]
-        renders += [{"label": f"{stem} {v}", "image": os.path.join(a.out, f"still_{v}.png"), "engine": eng}
-                    for v in stills]
-        return info, renders
 
-    info = with_review(hook, f"turntable {asset_label(a.asset)} ({look})", work)
+def _turntable_render(a, look, stills, path, engine, extra, ff, mp4, stem, hook):
+    """Render a turntable spec into a.out (GPU lock inside render_into). -> (render.json dict, review renders)."""
+    info = render_into(path, a.out, extra, engine, a, keep=("turntable.json",), hook=hook)
     if info is None:
-        return 0
-    tt = info.get("turntable") or {}
-    print(f"turntable {asset_label(a.asset)} ({look}) {info['frame_count']} frames · "
-          f"{info['mean_seconds_per_frame']} s/frame"
-          + (f" · camera {tt['camera_distance_m']} m, {tt.get('height_m')} m tall" if tt.get("camera_distance_m") else "")
-          + (f" · stills {', '.join(stills)}" if stills else "") + f" -> {a.out}")
-    return 0
+        return None, []
+    missing = [v for v in stills if not os.path.isfile(os.path.join(a.out, f"still_{v}.png"))]
+    if missing:
+        raise Failed(f"Blender finished without still_{missing[0]}.png")
+    if ff:
+        encode_ffmpeg(ff, os.path.join(a.out, "beauty"), 1, info["fps"], mp4)
+        info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
+        write_json(os.path.join(a.out, "render.json"), info)
+    eng = f"blender {info.get('engine', '')}".strip()
+    renders = [render_entry(a.out, info, f"turntable {stem} ({look})")]
+    renders += [{"label": f"{stem} {v}", "image": os.path.join(a.out, f"still_{v}.png"), "engine": eng}
+                for v in stills]
+    return info, renders
 
 
 def cmd_lookbook(a):
@@ -760,6 +781,245 @@ def _lookbook_looks(a, spec_path, shot, frame, size, book):
         book["looks"][look] = {"file": f"{look}.png", "engine": info["engine"], "device": info["device"],
                                "seconds": info["seconds_per_frame"][0], "fallback": info.get("fallback")}
         print(f"lookbook {look} -> {os.path.join(a.out, look + '.png')} ({info['seconds_per_frame'][0]} s)")
+
+
+# ------------------------------------------------------------------ image-to-3D blanks (mesh-prep, mesh-check)
+MESH_STILLS = "front,34,side"
+MESH_VIEW = "front"             # Hunyuan3D: the concept is the view from +Z in glTF (from -Y in Blender)
+
+
+def _load_meshcheck():
+    """tools/blender/meshcheck.py (numpy + Pillow), loaded on use: find/check/render never need numpy."""
+    try:
+        sp = importlib.util.spec_from_file_location("film_blender_meshcheck", os.path.join(HERE, "meshcheck.py"))
+        mod = importlib.util.module_from_spec(sp)
+        sp.loader.exec_module(mod)
+        return mod
+    except ImportError as e:
+        raise Refused(f"mesh-check/mesh-prep need numpy and Pillow ({e}): pip install numpy Pillow")
+
+
+def read_mesh(mc, path):
+    if not os.path.isfile(path):
+        raise Refused(f"no such file: {path}")
+    try:
+        return mc.read_glb(path)
+    except mc.GlbError as e:
+        raise Refused(f"{path}: {e}")
+
+
+def concept_arg(mc, path):
+    """The subject mask of --concept (None without it); Refused when it cannot be read or is empty."""
+    if not path:
+        return None
+    if not os.path.isfile(path):
+        raise Refused(f"--concept {path}: no such file")
+    try:
+        mask = mc.concept_mask(path)
+    except Exception as e:          # Pillow: not an image
+        raise Refused(f"--concept {path}: not an image ({type(e).__name__})")
+    if not mask.any():
+        raise Refused(f"--concept {path}: no subject found (the image is near-white)")
+    return mask
+
+
+def mesh_line(label, st):
+    return (f"{label}: {st['tris']} tris, {st['verts']} verts, {st['islands']} island(s), {st['boundary_edges']} "
+            f"boundary + {st['overshared_edges']} over-shared edges -> "
+            + ("watertight" if st["watertight"] else "NOT watertight"))
+
+
+def iou_line(label, cmp):
+    return (f"{label} vs concept: silhouette IoU {cmp['iou']:.3f}" + (" (mirrored)" if cmp["mirrored"] else "")
+            + f" · proportions {cmp['aspect_drift']:+.1%}")
+
+
+def save_mask(mask, path):
+    from PIL import Image
+    Image.fromarray((mask * 255).astype("uint8")).save(path, "PNG")
+
+
+def prep_name(glb):
+    """'ho-giao_raw_v01.glb' -> 'ho-giao_v01' (the prep files are <name>_prep.glb/.blend)."""
+    stem = os.path.splitext(os.path.basename(glb))[0]
+    return re.sub(r"_raw(?=(_v\d+)?$)", "", stem) or stem
+
+
+def voxel_arg(text):
+    t = str(text).strip().lower()
+    if t == "auto":
+        return "auto"
+    try:
+        v = float(t)
+    except ValueError:
+        v = -1.0
+    if not 0 <= v < 1e6:
+        raise Refused(f"--voxel {text!r}: auto, 0 (no voxel remesh) or a size in the mesh's units (> 0)")
+    return f"{v:g}"
+
+
+def cmd_mesh_check(a):
+    mc = _load_meshcheck()
+    for p in (a.sheet, a.json):
+        if p and os.path.exists(p):
+            raise Refused(f"{p} exists (nothing is overwritten; use a new name, e.g. _v02)")
+    V, F, info = read_mesh(mc, a.glb)
+    concept = concept_arg(mc, a.concept)
+    st = mc.mesh_stats(V, F)
+    print(mesh_line(os.path.basename(a.glb), st))
+    sil = mc.silhouette(V, F, a.view)
+    cmp = mc.compare(concept, sil) if concept is not None else None
+    if cmp:
+        print(iou_line(f"view {a.view}", cmp))
+    warns = mc.warnings(st, cmp)
+    for w in warns:
+        print(f"WARNING: {w}")
+    if a.json:
+        write_json(a.json, {"tool": "tools/blender/blender.py mesh-check", "glb": os.path.abspath(a.glb),
+                            "glb_sha256": sha256(a.glb), "glb_info": info, "stats": st, "view": a.view,
+                            "concept": os.path.abspath(a.concept) if a.concept else None, "silhouette": cmp,
+                            "warnings": warns})
+    if a.sheet:
+        tiles = ([("concept", a.concept)] if concept is not None else []) + [(f"silhouette ({a.view})", sil)]
+        if cmp:
+            tiles.append((f"overlay IoU {cmp['iou']:.3f}", mc.overlay(concept, sil, mirrored=cmp["mirrored"])))
+        os.makedirs(os.path.dirname(os.path.abspath(a.sheet)), exist_ok=True)
+        mc.compare_sheet(a.sheet, tiles, title=f"{os.path.basename(a.glb)} · {st['tris']} tris")
+        print(f"sheet -> {a.sheet}")
+    return 0
+
+
+def mesh_prep_command(blender, a, name):
+    cmd = [blender, "-b", "--factory-startup", "--python-exit-code", "1", "-P", MESHPREP, "--",
+           "--glb", os.path.abspath(a.glb), "--out", os.path.abspath(a.out), "--name", name,
+           "--voxel", voxel_arg(a.voxel), "--quad-faces", str(a.quad_faces), "--min-island", f"{a.min_island:g}"]
+    if a.decimate:
+        cmd += ["--decimate", str(a.decimate)]
+    return cmd
+
+
+def cmd_mesh_prep(a):
+    mc = _load_meshcheck()
+    voxel_arg(a.voxel)
+    if not (a.quad_faces == 0 or 100 <= a.quad_faces <= 1000000):
+        raise Refused("--quad-faces must be 0 (no quad remesh) or 100..1000000")
+    if a.decimate is not None and not 100 <= a.decimate <= 10000000:
+        raise Refused("--decimate must be 100..10000000 triangles")
+    if not 0 <= a.min_island < 0.5:
+        raise Refused("--min-island must be 0 (keep every loose part) .. 0.5 (share of the vertices)")
+    if a.frames is not None and a.frames < 2:
+        raise Refused("--frames must be at least 2")
+    look = a.look or "clay"
+    if look not in spec.look_ids():
+        raise Refused(f"--look {look!r} is not one of {', '.join(spec.look_ids())}")
+    stills = stills_arg(a.stills)
+    V, F, info = read_mesh(mc, a.glb)
+    concept = concept_arg(mc, a.concept)
+    check_out_dir(a.out)
+    name = prep_name(a.glb)
+    blender = blender_or_fail(a.dry_run)
+    cmd = mesh_prep_command(blender, a, name)
+    tt_out = os.path.join(a.out, "turntable")
+    if a.dry_run:
+        print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
+        if not a.no_turntable:
+            print(f"then: turntable {os.path.join(a.out, name + '_prep.glb')} --look {look} --stills "
+                  f"{','.join(stills) or 'none'} --out {tt_out}")
+        print(f"then (CPU): mesh_report.json, silhouette_raw.png, silhouette_prep.png, compare.png in {a.out}")
+        return 0
+    raw = mc.mesh_stats(V, F)
+    print(mesh_line("raw", raw))
+    hook = review_hook(a, kind="model", subject=name)
+    with claim_out(a.out):
+        rep = with_review(hook, f"mesh-prep {name}",
+                          lambda: _mesh_prep_claimed(a, mc, cmd, name, look, stills, (V, F, info, raw), concept,
+                                                     tt_out, hook))
+    prep = rep["prep"]
+    print(mesh_line("prep", prep["stats"]) + f" · {prep['blender'].get('retopo', {}).get('method')}")
+    for k in ("raw", "prep"):
+        if rep["silhouette"].get(k):
+            print(iou_line(k, rep["silhouette"][k]))
+    for w in rep["warnings"]:
+        print(f"WARNING: {w}")
+    print(f"mesh-prep {name} -> {a.out} (mesh_report.json, {prep['glb']}, {prep['blend']}, compare.png"
+          + ("" if a.no_turntable else ", turntable/") + ")")
+    return 0
+
+
+def _mesh_prep_claimed(a, mc, cmd, name, look, stills, raw_mesh, concept, tt_out, hook):
+    V, F, info, raw = raw_mesh
+    tt = None
+    with gpu_turn(a, hook):             # meshprep.py and the turntable under one GPU turn (re-entrant lock)
+        if hook:
+            hook.update(0.05, "remesh in Blender", force=True)
+        rc, _, tail = run_blender(cmd, a.timeout)
+        if rc != 0:
+            raise Failed(f"Blender exited with {rc}:\n" + "\n".join(tail[-15:]))
+        try:
+            with open(os.path.join(a.out, "prep.json"), encoding="utf-8") as f:
+                prep = json.load(f)
+            prep_glb = os.path.join(a.out, prep["files"]["glb"])
+        except (OSError, ValueError, KeyError, TypeError):
+            raise Failed(f"Blender finished but wrote no readable {os.path.join(a.out, 'prep.json')}")
+        if not a.no_turntable:
+            if hook:
+                hook.update(0.3, "clay turntable", force=True)
+            seconds = a.frames / TURNTABLE_FPS if a.frames is not None else 4.0
+            data = turntable_spec(prep_glb, look, seconds, stills=stills, front=a.front, engine=a.engine)
+            errors = spec.validate(data, os.getcwd())
+            if errors:
+                raise Failed("turntable: " + "; ".join(errors))
+            os.makedirs(tt_out)
+            ns = argparse.Namespace(cmd="turntable", asset=prep_glb, out=tt_out, dry_run=False, preview=a.preview,
+                                    size=None, samples=a.samples, timeout=a.timeout)
+            path, extra, ff, mp4 = _turntable_files(ns, data)
+            tt = _turntable_render(ns, look, stills, path, data["engine"], extra, ff, mp4, name + "_prep", None)
+    try:
+        pV, pF, _ = mc.read_glb(prep_glb)
+    except mc.GlbError as e:
+        raise Failed(f"{prep_glb}: {e}")
+    pstats = mc.mesh_stats(pV, pF)
+    sil_raw, sil_prep = mc.silhouette(V, F, MESH_VIEW), mc.silhouette(pV, pF, MESH_VIEW)
+    save_mask(sil_raw, os.path.join(a.out, "silhouette_raw.png"))
+    save_mask(sil_prep, os.path.join(a.out, "silhouette_prep.png"))
+    cmp = {k: (mc.compare(concept, m) if concept is not None else None) for k, m in (("raw", sil_raw), ("prep", sil_prep))}
+    tiles = [("concept", a.concept)] if concept is not None else []
+    tiles.append(("raw silhouette", sil_raw))
+    for k, m in (("raw", sil_raw), ("prep", sil_prep)):
+        if cmp[k]:
+            tiles.append((f"{k} vs concept IoU {cmp[k]['iou']:.3f}", mc.overlay(concept, m, mirrored=cmp[k]["mirrored"])))
+    if not cmp["prep"]:
+        tiles.append(("prep silhouette", sil_prep))
+    tiles += [(f"clay {v}", os.path.join(tt_out, f"still_{v}.png")) for v in stills if tt]
+    fin = prep.get("stages", {}).get("final", {})
+    mc.compare_sheet(os.path.join(a.out, "compare.png"), tiles,
+                     title=f"{name}: raw {raw['tris']} tris -> prep {fin.get('faces', '?')} faces "
+                           f"({fin.get('quads', '?')} quads, {prep.get('retopo', {}).get('method', '?')})")
+    warns = [f"raw: {w}" for w in mc.warnings(raw, cmp["raw"])] + [f"prep: {w}" for w in mc.warnings(pstats, cmp["prep"])]
+    warns += [f"blender: {n}" for n in prep.get("notes") or []]
+    tt_info = tt[0] if tt else None
+    report = {
+        "tool": "tools/blender/blender.py mesh-prep", "name": name,
+        "raw": {"glb": os.path.abspath(a.glb), "glb_sha256": sha256(a.glb), "glb_info": info, "stats": raw},
+        "prep": {"glb": prep["files"]["glb"], "blend": prep["files"]["blend"], "stats": pstats, "blender": prep},
+        "params": {"voxel": voxel_arg(a.voxel), "quad_faces": a.quad_faces, "decimate": a.decimate,
+                   "min_island": a.min_island, "look": look, "view": MESH_VIEW},
+        "concept": os.path.abspath(a.concept) if a.concept else None, "silhouette": cmp,
+        "files": {"silhouette_raw": "silhouette_raw.png", "silhouette_prep": "silhouette_prep.png",
+                  "sheet": "compare.png", "turntable": "turntable/" if tt else None},
+        "turntable": ({"mp4": (tt_info.get("mp4") or {}).get("file"), "stills": [f"still_{v}.png" for v in stills],
+                       "engine": tt_info.get("engine"), "seconds_per_frame": tt_info.get("mean_seconds_per_frame")}
+                      if tt_info else None),
+        "warnings": warns,
+        "next": "sculpt/retopo by hand where needed, rebuild thin parts (fins, hair, antlers) by script, then rig "
+                "(.claude/skills/film-compose-shot/references/blender-method.md)",
+    }
+    write_json(os.path.join(a.out, "mesh_report.json"), report)
+    renders = list(tt[1]) if tt else []
+    renders.append({"label": f"{name} compare", "image": os.path.join(a.out, "compare.png"), "engine": "blender"})
+    if hook:
+        hook.rv.step(f"{name}_prep", glb=prep_glb, stats={"verts": pstats["verts"], "tris": pstats["tris"]})
+    return report, renders
 
 
 def main(argv=None):
@@ -834,9 +1094,36 @@ def main(argv=None):
     q.add_argument("--engine", choices=spec.ENGINES, default=None)
     q.add_argument("--dry-run", action="store_true")
     q.add_argument("--timeout", type=float, default=None)
+    q = sp.add_parser("mesh-prep", help="image-to-3D blank (.glb) -> sculpt base: mesh report, voxel + quad remesh, "
+                                        "clay turntable, silhouette IoU vs the concept")
+    q.add_argument("glb")
+    q.add_argument("--out", required=True)
+    q.add_argument("--concept", default=None, help="the concept image the mesh came from (silhouette IoU, sheet)")
+    q.add_argument("--voxel", default="auto",
+                   help="voxel remesh size in the mesh's units: auto (longest side / 300, default) or 0 (none)")
+    q.add_argument("--quad-faces", type=int, default=20000, help="QuadriFlow target quads (default 20000; 0 = none)")
+    q.add_argument("--decimate", type=int, default=None, help="decimate to N triangles instead of QuadriFlow")
+    q.add_argument("--min-island", type=float, default=0.002,
+                   help="drop loose parts under this share of the vertices (default 0.002; 0 keeps all)")
+    q.add_argument("--no-turntable", action="store_true", help="skip the clay turntable")
+    q.add_argument("--stills", default=MESH_STILLS,
+                   help=f"turntable stills, of {','.join(spec.TURNTABLE_VIEWS)} or none (default {MESH_STILLS})")
+    q.add_argument("--frames", type=int, default=None, help=f"turntable frames at {TURNTABLE_FPS} fps (default 96)")
+    q.add_argument("--front", type=float, default=0.0, help="turntable: degrees that turn the front to the camera")
+    q.add_argument("--samples", type=int, default=None)
+    common(q)
+    review_arg(q)
+    q = sp.add_parser("mesh-check", help="mesh report + silhouette IoU of a .glb without Blender (CPU)")
+    q.add_argument("glb")
+    q.add_argument("--concept", default=None, help="the concept image (silhouette IoU)")
+    q.add_argument("--view", choices=("front", "side", "back"), default=MESH_VIEW,
+                   help="silhouette view (front = from +Z in glTF, the concept's view for Hunyuan3D)")
+    q.add_argument("--sheet", default=None, help="write a comparison PNG here (must not exist)")
+    q.add_argument("--json", default=None, help="write the report here (must not exist)")
     a = p.parse_args(argv)
     fn = {"find": cmd_find, "check": cmd_check, "render": cmd_render, "still": cmd_still, "turntable": cmd_turntable,
-          "keyframes": cmd_keyframes, "lookbook": cmd_lookbook}[a.cmd]
+          "keyframes": cmd_keyframes, "lookbook": cmd_lookbook, "mesh-prep": cmd_mesh_prep,
+          "mesh-check": cmd_mesh_check}[a.cmd]
     fired = []
 
     def on_stop(signum, frame):

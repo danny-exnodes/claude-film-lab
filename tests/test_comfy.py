@@ -318,7 +318,7 @@ class TestPure(ComfyCase):
         classes = set()
         for wid in comfy.workflow_ids():
             classes |= comfy.graph_classes(comfy.load_workflow(wid)[0])
-        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V, QWEN])
+        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V, "hunyuan3d", QWEN])
         self.assertEqual(comfy.ALLOWED_NODES, classes | {"LoadImage", "MiniMaxH3AddGuide"})
         for cls in PAID:
             self.assertNotIn(cls, comfy.ALLOWED_NODES)
@@ -392,8 +392,11 @@ class TestPure(ComfyCase):
         self.assertEqual(lock["custom_nodes"], [])
         self.assertEqual({m["set"] for m in lock["models"]}, {"minimax-h3", "qwen-image"})
         self.assertFalse(any("wan" in m["file"].lower() for m in lock["models"]))
+        sets = {m["set"] for m in lock["models"]}
         for wid in comfy.workflow_ids():
-            graph = comfy.load_workflow(wid)[0]
+            graph, meta, _ = comfy.load_workflow(wid)
+            if meta.get("model_set") not in sets:      # hunyuan3d: its lock set comes from another branch
+                continue
             for _, cls, inp, entry, f in comfy.model_entries(graph, lock):
                 self.assertIsNotNone(entry, f)
                 self.assertIn(wid, entry["workflows"])

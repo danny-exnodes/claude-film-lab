@@ -3,11 +3,13 @@
 Tạo clip có tiếng bằng model **MiniMax H3** chạy trong **ComfyUI trên máy của chủ dự án** (Windows, RTX 5070 Ti 16 GB),
 **miễn phí**, ghi vào ledger của tập như một request Seedance nhưng **chi phí 0** (không trừ trần nào của
 `budget.yaml`). Chỉ dùng được trong **phiên Claude Code local** trên máy đó; phiên cloud không có GPU, không có ComfyUI.
-Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo ảnh concept").
+Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo ảnh concept") và **phôi 3D** của sinh vật bằng
+Hunyuan3D 2.1 (`hunyuan3d`, mục "Tạo phôi 3D").
 
 | File | Việc |
 |---|---|
 | `comfy.py` | CLI (chỉ thư viện chuẩn; Pillow để cắt khung hình): `ping`, `start`, `install`, `models`, `workflows`, `run`, `interrupt` |
+| `mesh3d.py` | `run` của workflow ảnh → 3D (`hunyuan3d`): kiểm nền, vuông hoá ảnh vào, tải GLB (Pillow + numpy) |
 | `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model H3 và Qwen-Image (sha256 chưa ghim: `null`) |
 | `workflows/<id>.json` | graph ComfyUI dạng **API** (không subgraph, không node bị bypass), giá trị mặc định do lab đặt |
 | `workflows/<id>.meta.json` | bản đồ tham số (node → input), luật khung hình/kích thước, phần tuỳ chọn, ref và guide |
@@ -48,6 +50,7 @@ model chung của Desktop. `--offline` chặn các
 | `h3-i2v` | `comfy:h3-i2v` | `--image` khung đầu, tuỳ chọn `--last` khung cuối (first-last frame); không `--image` = text-to-video | `minimax_h3_fl2va_pruned_int8_convrot` |
 | `h3-r2v` | `comfy:h3-r2v` | `--ref` 1–9 ảnh tham chiếu (`<Picture 1..n>` trong prompt), tuỳ chọn `--guide GIÂY=ẢNH` neo hình theo thời gian | `minimax_h3_ref2va_pruned_int8_convrot` |
 | `qwen-t2i` | `comfy:qwen-image` (kind `image`) | chỉ chữ: `--prompt`/`--prompt-file` (file chữ UTF-8), `--negative`, `--size WxH` | `qwen_image_2512_fp8_e4m3fn` (mục "Tạo ảnh concept") |
+| `hunyuan3d` | `comfy:hunyuan3d` (kind `image`) | `--image` concept nền trắng, `--octree 256\|512`, `--steps`, `--cfg`, `--seed`, `--allow-bg` | `hunyuan_3d_v2.1` (mục "Tạo phôi 3D") |
 
 Cả hai dùng chung text encoder `qwen3vl_32b_minimax_h3_nvfp4_awq` (`CLIPLoader` type `minimax`), VAE hình
 `minimax_h3_video_vae_int8_convrot`, VAE tiếng `minimax_h3_audio_vae_fp32`; đầu ra mp4 H.264 có tiếng
@@ -147,6 +150,43 @@ python tools/comfy/comfy.py run qwen-t2i --prompt-file concept.txt --turbo --see
 - Graph chưa được xác nhận với `/object_info` của server thật (`"verified": false`); bản thử tạm của chủ lab chạy được
   với cùng các node lõi.
 
+## Tạo phôi 3D (`hunyuan3d`)
+
+Hunyuan3D 2.1 chạy local, miễn phí: **một ảnh concept → một mesh GLB không màu**, phôi để điêu khắc/retopo trong Blender
+(`tools/blender/blender.py mesh-prep`; quy trình đủ: `.claude/skills/film-compose-shot/references/blender-method.md` §7).
+Model `checkpoints/hunyuan_3d_v2.1.safetensors` (bản đóng gói Comfy-Org, 7,4 GB) đã có trên máy chủ lab.
+
+```bash
+python tools/comfy/comfy.py run hunyuan3d --image <concept_trang>.png --seed 7 --dry-run \
+    --out out/<project>/characters/<c>/<c>_raw_v01.glb --ledger out/<project>/<id>/ledger.csv
+python tools/comfy/comfy.py run hunyuan3d --image <concept_trang>.png --seed 7 --octree 512 --steps 50 \
+    --out out/<project>/characters/<c>/<c>_raw_v02.glb --ledger out/<project>/<id>/ledger.csv
+```
+
+- Graph (node lõi, dựng lại từ template `3d_hunyuan3d-v2.1` của ComfyUI): `LoadImage` → `CLIPVisionEncode` (cắt giữa) →
+  `Hunyuan3Dv2Conditioning`; `ImageOnlyCheckpointLoader` → `ModelSamplingAuraFlow` (shift 1.0) → `KSampler` (euler/normal,
+  30 bước, cfg 5, denoise 1) trên `EmptyLatentHunyuan3Dv2` (4096) → `VAEDecodeHunyuan3D` → `VoxelToMesh` (surface net,
+  ngưỡng 0,6) → `SaveGLB`.
+- **Ảnh vào**: toàn thân trên nền trắng trơn (làm bằng Qwen-Image-Edit). `run` kiểm một viền 2 % quanh ảnh: dưới 98 %
+  điểm ảnh trắng (nền màu, thân chạm mép) → từ chối (2); `--allow-bg` vẫn gửi (cảnh báo). Ảnh PNG trong suốt tính
+  là nền trắng. Trước khi tải lên: cắt theo khung bao của vật (bỏ đốm lẻ ở mép), đệm thành ảnh vuông trắng 1024×1024, vật
+  chiếm 85 % cạnh (`CLIPVisionEncode` cắt giữa: ảnh rộng sẽ mất đầu/đuôi), vào file tạm; file gốc không bị đụng.
+- `--octree 256` (mặc định, `num_chunks` 8000, ~40 s với 30 bước) · `512` (`num_chunks` 32000, chi tiết hơn; dùng
+  `--steps 50`, ~3 phút). Nên chạy 2–4 seed ở 256 để chọn rồi chạy 512 cho seed được chọn.
+- Từ chối (2): cờ của workflow khác (`--prompt`, `--negative`, `--size`, `--turbo`, `--last`, `--ref`, `--guide`,
+  `--seconds`, `--res`, `--keep-frames`), thiếu `--image`, `--out` không phải `.glb` hoặc đã có, octree khác 256/512,
+  server thiếu node hay checkpoint; ngược lại `--octree`/`--allow-bg` với workflow khác cũng bị từ chối.
+- Đầu ra: `<out>.glb` (tải về nguyên tử, không bao giờ thay file có sẵn) + sidecar `<out>.glb.json` (seed, bước, cfg,
+  octree, ảnh vào: sha256, khung bao, kết quả kiểm nền; số đỉnh/tam giác của mesh, graph, giây GPU, giấy phép, lệnh
+  `mesh-prep` gợi ý). Ledger: `kind image`, `model comfy:hunyuan3d`, `size 1024x1024`, `count 1`, ghi chú
+  `req=<hex>; seed=<n>; steps=<n>; octree=<n>`, chi phí 0. `--review BUILD`: build kiểu `model`, mesh xong là một `step`
+  có GLB (engine `comfy-hunyuan3d`).
+- Mesh ra **không kín**, không vòng cạnh, phần mảnh (vây, tóc, gạc) vỡ: luôn qua `blender.py mesh-prep`. Giấy phép
+  trọng số: **Tencent Hunyuan 3D 2.1 Community License – không áp dụng ở EU, Anh, Hàn Quốc** (`THIRD_PARTY.md`,
+  `docs/MODELS.md`).
+- Graph chưa xác nhận với `/object_info` của server thật (`"verified": false`); script thử của chủ lab chạy được với cùng
+  node, cùng giá trị.
+
 ### Mã thoát và ledger
 
 - **0** xong · **2** bị từ chối tại chỗ, chưa tải gì lên, chưa xếp hàng, không có dòng ledger (sửa lệnh) · **1** job đã
@@ -172,7 +212,7 @@ chỉ liên lạc `FILM_COMFY_URL` (trừ `install --portable`), không qua prox
 
 ## Kiểm thử
 
-`tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
+`tests/test_comfy.py` (và `tests/test_comfy_mesh.py` cho `hunyuan3d`) dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
 khung/kích thước, cắt ảnh, dry-run, đường thành công (file + sidecar + ledger, không tốn trần), lỗi thực thi, quá giờ →
 `interrupted`, `models --verify`, `install --dry-run`, `start`; `tests/test_comfy_ark.py` kiểm luật chi phí 0 và khoá
 ledger khi không có `fcntl` (Windows). Không cần GPU, chạy được trong WSL. Graph thật chỉ được xác nhận khi chạy với

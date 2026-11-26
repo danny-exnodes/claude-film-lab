@@ -54,19 +54,30 @@ thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Các
 | LoRA Turbo | `minimax_h3_fl2v_turbo_8step_v1.0`, `minimax_h3_ref2v_turbo_4step_v0.1` | nháp | **chỉ bản nháp**, không cho bản dùng hay mặt nhân vật | |
 | Qwen-Image 2512 – text to image | `qwen_image_2512_fp8_e4m3fn` + bộ mã hoá `qwen_2.5_vl_7b_fp8_scaled` + VAE `qwen_image_vae` | `qwen-t2i` | ảnh concept (sinh vật, đạo cụ, bối cảnh) để người dùng chọn trước khi dựng 3D; ledger `comfy:qwen-image`, kind `image` | 30 bước ở 1664×928 ≈ **135 s** mỗi ảnh (chủ lab đo, model đã nạp); lần đầu của phiên thêm thời gian nạp model |
 | LoRA Turbo Qwen | `Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16` | `qwen-t2i --turbo` | 2 bước, cfg 1: **chỉ nháp**, không phải ảnh người dùng duyệt | ước lượng ~25 s |
+| Hunyuan3D 2.1 – image to 3D | `hunyuan_3d_v2.1` (`checkpoints/`, bản đóng gói Comfy-Org, 7,4 GB) | `hunyuan3d` | **phôi** điêu khắc (mesh không màu) của sinh vật từ concept đã duyệt, nền trắng, toàn thân; ledger `comfy:hunyuan3d`, kind `image` | octree 256 + 30 bước ≈ **40 s** mỗi mesh (đỉnh VRAM cả card ~8,8 GB); octree 512 + 50 bước ≈ **3 phút** (~9,8 GB); chủ lab đo 2026-11-26 |
 
 - H3: 24 hình/s, số khung theo lưới `17k + 5`, bản dùng 1344×768 (7:4), nháp 864×480 (≈ 1 phút cho 5 s, ước lượng);
   không negative prompt (cfg 1); prompt tiếng Anh theo trường.
 - Qwen-Image (`qwen-t2i`): KSampler euler/simple, 30 bước, cfg 2.5, shift 3.1 (ModelSamplingAuraFlow); `--size` bội số 16,
   khung đã huấn luyện 1328×1328, 1664×928, 928×1664, 1472×1104, 1104×1472, 1584×1056, 1056×1584; có `--negative`.
   `python tools/comfy/comfy.py run qwen-t2i --prompt "..." --size 1664x928 --seed N --out <concepts>/<id>_v<NN>.png --ledger L`.
+- Hunyuan3D 2.1 (`hunyuan3d`): `ImageOnlyCheckpointLoader` → `ModelSamplingAuraFlow` (shift 1.0) → `KSampler` (euler/normal,
+  cfg 5); `CLIPVisionEncode` (cắt giữa) → `Hunyuan3Dv2Conditioning`; `EmptyLatentHunyuan3Dv2` (4096) →
+  `VAEDecodeHunyuan3D` (octree 256/512) → `VoxelToMesh` (surface net, 0,6) → `SaveGLB`. Mesh 137k–1M tam giác, **không
+  kín** (hàng chục nghìn cạnh non-manifold, vài trăm cạnh hở), không vòng cạnh: luôn qua
+  `python tools/blender/blender.py mesh-prep` trước khi điêu khắc/rig. Phần mảnh (vây, tóc, gạc) vỡ. Độ trùng bóng với
+  concept (IoU) 0,85–0,99.
+  **Giấy phép: Tencent Hunyuan 3D 2.1 Community License – không áp dụng ở EU, Anh, Hàn Quốc**; thương mại có điều kiện
+  (ngưỡng người dùng hằng tháng, ghi nguồn): ghi vào `ASSETS.md` mọi model dựng từ mesh này, đọc bản giấy phép đi kèm
+  model trước khi phát hành. Cách dùng: `.claude/skills/film-compose-shot/references/blender-method.md` §7.
 - **Giấy phép:** open weights; điều khoản chưa được xác minh trong repo → **đọc model card trước khi dùng thương mại**
   (kênh có kiếm tiền) và ghi kết quả vào đây.
 - Bản cài ComfyUI có node API **trả tiền** của MiniMax (`comfy_api_nodes/`): không dùng; `comfy.py` chỉ cho node trong
   danh sách cho phép, server chạy `--offline`.
 - Có trên máy, **chưa nối** vào lab (không workflow, không công cụ): LTX-2.3 22B dev fp8 (+ spatial upscaler x2, distilled
   LoRA, bộ mã hoá gemma 3 12B fp4), SeedVR2 3B (phóng video), Qwen-Image-Edit 2511 (+ LoRA Lightning 4/8 bước) và
-  Z-Image Turbo (model ảnh local), Wan Animate 2. Wan 2.2 và LTX-2.5 không dùng.
+  Z-Image Turbo (model ảnh local), Wan Animate 2. Wan 2.2 và LTX-2.5 không dùng. ComfyUI lõi có node TRELLIS.2
+  (ảnh → 3D có texture PBR) nhưng **model chưa tải** (~16 GB): hỏi chủ lab trước khi tải (`docs/BACKLOG.md`).
 - Mọi job GPU local (Blender, ComfyUI) đi qua khoá GPU chung của lab `tools/gpu_run.py` (`out/_gpu/gpu.lock` của bản
   checkout chính, một khoá cho mọi worktree): `blender.py` và `comfy.py run` tự lấy khoá; lệnh GPU khác chạy qua
   `python tools/gpu_run.py --label <việc> -- <lệnh>`.

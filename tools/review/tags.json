@@ -23,6 +23,7 @@
         "blender": "Blender",
         "comfy-h3": "ComfyUI H3",
         "comfy-qwen": "ComfyUI Qwen-Image",
+        "comfy-hunyuan3d": "ComfyUI Hunyuan3D",
         "seedance": "Seedance",
         "seedream": "Seedream",
         "three": "three.js",

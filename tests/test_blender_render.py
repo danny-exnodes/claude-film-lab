@@ -1,7 +1,7 @@
 """Real Blender renders of tools/blender (method: blender): a 64x36, 3-frame shot with every pass, a still twice (same
 bytes), keyframes at another size, a Cycles still, a turntable and the lookbook. Free and local; skipped when no Blender
 is found ($FILM_BLENDER, PATH, the usual install folders), so it skips in WSL and in cloud sessions.
-Run on the Windows PC:  cd tests && python -m unittest test_blender_render -v"""
+Also mesh-prep (issue #69) on a box GLB. Run on the Windows PC:  cd tests && python -m unittest test_blender_render -v"""
 import json, os, struct, subprocess, sys, textwrap, unittest, zlib
 from pathlib import Path
 
@@ -232,6 +232,25 @@ class TestBlenderRender(helpers.TmpDirCase, unittest.TestCase):
         for look in ("grey-layout", "clay", "toon-ink", "ink-wash"):
             self.assertEqual(png_info(lb / f"{look}.png")[:2], (64, 36))
             self.assertIn(look, book["looks"])
+
+    def test_mesh_prep_box_with_debris_and_a_hole(self):
+        # issue #69: meshprep.py in a real Blender (voxel remesh, loose parts, QuadriFlow, GLB export) + turntable
+        from test_blender_mesh import box, concept_png, tetra, write_glb
+        V, F = box()
+        tV, tF = tetra(at=(3, 0, 0), s=0.05)
+        raw = write_glb(self.tmp / "box_raw_v01.glb", [(V, F[1:]), (tV, tF)])
+        out = self.tmp / "prep"
+        r = self.cli("mesh-prep", raw, "--out", out, "--concept", concept_png(self.tmp / "c.png"), "--quad-faces", "500",
+                     "--frames", "4", "--preview", "--stills", "front")
+        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-3000:])
+        rep = json.loads((out / "mesh_report.json").read_text(encoding="utf-8"))
+        self.assertEqual(rep["raw"]["stats"]["boundary_edges"], 3)
+        self.assertTrue(rep["prep"]["stats"]["watertight"], rep["prep"]["stats"])
+        self.assertTrue(rep["prep"]["blender"]["blender"].startswith("5."))
+        self.assertGreater(rep["silhouette"]["prep"]["iou"], 0.85)
+        for name in ("box_v01_prep.glb", "box_v01_prep.blend", "compare.png", "turntable/still_front.png"):
+            self.assertTrue((out / name).is_file(), name)
+        print(f"\n  real mesh-prep: {rep['prep']['blender']['retopo']} {rep['prep']['blender']['seconds']}")
 
 
 if __name__ == "__main__":

@@ -275,7 +275,7 @@ Mục `## Sinh vật của tập` (mẫu có sẵn; bảng trống khi tập kh�
 (code); `Chính` = `có` | `không`; `Ảnh sách` = `có` (ảnh trang sách trong `out/<project>/assets/refs/<slug>/book/`) |
 `không` (chủ dự án xác nhận sách không có) | `chờ`; `Concept` = `chờ` | `duyệt <ngày> <file>` (chỉ chữ đầu được đọc).
 Concept được tính là duyệt khi bảng ghi `duyệt` **và** `characters/<slug>/CHARACTER.md` (thư mục tập hoặc dự án) có mục
-`## Concept đã duyệt` không trống. `tools/check_episode.py`: giá trị lạ, thiếu cột → WARN; `owner_refs.required` mà còn
+`## Concept đã duyệt` không trống. `tools/check_episode.py`: giá trị lạ, thiếu cột → WARN; ô `Chính` trống hay thiếu → tính là sinh vật chính + WARN; `owner_refs.required` mà còn
 `chờ` từ khâu 2 → WARN; tập `blender`/`code` có sinh vật chính chưa duyệt concept → WARN ở khâu 3–4, ERROR từ khâu 5
 (sau G2). `tools/status.py` in mục `CREATURES` (và `OWNER_REFS` khi bắt buộc); `--gate G2` của tập `blender`/`code` cần
 bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thiếu).

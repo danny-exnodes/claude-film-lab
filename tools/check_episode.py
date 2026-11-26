@@ -1229,8 +1229,8 @@ def check_assets(ep_dir, meta, rep):
 CREATURE_HEADING = "## Sinh vật của tập"
 CREATURE_COLS = {"slug": "slug", "tên": "name", "chính": "main", "ảnh sách": "book", "concept": "concept"}
 CREATURE_NEED = ("slug", "main", "book", "concept")
-CREATURE_VALUES = {   # first word of the cell, lower case -> value; an empty cell is the first value listed last
-    "main": {"có": True, "yes": True, "x": True, "không": False, "no": False, "": False},
+CREATURE_VALUES = {   # first word of the cell, lower case -> value; "" = an empty cell (main: none, see read_creatures)
+    "main": {"có": True, "yes": True, "x": True, "không": False, "no": False},
     "book": {"có": "yes", "yes": "yes", "không": "none", "no": "none", "chờ": "pending", "pending": "pending",
              "": "pending"},
     "concept": {"duyệt": "approved", "approved": "approved", "chờ": "pending", "pending": "pending", "": "pending"},
@@ -1239,7 +1239,8 @@ CREATURE_HELP = {"main": "có | không", "book": "có | không | chờ", "concep
 CONCEPT_HEADING = "## Concept đã duyệt"      # characters/<slug>/CHARACTER.md: which concept the owner picked, when
 CREATURE_METHODS = ("blender", "code")       # methods that build creature models: concept approved before G2
 CONCEPT_STAGE = 5                            # past G2 (closes stage 4): an unapproved main creature is an ERROR
-RE_TABLE_SEP = re.compile(r"^:?-{3,}:?$")
+RE_TABLE_SEP = re.compile(r"^:?-+:?$")        # GFM delimiter cells: ---, :--, --:, :-:, --
+RE_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 RE_COMMENT = re.compile(r"<!--.*?-->", re.S)
 
 
@@ -1250,15 +1251,24 @@ def cell_word(v):
 
 
 def section_lines(body, heading):
-    """Lines of the `## ` section named heading (HTML comments removed), or None when the section is missing."""
-    lines, on, found = [], False, False
+    """Lines of the `## ` section named heading (HTML comments removed), or None when the section is missing.
+    A `## ` line inside a fenced code block (``` or ~~~) is text, not a heading."""
+    lines, on, found, fence = [], False, False, None
     for line in RE_COMMENT.sub("", nfc(body)).splitlines():
-        if line.startswith("## "):
+        m = RE_FENCE.match(line)
+        if m:
+            mark = m.group(1)
+            if fence is None:
+                fence = mark
+            elif mark[0] == fence[0] and len(mark) >= len(fence) and not line.strip()[len(mark):].strip():
+                fence = None
+        elif fence is None and line.startswith("## "):
             if on:
                 break
             on = line.rstrip() == heading
             found = found or on
-        elif on:
+            continue
+        if on:
             lines.append(line)
     return lines if found else None
 
@@ -1299,6 +1309,10 @@ def read_creatures(body):
             word = cell_word(vals.get(key, ""))
             if word in table_:
                 row[key] = table_[word]
+            elif key == "main" and not word:     # empty or missing "Chính": counted as main (the gate still applies)
+                row[key] = True
+                out["problems"].append(f"{CREATURE_HEADING} row {n} ({slug}): {CREATURE_COLS_INV[key]} is empty: "
+                                       f"counted as main (write {CREATURE_HELP[key]})")
             else:
                 row[key] = True if key == "main" else table_[""]     # unreadable "main": the gate still applies
                 out["problems"].append(f"{CREATURE_HEADING} row {n} ({slug}): {CREATURE_COLS_INV[key]} "

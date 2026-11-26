@@ -1054,6 +1054,14 @@ class CreatureTest(StatusCase):
         code, d = self.data()
         self.assertTrue(d["creatures"]["rows"][0]["main"])      # unreadable: counted as main, the gate applies
 
+    def test_empty_main_cell_is_main_and_a_note(self):
+        self.method("blender")
+        self.table("| phuong-hoang | Phượng hoàng |  | có | chờ |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("phuong-hoang  Phượng hoàng · main · book photo yes · concept pending", out)
+        self.assertRegex(out, r"note: ## Sinh vật của tập row 1 \(phuong-hoang\): chính is empty: counted as main")
+        self.assertIn("concept gate (before any 3D/code model): phuong-hoang concept not 'duyệt' in the table", out)
+
     def test_concept_gate_of_blender_g2(self):
         self.method("blender")
         code, g = self.gate("--gate", "G2")

@@ -692,13 +692,41 @@ class TestEpisodeCreatures(EpisodeCase):
                 "| phuong-hoang | Phượng hoàng | Có | có | Duyệt 2026-11-26 (b) |\n| `A-huy` | Huỷ | | không | |\n"
                 "|  |  |  |  |  |\n## Nhật ký\n| a | b |\n")
         tab = ce.read_creatures(body)
-        self.assertEqual(tab["problems"], [])
+        self.assertEqual(tab["problems"], ["## Sinh vật của tập row 2 (huy): chính is empty: counted as main "
+                                           "(write có | không)"])
         self.assertEqual([(r["slug"], r["main"], r["book"], r["concept"]) for r in tab["rows"]],
-                         [("phuong-hoang", True, "yes", "approved"), ("huy", False, "none", "pending")])
+                         [("phuong-hoang", True, "yes", "approved"), ("huy", True, "none", "pending")])
         self.assertIsNone(ce.read_creatures("## Việc tiếp theo\n"))
         self.assertEqual(ce.read_creatures("## Sinh vật của tập\n\n")["rows"], [])
         bad = ce.read_creatures("## Sinh vật của tập\n| slug | Tên |\n|---|---|\n| a | b |\n")
         self.assertIn("column(s) chính, ảnh sách, concept missing", bad["problems"][0])
+
+    def test_gfm_delimiters_empty_main_and_fenced_headings(self):
+        """Every GFM delimiter row is a delimiter (not a creature); an empty or missing Chính cell counts as main and
+        is reported; a `## ` line inside a fenced code block does not end the section."""
+        for sep in ("|:-:|:--|--|---:|-|", "| :---: | :-- | -- | ---: | - |", "|---|---|---|---|---|"):
+            with self.subTest(sep=sep):
+                tab = ce.read_creatures("## Sinh vật của tập\n| slug | Tên | Chính | Ảnh sách | Concept |\n"
+                                        f"{sep}\n| rong | Rồng | không | không | chờ |\n")
+                self.assertEqual(tab["problems"], [])
+                self.assertEqual([r["slug"] for r in tab["rows"]], ["rong"])
+        tab = ce.read_creatures("## Sinh vật của tập\n| slug | Tên | Chính | Ảnh sách | Concept |\n|--|--|--|--|--|\n"
+                                "| huy | Huỷ |  | có | chờ |\n| rong | Rồng\n")
+        self.assertEqual([(r["slug"], r["main"]) for r in tab["rows"]], [("huy", True), ("rong", True)])
+        self.assertEqual(len(tab["problems"]), 2)
+        self.assertTrue(all("chính is empty: counted as main" in p for p in tab["problems"]), tab["problems"])
+        for fence in ("```", "~~~~"):
+            with self.subTest(fence=fence):
+                body = ("## Sinh vật của tập\nVí dụ:\n" + fence + "markdown\n## Không phải tiêu đề\n" + fence + "\n"
+                        "| slug | Tên | Chính | Ảnh sách | Concept |\n|---|---|---|---|---|\n"
+                        "| phuong-hoang | Phượng hoàng | có | có | chờ |\n## Nhật ký\n| a | b |\n")
+                tab = ce.read_creatures(body)
+                self.assertEqual([r["slug"] for r in tab["rows"]], ["phuong-hoang"], tab)
+        self.assertIsNone(ce.section_lines("```\n## Sinh vật của tập\n```\n", ce.CREATURE_HEADING))
+        rep = self.creatures("blender", 5, ["| phuong-hoang | Phượng hoàng |  | có | chờ |"])
+        self.assertEqual(rep.errors, 1, rep.lines)                          # empty Chính: the gate still applies
+        self.assertTrue(any(l.startswith("WARN  EPISODE.md: ## Sinh vật của tập row 1 (phuong-hoang): chính is empty")
+                            for l in rep.lines), rep.lines)
 
     def test_template_table_parses_empty(self):
         _, body = ce.split_front_matter(Path(ce.LAB, "templates/episode/EPISODE.md").read_text(encoding="utf-8"))

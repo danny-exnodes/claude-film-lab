@@ -328,6 +328,21 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - `status.py`/`check_episode.py` chưa kiểm `DESIGN-OPTIONS.md` (có 2–3 hướng, mỗi hướng có Prompt/Edit) hay số ảnh trong
   `_credits.jsonl` (15–40); cổng 3a vẫn do người dùng chọn concept.
 
+## Phôi 3D từ concept – Hunyuan3D 2.1 (#69): việc còn nợ
+
+- **TRELLIS.2** (ảnh → 3D có texture PBR): node đã có trong ComfyUI lõi, model chưa tải (~16 GB). **Hỏi chủ lab trước khi
+  tải** (ổ C: ít chỗ; tải về D:), rồi thử như `hunyuan3d` (workflow `trellis2`, so IoU và độ kín với Hunyuan3D trên cùng
+  concept).
+- `comfy.py run hunyuan3d` và `blender.py mesh-prep` mới chạy với ComfyUI/Blender giả; graph `hunyuan3d` chưa xác nhận
+  với `/object_info` thật (`"verified": false`), `meshprep.py` (voxel remesh, tách mảnh, QuadriFlow, xuất GLB) chưa chạy
+  với Blender 5.3 thật: chạy một lần trên máy chủ lab với phôi Q1·T3, đo giây và ghi vào `tools/blender/README.md`.
+- QuadriFlow trên lưới voxel ~300–600k mặt: chưa đo thời gian và bộ nhớ; nếu quá chậm thì decimate trước khi QuadriFlow.
+- Chưa có: khớp màu chiếu từ concept (`uvfit.py` của bản thử: tối ưu độ trùng bóng, ảnh "bleed") và ảnh "thật nhanh" (màu
+  chiếu + bump vảy) – chỉ để duyệt; điều kiện nhiều góc (`Hunyuan3Dv2ConditioningMultiView`, ảnh trước/sau từ Qwen-Edit);
+  chọn seed tự động theo IoU; vòng cạnh rig (retopo tay).
+- Bộ `hunyuan3d-2.1` của `tools/comfy/comfy.lock.json` (tên, thư mục `checkpoints`, kích thước, sha256) do nhánh song song
+  thêm; `test_comfy.test_lock_and_graph_models` bỏ qua workflow có bộ model chưa có trong lock.
+
 ## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
 
 - Cần người xem: duyệt linh vật "Giọt" (turntable) và lookbook 11 style; chọn style nào lên `status: stable` (mỗi pack

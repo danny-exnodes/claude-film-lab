@@ -268,6 +268,9 @@ Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compo
 | `grade.py`: `--depth …: depth_range unknown` | Pass depth nằm ngoài thư mục render (không có `render.json` bên cạnh) | Thêm `--depth-range NEAR FAR` đúng `depth_range` của `shot3d.json` |
 | `grade.py`: `ffmpeg is not installed` khi IN hoặc OUT là video | Máy chủ lab chưa có `ffmpeg` trên PATH (Blender chỉ có thư viện FFmpeg bên trong) | Grade chuỗi PNG (`renders3d/s<NN>/` → `graded/s<NN>/`, không cần ffmpeg); cần mp4 thì đặt `FILM_FFMPEG` tới `ffmpeg.exe` (có `ffprobe.exe` cùng thư mục) |
 | `grade.py` từ chối: `…style.yaml: grade.scene.tone.black: … out of range` | Khóa sai hoặc ngoài khoảng trong `grade:` hay `--params` | Sửa theo `blender-method.md` §7; `python3 tools/compose/grade.py --check --style …` kiểm mà không ghi gì |
+| `mesh-prep`: cảnh báo `blender: QuadriFlow failed (...): decimated ...` | QuadriFlow cần lưới kín, pháp tuyến cùng chiều; `--voxel 0` hoặc voxel quá thô để lại lỗ | Giữ `--voxel auto` (hoặc nhỏ hơn); bản giảm mặt vẫn dùng làm nền điêu khắc, retopo tay khi cần vòng cạnh rig |
+| `mesh-prep`/`mesh-check`: IoU < 0,85 hoặc `proportions drift` lớn | Mesh trôi khỏi concept (con nhiều chi: thân dài hơn, chân ngắn hơn), hoặc mặt concept không phải góc nhìn trước của mesh | Đối chiếu số chân/sừng/cổ với `CHARACTER.md`; thử seed khác hoặc ảnh vào khác; `mesh-check --view side` khi concept là góc nghiêng khác |
+| `mesh-prep`: `.blend` nặng (vài chục MB) | Bản gốc 1M tam giác giữ ẩn trong collection `source` để bake | Bình thường; không đẩy `.blend` lên Drive khi chưa cần |
 
 ## ComfyUI (`tools/comfy/`, clip MiniMax H3 local, `video_engine: comfy`)
 
@@ -305,6 +308,9 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | `comfy.py run` thoát 2: `node … comes from comfy_api_nodes… / custom nodes never run from here` | Trên server, lớp node cùng tên với node lõi lại đến từ node API trả tiền hoặc custom node (ghi đè lớp lõi) | Không chạy. Gỡ custom node đó khỏi ComfyUI hoặc dùng `comfy.py start` (`--offline`); không sửa allow list |
 | `comfy.py run qwen-edit` thoát 2: `--negative is refused at cfg 1` | Với `--lightning` (cfg 1) sampler không dùng prompt âm | Viết điều cần tránh vào `--prompt` ("keep everything else exactly", "no extra legs"); cần prompt âm thật thì bỏ `--lightning` (40 bước, cfg 4) |
 | Ảnh `qwen-edit` chép nguyên ảnh tham chiếu, bỏ ảnh 1 | `--ref` là concept với `--ref-mode full`: model coi concept là ảnh chính | Bỏ `--ref`, mô tả thiết kế bằng chữ; chỉ cần mượn màu thì `--ref-mode vl` |
+| `comfy.py run hunyuan3d` thoát 2: `the background is not plain white or the subject touches the edge` | Ảnh vào có nền màu/cảnh, hoặc thân bị cắt ở mép | Làm bản nền trắng, đủ thân bằng Qwen-Image-Edit; `--allow-bg` chỉ để thử (mesh sẽ kém) |
+| `comfy.py run hunyuan3d` thoát 2: `model hunyuan_3d_v2.1.safetensors … is not in ComfyUI's checkpoints/ list` | Checkpoint chưa có trong `models/checkpoints` mà server thấy | `comfy.py models`; không tải khi chưa hỏi chủ lab (7,4 GB) |
+| Mesh Hunyuan3D mất đầu/đuôi | Ảnh vào rộng, `CLIPVisionEncode` cắt giữa | `run` đã đệm vuông (vật 85 % cạnh); kiểm sidecar `input.bbox`; ảnh tự cắt sát mép thì làm lại ảnh vào |
 
 ## Xem trực tiếp (`tools/review/`, web app review)
 

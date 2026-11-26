@@ -58,7 +58,7 @@ tính vào trần nào. Cách dùng:
 | LoRA Turbo Qwen | `Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16` | `qwen-t2i --turbo` | 2 bước, cfg 1: **chỉ nháp**, không phải ảnh người dùng duyệt | ước lượng ~25 s |
 | Qwen-Image-Edit 2511 – sửa ảnh | `qwen_image_edit_2511_fp8mixed` (+ bộ mã hoá, VAE của Qwen-Image) | `qwen-edit` | vẽ lại bề mặt/mặt/chất liệu của **ảnh tĩnh và khung khoá** (render Blender, khung đầu/cuối của clip H3); ledger `comfy:qwen-edit`, kind `image` | 1 MP, 40 bước cfg 4: **240–250 s** (chủ lab đo 2026-11-26) |
 | LoRA Lightning Qwen-Edit | `Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16`, `…-8steps-…` (lightx2v) | `qwen-edit --lightning 4\|8` | 4/8 bước, cfg 1: dùng được cho bản duyệt (4 thường đủ) | 4 bước **17–22 s**, 8 bước 27–34 s |
-| Hunyuan3D 2.1 – ảnh → mesh | `hunyuan_3d_v2.1` (checkpoint, Comfy-Org repackaged) | `hunyuan3d` (làm riêng) | khối gốc sculpt từ concept duyệt; bộ `hunyuan3d-2.1` trong lock | 38–43 s (std), 173–183 s (hi) |
+| Hunyuan3D 2.1 – image to 3D | `hunyuan_3d_v2.1` (`checkpoints/`, bản đóng gói Comfy-Org, 7,4 GB) | `hunyuan3d` | **phôi** điêu khắc (mesh không màu) của sinh vật từ concept đã duyệt, nền trắng, toàn thân; ledger `comfy:hunyuan3d`, kind `image` | octree 256 + 30 bước ≈ **40 s** mỗi mesh (đỉnh VRAM cả card ~8,8 GB); octree 512 + 50 bước ≈ **3 phút** (~9,8 GB); chủ lab đo 2026-11-26 |
 
 - H3: 24 hình/s, số khung theo lưới `17k + 5`, bản dùng 1344×768 (7:4), nháp 864×480 (≈ 1 phút cho 5 s, ước lượng);
   không negative prompt (cfg 1); prompt tiếng Anh theo trường.
@@ -75,6 +75,15 @@ tính vào trần nào. Cách dùng:
   1.0 mỗi khung một con khác, 0.75 giữ dáng nhưng chỉ đổi màu → chỉ cho ảnh đơn và khung khoá; ảnh concept làm `--ref`
   thì model chép nguyên concept, bỏ ảnh 1; `--negative` vô tác dụng ở cfg 1 (`comfy.py` từ chối).
   `python tools/comfy/comfy.py run qwen-edit --image <in>.png --prompt "..." --lightning 4 --out <dir>/<id>_v<NN>.png --ledger L`.
+- Hunyuan3D 2.1 (`hunyuan3d`): `ImageOnlyCheckpointLoader` → `ModelSamplingAuraFlow` (shift 1.0) → `KSampler` (euler/normal,
+  cfg 5); `CLIPVisionEncode` (cắt giữa) → `Hunyuan3Dv2Conditioning`; `EmptyLatentHunyuan3Dv2` (4096) →
+  `VAEDecodeHunyuan3D` (octree 256/512) → `VoxelToMesh` (surface net, 0,6) → `SaveGLB`. Mesh 137k–1M tam giác, **không
+  kín** (hàng chục nghìn cạnh non-manifold, vài trăm cạnh hở), không vòng cạnh: luôn qua
+  `python tools/blender/blender.py mesh-prep` trước khi điêu khắc/rig. Phần mảnh (vây, tóc, gạc) vỡ. Độ trùng bóng với
+  concept (IoU) 0,85–0,99.
+  **Giấy phép: Tencent Hunyuan 3D 2.1 Community License – không áp dụng ở EU, Anh, Hàn Quốc**; thương mại có điều kiện
+  (ngưỡng người dùng hằng tháng, ghi nguồn): ghi vào `ASSETS.md` mọi model dựng từ mesh này, đọc bản giấy phép đi kèm
+  model trước khi phát hành. Cách dùng: `.claude/skills/film-compose-shot/references/blender-method.md` §8.
 - **Giấy phép:** Hunyuan3D 2.1: *Tencent Hunyuan 3D 2.1 Community License*, **không áp dụng ở EU, Anh, Hàn Quốc**, dùng
   thương mại có điều kiện, ghi nguồn (`comfy.lock.json` → `sets`). Qwen-Image-Edit 2511 và LoRA Lightning: Apache-2.0
   theo model card (chưa xác minh trong repo). Các model khác: open weights; điều khoản chưa được xác minh trong repo →
@@ -82,7 +91,8 @@ tính vào trần nào. Cách dùng:
 - Bản cài ComfyUI có node API **trả tiền** của MiniMax (`comfy_api_nodes/`): không dùng; `comfy.py` chỉ cho node trong
   danh sách cho phép, server chạy `--offline`.
 - Có trên máy, **chưa nối** vào lab (không workflow, không công cụ): SeedVR2 3B (phóng video). LTX-2.3, Wan Animate 2,
-  Z-Image Turbo đã xoá khỏi máy chủ lab (2026-11-26, chủ lab duyệt bảng kiểm kê, #75). Wan 2.2 và LTX-2.5 không dùng.
+  Z-Image Turbo đã xoá khỏi máy chủ lab (2026-11-26, chủ lab duyệt bảng kiểm kê, #75). Wan 2.2 và LTX-2.5 không dùng. ComfyUI lõi có node TRELLIS.2
+  (ảnh → 3D có texture PBR) nhưng **model chưa tải** (~16 GB): hỏi chủ lab trước khi tải (`docs/BACKLOG.md`).
 - Mọi job GPU local (Blender, ComfyUI) đi qua khoá GPU chung của lab `tools/gpu_run.py` (`out/_gpu/gpu.lock` của bản
   checkout chính, một khoá cho mọi worktree): `blender.py` và `comfy.py run` tự lấy khoá; lệnh GPU khác chạy qua
   `python tools/gpu_run.py --label <việc> -- <lệnh>`.

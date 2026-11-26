@@ -28,6 +28,8 @@
   python tools/comfy/comfy.py run qwen-edit --image IN.png [--ref R.png ...] (--prompt TEXT | --prompt-file F.txt)
                      --out <dir>/<id>_v<NN>.png [--lightning 4|8] [--steps N] [--cfg C] [--denoise D] [--seed N]
                      [--size WxH] [--ref-mode full|vl] [--negative TEXT (cfg > 1 only)]
+  python tools/comfy/comfy.py run hunyuan3d --image <concept on white>.png --out <asset>_raw_v<NN>.glb
+                     [--octree 256|512] [--steps 30] [--cfg 5] [--seed N] [--allow-bg]
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
 
@@ -46,6 +48,10 @@ Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.jso
            center-cropped when the aspect differs). 40 steps, cfg 4; --lightning 4|8 = lightx2v LoRA (4/8 steps,
            cfg 1). --negative only when cfg > 1 (refused at cfg 1: no effect). --denoise < 1 keeps more of image 1.
            --ref-mode vl: refs only seen by the VL encoder. Ledger kind image, model comfy:qwen-edit.
+  hunyuan3d Hunyuan3D 2.1 image-to-3D (one untextured GLB, a sculpt blank for tools/blender/blender.py mesh-prep):
+           --image = the approved concept, whole subject on plain white (else refused; --allow-bg); --octree 256
+           (default, ~40 s) | 512 (with --steps 50, ~3 min). Ledger kind image, model comfy:hunyuan3d. The code is
+           tools/comfy/mesh3d.py. Weights: Tencent Hunyuan 3D 2.1 Community License (not valid in the EU/UK/South Korea).
 H3 rules: length = 17k+5 frames at 24 fps (`--seconds` is snapped up); the start frame is center-cropped to the canvas
 aspect and resized with Lanczos to exactly the canvas in a temp file before upload (the node would stretch it; the source file is
 never touched); CFG-distilled: no negative prompt (--negative is refused); 20 steps; --turbo (Lightning LoRA, few
@@ -123,6 +129,9 @@ ALLOWED_NODES = frozenset({
     # qwen-edit (Qwen-Image-Edit 2511)
     "CFGNorm", "ImageScaleToTotalPixels", "TextEncodeQwenImageEditPlus", "FluxKontextMultiReferenceLatentMethod",
     "ReferenceLatent", "VAEEncode", "ImageScale",
+    # hunyuan3d (Hunyuan3D 2.1 image-to-3D; also ModelSamplingAuraFlow, KSampler)
+    "ImageOnlyCheckpointLoader", "CLIPVisionEncode", "Hunyuan3Dv2Conditioning", "EmptyLatentHunyuan3Dv2",
+    "VAEDecodeHunyuan3D", "VoxelToMesh", "SaveGLB",
 })
 # /object_info's python_module of a class: core nodes come from these modules. A paid API/partner node
 # (comfy_api_nodes) or a custom node that registered a class under a core name is refused before anything is sent.
@@ -131,7 +140,7 @@ REFUSED_MODULES = ("comfy_api_nodes", "custom_nodes")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"       # RFC 6455
 GPU_HOLD = contextlib.ExitStack()                     # the GPU lock of the running `run` (released by main())
 MODEL_INPUTS = {"UNETLoader": "unet_name", "LoraLoaderModelOnly": "lora_name", "CLIPLoader": "clip_name",
-                "VAELoader": "vae_name"}
+                "VAELoader": "vae_name", "ImageOnlyCheckpointLoader": "ckpt_name"}
 MODEL_FOLDER_ALIASES = {"diffusion_models": ("diffusion_models", "unet"), "text_encoders": ("text_encoders", "clip")}
 I2V_HEADER = "For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced."
 PROMPT_FIELDS = {
@@ -1162,9 +1171,32 @@ class StepListener(threading.Thread):
                 s.close()
 
 
+class _Helpers:
+    """This module's globals as live attributes (tests patch them): the `c` handed to tools/comfy/mesh3d.py."""
+
+    def __getattr__(self, name):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+def mesh3d():
+    """tools/comfy/mesh3d.py: `run` and `workflows` of the image-to-3D workflows (meta kind "mesh"), loaded on use."""
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("film_comfy_mesh3d", os.path.join(HERE, "mesh3d.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod
+
+
 def run(a):
     wid = a.workflow
     template, meta, wf_sha = load_workflow(wid)
+    if meta.get("kind") == "mesh":
+        return mesh3d().run(_Helpers(), a, wid, template, meta, wf_sha)
+    if a.octree is not None or a.allow_bg:
+        refuse(f"{wid}: --octree/--allow-bg are for the image-to-3D workflow (hunyuan3d)")
     if meta.get("kind") == "image":
         return run_image(a, wid, template, meta, wf_sha)
     plan = check_inputs(a, meta, wid)
@@ -2502,6 +2534,9 @@ def workflows_cmd(a):
             print(f"  graph: {len(graph)} nodes · verified against a live /object_info: "
                   f"{'yes' if meta.get('verified') else 'no (unverified)'}")
             continue
+        if meta.get("kind") == "mesh":
+            mesh3d().describe(_Helpers(), graph, meta, lock)
+            continue
         if meta.get("kind") == "image":
             sz, d, e = meta["size"], meta["defaults"], meta.get("estimate") or {}
             print(f"  inputs: --prompt | --prompt-file (text) · --negative · --size WxH (default "
@@ -2617,7 +2652,7 @@ r = sp.add_parser("run", help="one clip from a workflow (see the module help)")
 r.add_argument("workflow")
 r.add_argument("--image", default=None,
                help="h3-i2v: start frame (center-cropped to the canvas aspect, Lanczos to its size); "
-                    "qwen-edit: image 1, the one edited")
+                    "qwen-edit: image 1, the one edited; hunyuan3d: the concept, whole subject on plain white")
 r.add_argument("--last", default=None, help="h3-i2v: end frame (first-last-frame; needs --image)")
 r.add_argument("--ref", action="append", default=None, metavar="IMG",
                help="h3-r2v: reference image (repeat, 1-9); qwen-edit: Picture 2/3 (repeat, at most 2)")
@@ -2644,8 +2679,11 @@ r.add_argument("--denoise", type=float, default=None,
                help="qwen-edit: 1.0 (default) redraws image 1; 0.6-0.85 keeps its shapes")
 r.add_argument("--ref-mode", choices=["full", "vl"], default=None,
                help="qwen-edit: full (default: refs are also reference latents) | vl (refs only seen by the VL encoder)")
+r.add_argument("--octree", type=int, default=None, help="hunyuan3d: mesh grid 256 (default) | 512 (finer, ~3 min)")
+r.add_argument("--allow-bg", action="store_true", help="hunyuan3d: send an image whose border is not plain white")
 r.add_argument("--out", required=True,
-               help="<clips>/<name>_v<NN>.mp4 | <concepts>/<id>_v<NN>.png | <dir>/<id>_v<NN>.png (must not exist)")
+               help="<clips>/<name>_v<NN>.mp4 | <concepts>/<id>_v<NN>.png | <dir>/<id>_v<NN>.png | "
+                    "<asset>_raw_v<NN>.glb (must not exist)")
 r.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
 r.add_argument("--no-ledger", action="store_true", help="ad-hoc test without a ledger (main session only)")
 r.add_argument("--dry-run", action="store_true", help="validate and print the filled graph summary; send nothing")

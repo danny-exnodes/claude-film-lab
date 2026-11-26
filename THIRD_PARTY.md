@@ -13,11 +13,20 @@ below if it is not there yet.
 | `tools/comfy/workflows/h3-i2v.json` | `video_minimax_h3_i2v.json` of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates) (subgraph "Image to Video (MiniMax H3)": node classes, input names, wiring; flattened to API format, our values). Source named in `h3-i2v.meta.json` (`source`): JSON holds no comment | MIT, Copyright (c) 2023-present Comfy Org |
 | `tools/comfy/workflows/h3-r2v.json` | `video_minimax_h3_r2v.json` and `video_minimax_h3_multiframe_reference.json` (MiniMaxH3AddGuide chain) of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates), API format, our values. Source named in `h3-r2v.meta.json` (`source`) | MIT, Copyright (c) 2023-present Comfy Org |
 | `tools/comfy/workflows/qwen-edit.json` | `image_qwen_image_edit_2511.json` of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates) (node classes, input names, wiring: ModelSamplingAuraFlow → CFGNorm, ImageScaleToTotalPixels, TextEncodeQwenImageEditPlus, FluxKontextMultiReferenceLatentMethod), API format, our values; the `vl` variant (ReferenceLatent), Lightning switch and output ImageScale are ours. Source named in `qwen-edit.meta.json` (`source`) | MIT, Copyright (c) 2023-present Comfy Org |
+| `tools/comfy/workflows/hunyuan3d.json` | `3d_hunyuan3d-v2.1.json` of [Comfy-Org/workflow_templates](https://github.com/Comfy-Org/workflow_templates) (its subgraph: node classes, input names, wiring; flattened to API format, our values). Source named in `hunyuan3d.meta.json` (`source`) | MIT, Copyright (c) 2023-present Comfy Org |
 | `tools/review/web/vendor/three/` (git-ignored, copied by `tools/review/vendor_three.py`) | [mrdoob/three.js](https://github.com/mrdoob/three.js) 0.186.1, unmodified: `build/three.module.js`, `build/three.core.js` (pinned in `tools/toon/three.lock`) and `examples/jsm/loaders/GLTFLoader.js`, `examples/jsm/controls/OrbitControls.js`, `examples/jsm/utils/BufferGeometryUtils.js`, `examples/jsm/utils/SkeletonUtils.js` (pinned in `tools/review/three-examples.lock`) | MIT, Copyright © 2010-2026 three.js authors |
 
 Only code was adapted. The demo film of that project, its characters, compositions, story, score and assets
 (CC BY) are not used here. From Comfy-Org/workflow_templates only the graph structure of the two MiniMax H3 templates
-and of the Qwen-Image-Edit 2511 template was adapted; no model weights or template thumbnails are in this repo.
+and of the Qwen-Image-Edit 2511 and Hunyuan3D 2.1 templates was adapted; no model weights or template thumbnails
+are in this repo.
+
+Model weights the local workflows load (on the owner's PC, never in this repo) have their own licences:
+`hunyuan_3d_v2.1.safetensors` (workflow `hunyuan3d`, Comfy-Org's repackaging of Tencent Hunyuan3D 2.1) is under the
+**Tencent Hunyuan 3D 2.1 Community License**: it does not apply in the European Union, the United Kingdom or South
+Korea, and commercial use has conditions (monthly active users, attribution). A mesh made with it (or a model rebuilt
+from that mesh) carries that licence in the episode's `ASSETS.md`; read the licence that ships with the model before
+publishing. `docs/MODELS.md` lists the other local models.
 
 ## Licences
 

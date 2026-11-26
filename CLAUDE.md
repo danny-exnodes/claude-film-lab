@@ -58,7 +58,7 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
   hoặc server của ứng dụng Comfy Desktop qua `FILM_COMFY_URL` (localhost). **Không bao giờ dùng node API trả tiền** (bản
   cài có node MiniMax trả tiền trong `comfy_api_nodes/`); `comfy.py run` từ chối workflow có node ngoài danh sách cho phép.
 - Lần chạy local vẫn ghi ledger của tập (`--ledger`, `FILM_AGENT` trong agent); dòng `comfy:*`/`blender:*` không tính trần.
-- Một việc GPU một lúc (16 GB VRAM). Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:
+- Một việc GPU một lúc (16 GB VRAM): khoá `tools/gpu_run.py`, lệnh GPU ngoài `blender.py`/`comfy.py run` thì chạy qua nó. Ổ C: của máy chủ lab còn ít chỗ: đầu ra và thư mục tạm của lần chạy dài không để trên C:
   (`comfy.py start` đặt input/output/temp/user của ComfyUI vào `out/_comfy/` của lab, đổi bằng `FILM_COMFY_WORK`).
 - **Không tải app hay model nào khi chưa hỏi.** Trước hết tìm cái đã cài trên máy (Blender ở `C:\Program Files\Blender
   Foundation\`, Comfy Desktop và model ở `%LOCALAPPDATA%\Comfy-Desktop\`), báo chủ lab, nêu dung lượng, chỉ tải khi được
@@ -93,8 +93,11 @@ python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
 python tools/blender/blender.py find | check <shot3d.json> | render <shot3d.json> --out <dir> [--preview]   # method: blender, chỉ máy chủ lab
 python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> | keyframes <shot3d.json> --out <dir>
+python tools/blender/blender.py turntable <model>.blend#<Collection> --out <dir> --look realistic --frames 72 [--samples N] [--fill 0.7] [--front 180]   # turntable duyệt G2: phông cyc, still_front|34|side|head.png
 python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
 python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
+python tools/comfy/comfy.py run qwen-t2i --prompt "..." [--size 1664x928] [--seed N] [--turbo] --out <concepts>/<id>_v<NN>.png --ledger L [--dry-run]   # ảnh concept Qwen-Image local, ~135 s/ảnh
+python tools/gpu_run.py [--label L] [--wait SEC] -- <lệnh ...> | status   # khoá GPU chung mọi worktree; render Blender, comfy.py run tự lấy khoá
 python tools/review/review.py up [--no-ngrok] | down | url | status        # web app xem trực tiếp (Docker + ngrok), chỉ máy chủ lab
 python tools/review/review.py monitor [--stop|--restart] [--comfy-log PATH]  # monitor.py: số đo máy + tiến độ ComfyUI lên bảng theo dõi (chỉ nhãn job, không dòng lệnh)
 python tools/review/review.py publish-video <clip>.mp4 --build <id> --label L | publish-model <model>.glb --build <id>

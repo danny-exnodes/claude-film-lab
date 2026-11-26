@@ -214,6 +214,20 @@
 | Dị thú: bàn chân trượt hoặc chân duỗi thẳng không chạm đất khi đi | Chân quá ngắn so với sải (`stride`) hoặc thân uốn (`body.wave`) | Bỏ `stride` tự đặt hoặc tăng `legs.length`; `tests/js/creature.test.cjs` kiểm mẫu; spec mới: chạy lại test với spec đó |
 | `ink-wash-3d`: con thú bơi trên cạn, không thấy mặt nước / vòng sóng | `swim` cần `env.water` (`true` hoặc `{level}`) | Thêm `env: {water: true}` vào scene của shot (mẫu: `demo/creatures/luc-tuc-ngu.json`) |
 
+## Hàng đợi GPU (`tools/gpu_run.py`, máy chủ lab)
+
+Một khoá cho mọi agent, phiên và git worktree: `<bản checkout chính>/out/_gpu/gpu.lock` (`FILM_GPU_LOCK` để đổi), người
+giữ ghi ở `gpu.owner` cạnh nó (JSON `label`, `pid`, `since`). `blender.py render|still|turntable|keyframes|lookbook` và
+`comfy.py run` tự lấy khoá; lệnh GPU khác: `python tools/gpu_run.py --label <việc> -- <lệnh>`.
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| `waiting for the GPU (held by: … · pid … · since …)` rồi đứng chờ lâu | Job khác (render Blender, clip H3, ảnh Qwen) đang chạy | Bình thường: chờ. Xem ai giữ: `python tools/gpu_run.py status`. Đừng xoá `gpu.lock`, đừng tắt hàng đợi để chen ngang |
+| `blender.py`/`comfy.py` thoát 2: `the GPU is still busy after N s` | Đã đặt `FILM_GPU_WAIT` và job kia chưa xong | Chưa chạy gì, không dòng ledger: chạy lại sau, hoặc bỏ `FILM_GPU_WAIT` để chờ tới lượt |
+| `gpu_run.py` thoát 75 | `--wait` hết giờ: lệnh **chưa chạy** | Chạy lại sau hoặc tăng `--wait` |
+| `status` báo người giữ có `pid` đã chết | Không thể: hệ điều hành nhả khoá khi tiến trình chết; `status` thấy khoá trống thì xoá `gpu.owner` cũ và in `free` | Nếu vẫn thấy: kiểm `FILM_GPU_LOCK` của hai bên có trỏ cùng một file không (mọi worktree mặc định dùng bản checkout chính) |
+| Agent cũ còn dùng script tạm `.gpu_run.py` ngoài repo (khoá `.gpu.lock` riêng) | Có trước `tools/gpu_run.py`: hai khoá không thấy nhau | Chuyển sang `tools/gpu_run.py`; trong lúc chuyển, bọc lệnh bằng cả hai |
+
 ## Blender (`tools/blender/`, phương pháp `blender`)
 
 Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compose-shot/references/blender-method.md`.
@@ -230,7 +244,9 @@ Chỉ trên máy chủ lab, phiên local. Chi tiết: `.claude/skills/film-compo
 | `check_episode`: `WARN shots3d/sNN.json: camera.move … differs` / `seconds … differs` | `shot3d.json` lệch `shots.csv` sau khi sửa kịch bản | Sửa shot3d theo `shots.csv` (kịch bản đã duyệt thắng), render lại thành `_v<NN>` |
 | `check_episode`: `no final Blender render for sNN at stage 7` | Container bị thu hồi, hoặc chỉ có bản `--preview` | Kéo gói shot từ Drive (`04_SanXuat/<thư mục tập>/<ngày>/<id>_sNN_<ngày>.zip`), giải nén trong `out/<project>/<id>/` → `renders3d/sNN/beauty.mp4` + `render.json` về chỗ cũ; không có gói nào chứa `renders3d/sNN*/` → `blender.py render … --out …/renders3d/sNN_v<NN>/` |
 | `blender.py render` từ chối: `--out` đã có/không rỗng | Không ghi đè render cũ | Dùng thư mục `_v<NN>` tiếp theo |
-| Render rất chậm hoặc hết VRAM khi ComfyUI đang chạy | Hai việc GPU cùng lúc trên 16 GB | Chờ clip xong (`comfy.py interrupt` chỉ khi người dùng đồng ý), một việc GPU một lúc |
+| Render rất chậm hoặc hết VRAM khi ComfyUI đang chạy | Hai việc GPU cùng lúc trên 16 GB (một lệnh chạy ngoài hàng đợi, hoặc ComfyUI còn giữ model trong VRAM sau job) | Mọi việc GPU qua hàng đợi (mục trên); ComfyUI không còn job mà vẫn chiếm VRAM thì đóng/khởi động lại server khi người dùng đồng ý |
+| Action trong `.blend`/`.glb` chạy nhanh/chậm sai khi `--preview` (12 fps) | Bản cũ lấy khung action = khung scene | Đã sửa: action chạy theo giây ở fps của nó (NLA strip, `render.json` → `actions`); fps scene của `.blend` khác fps lúc key action thì ghi `anim.fps`. Không cần né bằng NLA strip tự đặt và bỏ `anim.action` nữa |
+| Turntable: model nhỏ trong khung, lộ chân trời, hoặc model quay lưng | Bản cũ fit 2 m với máy quay xa; model nhìn về +Y | `blender.py turntable` mới: máy quay theo bounding box (`--fill`), phông cyc; model nhìn +Y thì `--front 180`; cận đầu sai chỗ thì `--head-bone <tên xương>` |
 | Khung đầu tiên sau khi đổi look/shader mất 1–2 phút | EEVEE biên dịch shader một lần (có cache cho lần sau) | Bình thường; đo tốc độ từ khung thứ hai |
 | Log Blender: `Warning: edge N - M appears twice, correcting` | Freestyle dựng mesh nét | Vô hại (`blender.py` không in ra) |
 | Pass normal/depth ra xám đều hoặc bị cong sRGB | Blender 5.x áp view transform lên File Output | `scene.py` đặt `save_as_render = False` + `color_management = OVERRIDE`, `Non-Color`; sửa `scene.py` thì giữ hai dòng đó |
@@ -256,6 +272,10 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | Dòng ledger `comfy:*` là `pending` mãi, `status.py` LOCAL in `open` | Lần chạy chết giữa chừng (máy tắt, server đóng) | Miễn phí, không có gì để lấy lại: xem `/history` của server nếu còn chạy (`comfy.py interrupt --prompt-id <task_id>` nếu còn chạy), `ark.py ledger-close --req <id> --ledger L --status abandoned`, rồi tạo clip mới với `_v<NN>` tiếp theo |
 | `comfy.py run` cảnh báo `below the model's trained range (124..362 frames)` | Clip H3 ngắn hơn ~5,2 s | Dùng `--seconds 5` trở lên (124 khung); khung cuối Blender vẫn dùng được, chuyển động chỉ chậm lại |
 | Clip H3 có tiếng (soundscape) lẫn dưới lời bình | H3 sinh âm thanh cùng hình | Compositor tắt tiếng clip (mặc định) và ghi vào `review/sound-audit.md` |
+| `comfy.py run qwen-t2i` thoát 2: `needs multiples of 16` / cảnh báo `not one of qwen-t2i's trained sizes` | Qwen-Image làm việc theo khối 16 px; ngoài các khung đã huấn luyện ảnh dễ lặp/méo | Dùng kích thước gợi ý trong lỗi; ưu tiên 1664x928, 1328x1328, 928x1664 |
+| Ảnh `qwen-t2i` đầu tiên của phiên lâu hơn ~135 s nhiều | Nạp model 20 GB từ đĩa vào RAM/VRAM | Bình thường cho lần đầu; các ảnh sau ~135 s (30 bước, 1664x928) |
+| `run ... --review` ảnh: `review: not published (HTTP 400: build: kind must be one of …)` | Server review chưa biết kiểu build `image` | Không ảnh hưởng ảnh và ledger; cập nhật server review lên bản có kiểu `image` |
+| `queued prompt … · no websocket: progress by time` | Không mở được `/ws` (server cũ, proxy, URL https) | Ảnh vẫn ra bình thường; tiến độ chỉ theo thời gian ước lượng |
 
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)

@@ -63,7 +63,7 @@ function dashboard(root, _args, live) {
   }
 
   function fill(el, b) {
-    const thumb = h('a', { class: 'thumb', href: `#/${b.last_glb ? 'build' : 'timeline'}/${encodeURIComponent(b.id)}`,
+    const thumb = h('a', { class: 'thumb', href: `#/${b.last_glb || b.steps ? 'build' : 'timeline'}/${encodeURIComponent(b.id)}`,
                            'aria-label': b.title });
     if (b.thumb) thumb.append(h('img', { src: mediaUrl(b.thumb), alt: '', loading: 'lazy' }));
     else thumb.append(h('div', { class: 'ph', text: b.last_glb ? '3D · GLB' : (b.renders ? 'VIDEO' : 'FILM LAB') }));
@@ -71,10 +71,8 @@ function dashboard(root, _args, live) {
     const steps = b.expected_steps ? `Bước ${b.steps}/${b.expected_steps}` : (b.steps ? `${b.steps} bước` : '');
     const job = b.job;
     const actions = h('nav', { class: 'actions' });
-    if (b.last_glb) {
-      actions.append(h('a', { href: `#/build/${encodeURIComponent(b.id)}`, text: 'Bản vẽ dựng' }),
-                     h('a', { href: `#/model/${encodeURIComponent(b.id)}`, text: 'Xem model' }));
-    }
+    if (b.last_glb || b.steps) actions.append(h('a', { href: `#/build/${encodeURIComponent(b.id)}`, text: 'Bản vẽ dựng' }));
+    if (b.last_glb) actions.append(h('a', { href: `#/model/${encodeURIComponent(b.id)}`, text: 'Xem model' }));
     if (b.renders) actions.append(h('a', { href: `#/timeline/${encodeURIComponent(b.id)}`, text: `Video (${b.renders})` }));
     el.className = `card st-${b.status}`;
     el.replaceChildren(thumb, h('div', { class: 'body' },

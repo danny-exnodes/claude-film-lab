@@ -45,7 +45,9 @@ export default async function mount(root, [id], live, alive = () => true) {
   const titleblock = h('div', { class: 'titleblock' },
     ...['build', 'đỉnh', 'mặt', 'bước'].flatMap((k) => [h('span', { text: k.toUpperCase() }), (tb[k] = h('b'))]));
   const note = h('div', { class: 'note', hidden: true });
-  stage.append(caption, titleblock, note);
+  // A step that posted only an image (a test render, a turntable still) is shown as that image over the blueprint.
+  const still = h('img', { class: 'still', alt: '', hidden: true });
+  stage.append(caption, titleblock, note, still);
   const dimLabels = [0, 1, 2].map(() => h('span', { class: 'dim', hidden: true }));
   stage.append(...dimLabels);
 
@@ -383,7 +385,13 @@ export default async function mount(root, [id], live, alive = () => true) {
     [...log.children].forEach((li, i) => { li.classList.toggle('on', i === shown); li.classList.toggle('future', i > shown); });
     const onLi = log.children[shown];
     if (onLi && mode !== 'idle') onLi.scrollIntoView({ block: 'nearest' });
-    if (!steps.some((x) => x.glb)) {
+    const img = s && !s.glb && s.image ? mediaUrl(s.image) : null;
+    if (img) {
+      if (still.getAttribute('src') !== img) still.src = img;
+      still.alt = s.label;
+      still.hidden = false;
+    } else still.hidden = true;
+    if (!img && !steps.some((x) => x.glb)) {
       note.hidden = false;
       note.textContent = steps.length ? 'Các bước chưa có file GLB.' : (ACTIVE.has(build.status) ? 'Đang chờ bước đầu tiên…' : 'Build này không có model 3D.');
     } else note.hidden = true;

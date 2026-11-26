@@ -202,9 +202,15 @@ def tts_jobs(td):
     silent = episode("ep_silent", "2026-11-06", "# Không có lời bình\n")
     path = str(nosite) + os.pathsep + os.environ["PATH"]
 
-    def env(pythonpath, hf="hf_none"):
-        return {"PATH": path, "PYTHONPATH": pythonpath, "HF_HOME": str(td / hf), "HF_HUB_CACHE": ""}
+    def env(pythonpath, hf="hf_none", **extra):
+        return dict({"PATH": path, "PYTHONPATH": pythonpath, "HF_HOME": str(td / hf), "HF_HUB_CACHE": ""}, **extra)
+    # FILM_TTS_PYTHON (#63): a venv interpreter that sees the installed stand-ins while python3 on PATH sees none
+    venv = td / "tts_venv" / "bin"
+    venv.mkdir(parents=True)
+    write_exec(venv / "python", f'#!/bin/bash\nPYTHONPATH="{ok}" exec "{sys.executable}" -S "$@"\n')
     return {
+        "tts_venv": ([None, "--quick"], env(none, FILM_TTS_PYTHON=str(venv / "python"))),
+        "tts_venv_bad": ([None, "--quick"], env(ok, FILM_TTS_PYTHON=str(td / "tts_venv" / "missing"))),
         "tts_none": ([None, "--quick"], env(none)),
         "tts_ok": ([None, "--quick"], env(ok)),
         "tts_cached": ([None, "--quick"], env(ok, "hf_cached")),
@@ -507,6 +513,13 @@ class TestDoctor(unittest.TestCase):
         self.assertRegex(self.line("tts_ok", "tts"), r"OK .*vieneu 3\.8\.3, v3 Turbo model not cached")
         self.assertRegex(self.line("tts_cached", "tts"), r"OK .*vieneu 3\.8\.3, v3 Turbo model cached")
         self.assertRegex(self.line("tts_ok", "tts-watermark"), r"OK .*resemble-perth 1\.0\.1 \+ torch 2\.15\.0\+cpu")
+
+    def test_tts_python_venv(self):
+        self.assertRegex(self.line("tts_venv", "tts"), r"OK .*vieneu 3\.8\.3 in FILM_TTS_PYTHON, v3 Turbo model")
+        self.assertRegex(self.line("tts_venv", "tts-watermark"), r"OK .*resemble-perth 1\.0\.1 .* in FILM_TTS_PYTHON")
+        self.assertRegex(self.line("tts_venv_bad", "tts"),
+                         r"WARN .*FILM_TTS_PYTHON=.*missing is not an executable interpreter")
+        self.assertRegex(self.line("tts_venv_bad", "tts-watermark"), r"WARN .*FILM_TTS_PYTHON")
 
     def test_tts_other_version_warns(self):
         self.assertRegex(self.line("tts_old", "tts"), r"WARN .*vieneu 3\.7\.0, pinned 3\.8\.3 in requirements-tts\.txt")

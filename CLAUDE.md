@@ -117,7 +117,8 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   (hoặc `FILM_REVIEW_BUILD`), tắt mặc định, không có server vẫn chạy bình thường. Review chỉ publish file nằm trong
   `out/_review/media/`; URL công khai không đăng nhập = ai có link cũng thấy mọi thứ đã publish (lựa chọn của chủ lab):
   không publish dữ liệu không muốn lộ, `review.py down` khi không dùng. Không đọc/in cấu hình hay authtoken của ngrok.
-- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`;
+- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`,
+  máy chủ lab: venv trên D: qua `FILM_TTS_PYTHON`, `docs/setup-local-windows.md`;
   bản cuối luôn `--require-watermark`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.

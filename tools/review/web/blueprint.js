@@ -3,6 +3,7 @@
 // step scrubber and replay with speed control afterwards.
 import { THREE, OrbitControls, loadGLB, makeStage, frameBox, glowTexture } from './three-util.js';
 import { h, chip, bar, api, mediaUrl, fmtDur, fmtNum, clamp, STATUS_VI } from './lib.js';
+import { loadTags, tagChips } from './tags.js';
 
 const EDGE = 0x5ef2ff;
 const DIM = 0x9fe9ff;
@@ -35,6 +36,8 @@ export default async function mount(root, [id], live, alive = () => true) {
   const headChip = h('span');
   const headBar = h('span');
   const headStats = h('span', { class: 'stats' });
+  const headChips = h('span', { class: 'hchips' });
+  const headTitle = h('h1', { text: build.name || build.title, title: build.title });
   const elapsed = h('span', { class: 'stats' });
   const stage = h('div', { class: 'stage', 'aria-label': 'Bản vẽ dựng 3D' }, h('div', { class: 'frame' }));
   const capN = h('div', { class: 'n' });
@@ -61,7 +64,7 @@ export default async function mount(root, [id], live, alive = () => true) {
   const log = h('ol', { class: 'steplog' });
   const links = h('div', { class: 'ctl' });
   root.append(h('section', { class: 'bp' },
-    h('div', { class: 'bp-head' }, h('a', { href: '#/', text: '← Bảng' }), h('h1', { text: build.title }), headChip, headBar,
+    h('div', { class: 'bp-head' }, h('a', { href: '#/', text: '← Bảng' }), headTitle, headChip, headBar, headChips,
       headStats, h('span', { class: 'grow' }), elapsed),
     h('div', { class: 'bp-main' }, stage, h('aside', { class: 'side' },
       h('div', { class: 'ctl' }, btnLive, btnPlay, speedSel, btnSpin),
@@ -360,8 +363,11 @@ export default async function mount(root, [id], live, alive = () => true) {
     btnPlay.textContent = mode === 'replay' ? '❚❚ Dừng' : '▶ Phát lại';
     btnPlay.classList.toggle('on', mode === 'replay');
     btnPlay.disabled = !steps.some((s) => s.glb);
+    headTitle.textContent = build.name || build.title;
+    headChips.replaceChildren(tagChips(build.tags) || '');
     links.replaceChildren(...[
       h('a', { class: 'btn', href: `#/model/${encodeURIComponent(id)}`, text: 'Xem model ↗' }),
+      build.images ? h('a', { class: 'btn', href: `#/images/${encodeURIComponent(id)}`, text: `Ảnh (${build.images})` }) : null,
       build.renders ? h('a', { class: 'btn', href: `#/timeline/${encodeURIComponent(id)}`, text: `Video (${build.renders})` }) : null,
     ].filter(Boolean));
   }
@@ -489,6 +495,7 @@ export default async function mount(root, [id], live, alive = () => true) {
     paintHead();
   });
   const timer = setInterval(paintHead, 1000);
+  loadTags().then(() => { if (!destroyed) paintHead(); });
 
   paintLog();
   paintHead();

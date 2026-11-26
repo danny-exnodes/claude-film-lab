@@ -117,9 +117,10 @@ export function systemPanels(live) {
       onclick: () => { win = k; store('sysWindow', k); for (const b of winBtns.children) b.classList.toggle('on', b.dataset.w === k); load(); } })));
   const disks = h('div', { class: 'disks' });
   const jobs = h('div', { class: 'jobs' });
+  const owner = h('div', { class: 'jobs owner' });
   const machine = h('article', { class: 'syscard machine', 'aria-label': 'Máy chủ lab' },
     h('header', {}, h('h2', { text: 'Máy' }), age, winBtns),
-    h('div', { class: 'tiles' }, tiles.map((t) => t.el)), disks, jobs);
+    h('div', { class: 'tiles' }, tiles.map((t) => t.el)), disks, jobs, owner);
 
   function paintMachine() {
     const s = latest || {};
@@ -143,8 +144,18 @@ export function systemPanels(live) {
     jobs.replaceChildren(h('span', { class: 'muted', text: 'Job nặng:' }),
       ...(procs.length ? procs.map((p) => h('span', { class: 'pill', text: p.count > 1 ? `${p.name} ×${p.count}` : p.name }))
         : [h('span', { class: 'muted', text: latest ? 'không có' : '–' })]));
+    paintOwner();
     paintCharts();
     paintAge();
+  }
+
+  // Who holds the GPU lock (tools/gpu_run.py, read by monitor.py from out/_gpu/gpu.owner; free when absent).
+  function paintOwner() {
+    const o = latest && latest.gpu_owner;
+    const since = o && o.since ? Date.now() / 1000 + skew - o.since : null;
+    owner.replaceChildren(h('span', { class: 'muted', text: 'Giữ GPU:' }),
+      o ? h('span', { class: 'pill gpu', title: 'Khoá GPU (gpu_run)', text: o.label }) : h('span', { class: 'muted', text: latest ? 'rảnh' : '–' }),
+      since != null ? h('span', { class: 'muted mono', text: `${fmtDur(since)}` }) : null);
   }
 
   function paintCharts() {
@@ -185,7 +196,18 @@ export function systemPanels(live) {
     h('header', {}, h('h2', { text: 'ComfyUI' }), cChip, cQueue), cBody, cHist);
 
   function buildLink(b) {
-    return b ? h('a', { href: `#/timeline/${encodeURIComponent(b.id)}`, text: b.title || b.id }) : null;
+    if (!b) return null;
+    const page = b.kind === 'image' || b.kind === 'concept' ? 'images' : 'timeline';
+    return h('a', { href: `#/${page}/${encodeURIComponent(b.id)}`, text: b.title || b.id });
+  }
+
+  // 'Build: Concept chim · qwen-t2i · ảnh 2/4' (workflow and batch position when comfy.py sent them).
+  function buildLine(b) {
+    if (!b) return null;
+    const kind = b.kind === 'image' || b.kind === 'concept' ? 'ảnh' : (b.kind === 'clip' ? 'video' : null);
+    return h('div', { class: 'cbuild' }, 'Build: ', buildLink(b),
+      b.workflow ? ` · ${b.workflow}` : '', kind ? ` · ${kind}` : '',
+      b.items ? h('b', { class: 'mono', text: ` · ảnh ${b.item || 0}/${b.items}` }) : null);
   }
 
   function paintComfy() {
@@ -207,7 +229,7 @@ export function systemPanels(live) {
       const i = h('i');
       i.style.width = `${Math.max(0, Math.min(100, cur.pct || 0))}%`;
       kids.push(
-        c.build ? h('div', { class: 'cbuild' }, 'Build: ', buildLink(c.build)) : null,
+        buildLine(c.build),
         h('div', { class: 'bar s-rendering big' }, i),
         h('div', { class: 'cstep' }, h('b', { class: 'mono', text: `Bước ${cur.step}/${cur.total}` }),
           cur.bar > 1 ? h('span', { class: 'muted', text: ` · lượt ${cur.bar}` }) : null,
@@ -218,7 +240,7 @@ export function systemPanels(live) {
           h('dt', { text: 'Còn lại' }), h('dd', { text: cur.eta != null ? `~${fmtDur(cur.eta)}` : '–' }),
           h('dt', { text: 'Cả job' }), h('dd', { text: fmtDur(cur.job_elapsed) })));
     } else if (c.up && c.running) {
-      kids.push(c.build ? h('div', { class: 'cbuild' }, 'Build: ', buildLink(c.build)) : null,
+      kids.push(buildLine(c.build),
         h('p', { class: 'muted', text: 'Đang chạy, chưa có bước nào (đang nạp model?).' }));
     } else {
       kids.push(h('p', { class: 'muted', text: c.up ? 'Không có job đang chạy.' : 'Server ComfyUI không chạy.' }));

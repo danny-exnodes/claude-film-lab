@@ -4,7 +4,7 @@ import { h, chip, bar, api, mediaUrl, fmtDur, ago, Live, STATUS_VI, JOB_VI, merg
 import { makeRouter, parseRoute } from './route.js';
 import { systemPanels } from './sys.js';
 import { loadTags, tagChip, tagChips, groupLabel, groupColor, matches, facets, groupBuilds, parseState,
-         stateQuery } from './tags.js';
+         stateQuery, own, tagValues, emptySel } from './tags.js';
 
 const view = document.getElementById('view');
 const live = new Live(document.getElementById('live'));
@@ -132,7 +132,7 @@ function dashboard(root, _args, live, alive = () => true) {
   }
 
   function toggle(g, v) {
-    const s = state.sel[g] || (state.sel[g] = new Set());
+    const s = own(state.sel, g) || (state.sel[g] = new Set());
     if (s.has(v)) s.delete(v); else s.add(v);
     if (!s.size) delete state.sel[g];
     changed();
@@ -142,20 +142,20 @@ function dashboard(root, _args, live, alive = () => true) {
     const kids = [];
     const groups = facets(list);
     for (const [g, vals] of groups) {
-      const sel = state.sel[g] || new Set();
+      const sel = own(state.sel, g) || new Set();
       kids.push(h('div', { class: 'tg', style: `--c:${groupColor(g)}` }, h('span', { class: 'tgl', text: groupLabel(g) }),
         vals.map(([v, n]) => tagChip(g, v, { button: true, on: sel.has(v), count: n, onclick: () => toggle(g, v) }))));
     }
     // a selected value that no build has (any more) stays visible, so it can be removed
     for (const [g, vals] of Object.entries(state.sel)) {
       for (const v of vals) {
-        if (!list.some((b) => ((b.tags || {})[g] || []).includes(v))) {
+        if (!list.some((b) => tagValues(b.tags, g).includes(v))) {
           kids.push(tagChip(g, v, { button: true, on: true, count: 0, onclick: () => toggle(g, v) }));
         }
       }
     }
     if (Object.keys(state.sel).length) {
-      kids.push(h('button', { class: 'clear', type: 'button', text: '✕ Bỏ lọc chip', onclick: () => { state.sel = {}; changed(); } }));
+      kids.push(h('button', { class: 'clear', type: 'button', text: '✕ Bỏ lọc chip', onclick: () => { state.sel = emptySel(); changed(); } }));
     }
     tagbar.replaceChildren(...kids);
     tagbar.hidden = !kids.length;

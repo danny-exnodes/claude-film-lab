@@ -9,12 +9,28 @@ import { loadTags, tagChips } from './tags.js';
 const ACTIVE = new Set(['queued', 'building', 'rendering']);
 const MAX_COMPARE = 4;
 
+// The seed as exact text: the server sends seed_str too (a JSON number above 2**53 is rounded by the browser).
+export function seedText(m) {
+  if (!m) return null;
+  if (typeof m.seed_str === 'string' && /^[0-9]{1,20}$/.test(m.seed_str)) return m.seed_str;
+  return m.seed != null ? String(m.seed) : null;
+}
+
+// A step's metadata for chosen-<build>.json: seed as the exact string, no seed_str.
+export function exportMeta(m) {
+  const out = { ...(m || {}) };
+  const seed = seedText(m);
+  delete out.seed_str;
+  if (seed != null) out.seed = seed;
+  return out;
+}
+
 export function metaRows(s) {
   const m = s.meta || {};
   const rows = [];
   if (m.workflow) rows.push(['Workflow', m.workflow]);
   if (m.model) rows.push(['Model', m.model]);
-  if (m.seed != null) rows.push(['Seed', String(m.seed)]);
+  if (seedText(m) != null) rows.push(['Seed', seedText(m)]);
   if (m.sampler_steps != null) rows.push(['Số bước', String(m.sampler_steps)]);
   if (m.seconds != null) rows.push(['Thời gian', `${fmtDur(m.seconds)} / ảnh`]);
   if (m.width && m.height) rows.push(['Cỡ', `${m.width}×${m.height}`]);
@@ -91,7 +107,7 @@ export default async function mount(root, [id], live, alive = () => true) {
       h('button', { class: 'star', type: 'button', title: on ? 'Bỏ chọn' : 'Chọn ảnh này', 'aria-pressed': on ? 'true' : 'false',
         text: on ? '★' : '☆', onclick: () => toggleChosen(s) }),
       h('figcaption', {}, h('label', { class: 'cmpl' }, cb, h('span', { text: s.label })),
-        h('span', { class: 'mono muted', text: [m.seed != null ? `seed ${m.seed}` : null,
+        h('span', { class: 'mono muted', text: [seedText(m) != null ? `seed ${seedText(m)}` : null,
           m.seconds != null ? fmtDur(m.seconds) : null].filter(Boolean).join(' · ') })));
     return el;
   }
@@ -200,7 +216,7 @@ export default async function mount(root, [id], live, alive = () => true) {
   function exportChosen() {
     const out = {
       build: id, title: build.title, exported: new Date().toISOString(),
-      chosen: steps.filter((s) => chosen.has(s.image)).map((s) => ({ n: s.n, label: s.label, image: s.image, meta: s.meta || {} })),
+      chosen: steps.filter((s) => chosen.has(s.image)).map((s) => ({ n: s.n, label: s.label, image: s.image, meta: exportMeta(s.meta) })),
     };
     const blob = new Blob([JSON.stringify(out, null, 2) + '\n'], { type: 'application/json' });
     const url = URL.createObjectURL(blob);

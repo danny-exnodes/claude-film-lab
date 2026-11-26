@@ -58,6 +58,9 @@ BUILD_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 KINDS = ("model", "render", "clip", "demo", "image", "concept")     # image/concept: a gallery of generated images
 TAG_GROUP = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 TAG_VALUE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
+# Group names that are keys of every JavaScript object ({}.constructor ...): refused, the page keys objects by group.
+RESERVED_GROUPS = frozenset({"constructor", "prototype", "__proto__", "tostring", "valueof", "hasownproperty",
+                             "isprototypeof", "tolocalestring"})
 MAX_TAG_GROUPS = 16
 MAX_TAG_VALUES = 8               # per group
 STATUSES = ("queued", "building", "rendering", "done", "failed")
@@ -343,8 +346,9 @@ def clean_tags(v, where="tags"):
         raise BadEvent(f"{where}: at most {MAX_TAG_GROUPS} groups")
     out = {}
     for group, vals in v.items():
-        if not isinstance(group, str) or not TAG_GROUP.match(group):
-            raise BadEvent(f"{where}: group {str(group)[:30]!r} must match {TAG_GROUP.pattern}")
+        if not isinstance(group, str) or not TAG_GROUP.match(group) or group in RESERVED_GROUPS:
+            raise BadEvent(f"{where}: group {str(group)[:30]!r} must match {TAG_GROUP.pattern} "
+                           f"(and not be {', '.join(sorted(RESERVED_GROUPS))})")
         if isinstance(vals, str):
             vals = [vals]
         if not isinstance(vals, list) or len(vals) > MAX_TAG_VALUES:
@@ -357,6 +361,15 @@ def clean_tags(v, where="tags"):
                 clean.append(x)
         out[group] = clean
     return out
+
+
+def public_meta(meta):
+    """Step metadata for the API: `seed` is also given as the string `seed_str` (exact: a browser parses JSON numbers
+    as doubles, which round a seed above 2**53)."""
+    meta = dict(meta or {})
+    if isinstance(meta.get("seed"), int) and not isinstance(meta["seed"], bool):
+        meta["seed_str"] = str(meta["seed"])
+    return meta
 
 
 def merge_tags(stored, given):
@@ -420,7 +433,7 @@ def read_registry(paths):
         if not isinstance(doc, dict) or not isinstance(doc.get("groups"), dict):
             continue
         for name, g in doc["groups"].items():
-            if not isinstance(g, dict) or not TAG_GROUP.match(str(name)):
+            if not isinstance(g, dict) or not TAG_GROUP.match(str(name)) or name in RESERVED_GROUPS:
                 continue
             cur = groups.setdefault(name, {"label": name, "color": "#8d9ab2", "values": {}})
             if isinstance(g.get("values"), dict):
@@ -775,7 +788,7 @@ class Store:
 
     def builds(self):
         with self.lock:
-            rows = self.db.execute("SELECT * FROM builds ORDER BY updated DESC").fetchall()
+            rows = self.db.execute("SELECT * FROM builds ORDER BY updated DESC, rowid DESC").fetchall()
             return [self._summary(r) for r in rows]
 
     def build(self, bid):
@@ -799,6 +812,8 @@ class Store:
                         d[col] = json.loads(d[col]) if d[col] else {}
                     except ValueError:
                         d[col] = {}
+            if isinstance(d.get("meta"), dict):
+                d["meta"] = public_meta(d["meta"])
             out.append(d)
         return out
 
@@ -813,8 +828,8 @@ class Store:
 
     def _prune_builds(self, keep):
         """Retention: at most MAX_BUILDS builds; the least recently updated go (their rows cascade). Never `keep`."""
-        self.db.execute("DELETE FROM builds WHERE id IN (SELECT id FROM builds WHERE id != ? ORDER BY updated DESC "
-                        "LIMIT -1 OFFSET ?)", (keep, max(0, MAX_BUILDS - 1)))
+        self.db.execute("DELETE FROM builds WHERE id IN (SELECT id FROM builds WHERE id != ? ORDER BY updated DESC, "
+                        "rowid DESC LIMIT -1 OFFSET ?)", (keep, max(0, MAX_BUILDS - 1)))
 
     def _prune_rows(self, table, bid, newest_first, most):
         """Retention: at most `most` rows of one build in steps/renders/jobs (the rest of `newest_first` go)."""
@@ -895,7 +910,7 @@ class Store:
                 vals.append(f["image"])
             db.execute(f"UPDATE builds SET {', '.join(sets)} WHERE id=?", vals + [bid])
             return {"build": bid, "n": n, "label": f["label"], "stats": f.get("stats") or {}, "glb": f.get("glb"),
-                    "image": f.get("image"), "t": now, "meta": meta}
+                    "image": f.get("image"), "t": now, "meta": public_meta(meta)}
         if kind == "progress":
             sets, vals = ["progress=?", "updated=?"], [f["progress"], now]
             if "message" in f:

@@ -112,7 +112,11 @@ class WatchCase(TmpDirCase, unittest.TestCase):
 class TestWatcher(WatchCase):
     def test_a_scan_publishes_wip_skips_sequences_and_exports_the_blend(self):
         self.layout()
-        r = self.watcher(since=1).scan()
+        w = self.watcher(since=1)
+        r0 = w.scan()                                   # first sight: only the saved .blend goes (its own settle)
+        self.assertEqual(self.of("step")[0][2] if self.of("step") else None, "phuong-hoang.blend · GLB")
+        self.assertEqual(len(self.of("step")), 1, "an image is published on the scan after the one that saw it")
+        r = w.scan()
         builds = {e[1]: e for e in self.of("build")}
         self.assertEqual(set(builds), {"shk-phuong-hoang", "shk-dan-huyet", "shk-q01t03-s21"})
         ph = builds["shk-phuong-hoang"]
@@ -139,7 +143,7 @@ class TestWatcher(WatchCase):
         self.assertIn("bpy_export_glb.py", cmd[cmd.index("-P") + 1])
         self.assertNotIn("--decimate", cmd)
         self.assertEqual([e[3] for e in self.of("job")], ["running", "done"])
-        self.assertEqual(r["exported"], 1)
+        self.assertEqual((r0["exported"], r["exported"]), (1, 0))
         self.assertEqual({e[1] for e in self.of("done")}, set(builds))
         # nothing new: nothing published; a changed file goes again; a restart remembers
         self.log.clear()
@@ -147,6 +151,7 @@ class TestWatcher(WatchCase):
         self.assertEqual(self.log, [])
         self.touch("characters/phuong-hoang/wip/sheet.jpg", b"new bytes", age=10)
         w = self.watcher()
+        w.scan()
         w.scan()
         self.assertEqual([e[2] for e in self.of("step")], ["wip/sheet"])
         self.assertEqual(len(self.blender_calls), 1, "the unchanged .blend is not exported again")
@@ -157,14 +162,19 @@ class TestWatcher(WatchCase):
         self.touch("characters/huy/writing.png", age=0.5)
         self.touch("characters/huy/huy.blend", age=5)                    # saved 5 s ago: not stable yet
         self.ok = False                                                  # the server is down
-        r = self.watcher(since=12).scan()
+        w = self.watcher(since=12)
+        w.scan()
+        self.assertEqual(self.of("step"), [], "nothing goes on the scan that first sees a file")
+        r = w.scan()
         self.assertEqual([e[2] for e in self.of("step")], ["new"])
         self.assertEqual(r["pending"], 2, "writing.png waits; new.png was not taken")
         self.assertEqual(self.blender_calls, [])
         self.ok = True
         self.now += 30
         self.log.clear()
-        self.watcher(since=12).scan()
+        w = self.watcher(since=12)
+        w.scan()
+        w.scan()
         labels = [e[2] for e in self.of("step")]
         self.assertEqual(sorted(labels), ["huy.blend · GLB", "new", "writing"], "old.png stays seen-only")
 
@@ -201,6 +211,57 @@ class TestWatcher(WatchCase):
             w2.scan()
         self.assertEqual(len(self.of("job")), 2, "no Blender: no job, nothing exported")
 
+    def test_a_file_must_look_the_same_on_two_scans(self):
+        p = self.touch("characters/huy/grow.png", b"12", age=60)
+        w = self.watcher()
+        w.scan()
+        p.write_bytes(b"1234")                                           # still written (an old mtime kept)
+        os.utime(p, (self.now - 60, self.now - 60))
+        r = w.scan()
+        self.assertEqual((self.of("step"), r["pending"]), ([], 1), "the size changed between the scans")
+        w.scan()
+        self.assertEqual([e[2] for e in self.of("step")], ["grow"])
+
+    def test_a_few_numbered_frames_wait_until_the_folder_settles(self):
+        for i in (1, 2, 3):
+            self.touch(f"characters/huy/r2/{i:04d}.png", age=30)       # a sequence just started
+        self.touch("characters/huy/r2/notes.png", age=30)               # not a frame: goes as usual
+        w = self.watcher()
+        w.scan()
+        w.scan()
+        self.assertEqual([e[2] for e in self.of("step")], ["r2/notes"])
+        self.now += 60
+        self.touch("characters/huy/r2/0004.png", age=0)                 # it grows: still a possible sequence
+        w.scan()
+        w.scan()
+        self.assertEqual([e[2] for e in self.of("step")], ["r2/notes"])
+        self.now += watch.SEQ_SETTLE                                     # left alone: four single images after all
+        w.scan()
+        self.assertEqual(sorted(e[2] for e in self.of("step")),
+                         ["r2/0001", "r2/0002", "r2/0003", "r2/0004", "r2/notes"])
+
+    @unittest.skipIf(os.name == "nt", "symlinks need privileges on Windows")
+    def test_links_and_paths_outside_the_project_are_never_read(self):
+        outside = self.tmp / "private"
+        (outside / "slug").mkdir(parents=True)
+        (outside / "slug" / "secret.png").write_bytes(b"x")
+        (outside / "secret2.png").write_bytes(b"y")
+        self.touch("characters/huy/ok.png")
+        os.symlink(outside / "slug", self.out / "characters" / "linked")              # a unit folder
+        os.symlink(outside, self.out / "characters" / "huy" / "inner")                 # a sub folder
+        os.symlink(outside / "secret2.png", self.out / "characters" / "huy" / "s.png")  # a file
+        os.symlink(outside, self.out / "locations")                                    # a watched dir
+        w = self.watcher()
+        w.scan()
+        w.scan()
+        self.assertEqual([(e[1], e[2]) for e in self.of("step")], [("shk-huy", "ok")])
+        with mock.patch("sys.stdout"):
+            w2 = self.watcher(dirs=["characters", "/etc", "../x", "C:\\x"])
+        self.assertEqual(w2.dirs, ["characters"])
+        for bad in ("/etc", "../x", "characters/../../x", "C:\\Users"):
+            with mock.patch("sys.stderr"):
+                self.assertEqual(watch.main(["p", "--dir", bad]), 2, bad)
+
     def test_build_ids_and_sequences(self):
         self.assertEqual(watch.build_id("son-hai-kinh", "q01t03", "s21"), "son-hai-kinh-q01t03-s21")
         self.assertEqual(watch.build_id("a" * 40, "b" * 40), ("a" * 40 + "-" + "b" * 40)[:64])
@@ -219,6 +280,7 @@ class TestWatcherWithTheRealClient(WatchCase):
         with mock.patch.dict(os.environ, env):
             w = watch.Watcher("shk", out_root=str(self.out), state_file=str(self.tmp / "s.json"), glb=False,
                               registry={})
+            w.scan()
             w.scan()
         self.assertEqual(fake.types(), ["build", "step", "done"])
         b = fake.of("build")[0]

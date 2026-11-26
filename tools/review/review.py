@@ -199,35 +199,64 @@ def is_watch(info):
     return is_python_running(info, "watch.py")
 
 
-def checked_pid(path, verify, what):
-    """The pid in `path` when that process is alive and verify(info) holds; else the pid file is stale: it is deleted
-    and None is returned (the process, if any, is never killed)."""
+def pid_alive(pid):
+    """True when a process with this pid runs (monitor.pid_alive: Windows OpenProcess, elsewhere kill 0)."""
+    try:
+        import monitor
+        return monitor.pid_alive(pid)
+    except Exception:
+        return False
+
+
+OURS, GONE, UNKNOWN = "ours", "gone", "unknown"
+
+
+def pid_check(path, verify, what):
+    """(state, pid) of the pid file `path`: OURS when the process runs and verify(info) holds; GONE when there is no
+    pid file, it is unreadable, its process is dead or is another program (the stale file is deleted; nothing is
+    killed); UNKNOWN when the process runs but cannot be inspected (PowerShell timeout, unparsable answer): the pid
+    file is kept and nothing is started or stopped, so a live monitor/watcher is never orphaned."""
     try:
         with open(path, encoding="utf-8") as f:
             pid = int(f.read().strip())
     except FileNotFoundError:
-        return None
+        return GONE, None
     except (OSError, ValueError):
         pid = None
-    info = process_info(pid) if pid else None
-    if info and verify(info):
-        return pid
+    if pid and pid > 0 and pid_alive(pid):
+        info = process_info(pid)
+        if info is None:
+            say(f"cannot verify pid {pid} of the {what} (the process query failed): pid file {path} kept, nothing "
+                f"stopped or started; try again, or end that process yourself and delete the pid file")
+            return UNKNOWN, pid
+        if verify(info):
+            return OURS, pid
     try:
         os.remove(path)
         say(f"stale {what} pid file removed (pid {pid} is not our {what}); nothing was stopped")
     except OSError:
         pass
-    return None
+    return GONE, pid
+
+
+def checked_pid(path, verify, what):
+    """The pid in `path` when it is our running process (pid_check OURS), else None."""
+    state, pid = pid_check(path, verify, what)
+    return pid if state == OURS else None
 
 
 def kill(pid, tree=False):
+    """End pid; tree: with its children (a watcher's Blender export, a tunnel's helpers)."""
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(pid)] + (["/T"] if tree else []) + ["/F"], capture_output=True)
-    else:
-        try:
+        return
+    try:
+        if tree and os.getpgid(pid) == pid:   # started with start_new_session: the whole process group
+            os.killpg(pid, 15)
+        else:
             os.kill(pid, 15)
-        except OSError:
-            pass
+    except OSError:
+        pass
 
 
 def remove(path):
@@ -237,7 +266,9 @@ def remove(path):
         pass
 
 
-def start_detached(cmd, pid_file, log_file, what):
+def start_detached(cmd, pid_file, log_file, what, fresh_log=False):
+    """Start cmd detached, its output appended to log_file (fresh_log: the log starts empty, e.g. cloudflared whose
+    URL is read back from it, so an earlier run's URL is never found)."""
     os.makedirs(STATE, exist_ok=True)
     try:
         if os.path.getsize(log_file) > 1 << 20:
@@ -245,7 +276,7 @@ def start_detached(cmd, pid_file, log_file, what):
     except OSError:
         pass
     env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1")
-    with open(log_file, "ab") as log:
+    with open(log_file, "wb" if fresh_log else "ab") as log:
         proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=LAB,
                                 **detach_kw())
     with open(pid_file, "w", encoding="utf-8") as f:
@@ -279,20 +310,24 @@ def cloudflared_pid():
 
 
 def start_monitor(a):
-    pid = monitor_pid()
-    if pid:
+    state, pid = pid_check(MONITOR_PID, is_monitor, "monitor")
+    if state == OURS:
         say(f"monitor already runs (pid {pid})")
         return 0
+    if state == UNKNOWN:
+        err(f"monitor not started: pid {pid} in {MONITOR_PID} may still be our monitor")
+        return 1
     start_detached(monitor_cmd(a), MONITOR_PID, MONITOR_LOG, "monitor")
     return 0
 
 
 def stop_monitor():
-    pid = monitor_pid()
-    if pid:
+    state, pid = pid_check(MONITOR_PID, is_monitor, "monitor")
+    if state == OURS:
         kill(pid)
         say(f"stopped monitor (pid {pid})")
-    remove(MONITOR_PID)
+        remove(MONITOR_PID)
+    return state != UNKNOWN
 
 
 def cmd_monitor(a):
@@ -303,7 +338,8 @@ def cmd_monitor(a):
             print(show(monitor_cmd(a)) + "   # detached; pid in " + MONITOR_PID)
         return 0
     if a.stop or a.restart:
-        stop_monitor()
+        if not stop_monitor():
+            return 1
     if a.stop:
         return 0
     return start_monitor(a)
@@ -334,12 +370,25 @@ def watch_pid(project):
 
 
 def stop_watch(project):
+    """Stop our watcher of project with its process tree (a running Blender GLB export goes with it). -> False when
+    its pid cannot be verified (nothing stopped, pid file kept)."""
     pid_file = watch_files(project)[0]
-    pid = watch_pid(project)
-    if pid:
-        kill(pid)
+    state, pid = pid_check(pid_file, is_watch, f"watcher of {project}")
+    if state == OURS:
+        kill(pid, tree=True)
         say(f"stopped the watcher of {project} (pid {pid})")
-    remove(pid_file)
+        remove(pid_file)
+    return state != UNKNOWN
+
+
+def bad_watch_dir(d):
+    """Why a --dir is refused (absolute, a drive, '..'), else None: watched folders stay inside out/<project>/."""
+    s = str(d or "").strip()
+    if not s or os.path.isabs(s) or re.match(r"^(?:[A-Za-z]:|[\\/])", s):
+        return "must be a folder relative to out/<project>/"
+    if ".." in re.split(r"[\\/]+", s):
+        return "must not contain '..'"
+    return None
 
 
 def cmd_watch(a):
@@ -349,6 +398,11 @@ def cmd_watch(a):
     if a.episode and not PROJECT.match(a.episode):
         err("refused: --episode must be a folder name like q01t03 or ep01")
         return 2
+    for d in a.dir or []:
+        why = bad_watch_dir(d)
+        if why:
+            err(f"refused: --dir {d!r} {why}")
+            return 2
     pid_file, log_file = watch_files(a.project)
     cmd = watch_cmd(a)
     if a.dry_run:
@@ -357,13 +411,17 @@ def cmd_watch(a):
     if a.once:                         # one scan in the foreground (the watcher's own exit code)
         return subprocess.run(cmd, cwd=LAB).returncode
     if a.stop or a.restart:
-        stop_watch(a.project)
+        if not stop_watch(a.project):
+            return 1
     if a.stop:
         return 0
-    pid = watch_pid(a.project)
-    if pid:
+    state, pid = pid_check(pid_file, is_watch, f"watcher of {a.project}")
+    if state == OURS:
         say(f"the watcher of {a.project} already runs (pid {pid}); --restart for new options")
         return 0
+    if state == UNKNOWN:
+        err(f"watcher not started: pid {pid} in {pid_file} may still be our watcher")
+        return 1
     start_detached(cmd, pid_file, log_file, f"watcher of {a.project}")
     return 0
 
@@ -406,14 +464,17 @@ def ngrok_url():
         return None
 
 
-def cloudflared_url():
-    """https://<random>.trycloudflare.com of our quick tunnel: its metrics endpoint, else the log `up` wrote."""
+def cloudflared_url(pid=None):
+    """https://<random>.trycloudflare.com of our quick tunnel: its metrics endpoint, else the log `up` wrote, but only
+    while our cloudflared runs (`pid`, else cloudflared_pid()): the log of a finished run holds a dead URL."""
     try:
         host = get_json(f"http://{CLOUDFLARED_METRICS}/quicktunnel", timeout=2).get("hostname")
         if host and re.fullmatch(r"[A-Za-z0-9.-]+", host):
             return f"https://{host}"
     except Exception:
         pass
+    if not (pid or cloudflared_pid()):
+        return None
     try:
         with open(CLOUDFLARED_LOG, encoding="utf-8", errors="replace") as f:
             found = re.findall(r"https://[a-z0-9-]+\.trycloudflare\.com", f.read()[-200000:])
@@ -436,18 +497,50 @@ def tailscale_status(exe):
 
 
 def tunnel_state():
+    """{kind: {"url", "since"}} of every tunnel `up` started and `down` has not stopped (tunnel.json; the one-kind file
+    of older versions is read too). {} when there is none."""
     try:
         with open(TUNNEL_STATE, encoding="utf-8") as f:
             d = json.load(f)
-        return d if isinstance(d, dict) and d.get("kind") in TUNNELS else None
     except (OSError, ValueError):
-        return None
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    if isinstance(d.get("tunnels"), dict):
+        found = d["tunnels"]
+    elif d.get("kind") in TUNNELS:                      # before: {"kind", "url", "since"}
+        found = {d["kind"]: {"url": d.get("url"), "since": d.get("since")}}
+    else:
+        return {}
+    return {k: (v if isinstance(v, dict) else {}) for k, v in found.items() if k in TUNNELS}
+
+
+def write_tunnels(tunnels):
+    if not tunnels:
+        remove(TUNNEL_STATE)
+        return
+    os.makedirs(STATE, exist_ok=True)
+    tmp = TUNNEL_STATE + ".part"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"tunnels": tunnels}, f)
+    os.replace(tmp, TUNNEL_STATE)
 
 
 def save_tunnel(kind, url):
-    os.makedirs(STATE, exist_ok=True)
-    with open(TUNNEL_STATE, "w", encoding="utf-8") as f:
-        json.dump({"kind": kind, "url": url, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, f)
+    """Record a started tunnel next to the others still recorded (down stops every one of them)."""
+    tunnels = tunnel_state()
+    tunnels[kind] = {"url": url, "since": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    write_tunnels(tunnels)
+
+
+def active_tunnels():
+    """Kinds of the tunnels `up` started that may still be public: recorded in tunnel.json, or our ngrok/cloudflared
+    (pid file) still runs or cannot be verified."""
+    kinds = list(tunnel_state())
+    for kind, pid_file, verify in (("ngrok", NGROK_PID, is_ngrok), ("cloudflared", CLOUDFLARED_PID, is_cloudflared)):
+        if kind not in kinds and pid_check(pid_file, verify, kind)[0] != GONE:
+            kinds.append(kind)
+    return kinds
 
 
 def tunnel_cmd(kind, exe=None):
@@ -511,44 +604,76 @@ def start_tunnel(kind, exe):
     url = cloudflared_url() if cloudflared_pid() else None
     if not url:
         os.makedirs(STATE, exist_ok=True)
-        start_detached(tunnel_cmd(kind, exe), CLOUDFLARED_PID, CLOUDFLARED_LOG, "cloudflared")
+        proc = start_detached(tunnel_cmd(kind, exe), CLOUDFLARED_PID, CLOUDFLARED_LOG, "cloudflared", fresh_log=True)
         for _ in range(60):
             time.sleep(0.5)
-            url = cloudflared_url()
+            url = cloudflared_url(proc.pid if proc.poll() is None else None)
             if url:
                 break
     return url, None if url else f"cloudflared started but no quick tunnel URL yet (log {CLOUDFLARED_LOG})"
 
 
-def stop_tunnels():
-    """Stop the tunnel(s) `up` started: our ngrok/cloudflared (pid verified), our tailscale funnel."""
-    for pid_fn, pid_file, what in ((ngrok_pid, NGROK_PID, "ngrok"), (cloudflared_pid, CLOUDFLARED_PID, "cloudflared")):
-        pid = pid_fn()                 # verified: a reused pid of another program is never killed
-        if pid:
-            kill(pid, tree=True)
-            say(f"stopped {what} (pid {pid})")
-        remove(pid_file)
-    st = tunnel_state()
-    if st and st.get("kind") == "tailscale":
-        exe = shutil.which("tailscale")
-        if exe:
+def stop_tunnels(kinds=None):
+    """Stop the tunnels `up` started (kinds: these only; default every one): our ngrok/cloudflared (pid verified, with
+    their process tree), our tailscale funnel (only when tunnel.json records it). -> the kinds that could not be
+    stopped (they stay in tunnel.json, so the next `down` tries again)."""
+    tunnels = tunnel_state()
+    left = []
+    for kind in kinds or TUNNELS:
+        if kind in ("ngrok", "cloudflared"):
+            pid_file, verify = (NGROK_PID, is_ngrok) if kind == "ngrok" else (CLOUDFLARED_PID, is_cloudflared)
+            state, pid = pid_check(pid_file, verify, kind)   # a reused pid of another program is never killed
+            if state == OURS:
+                kill(pid, tree=True)
+                say(f"stopped {kind} (pid {pid})")
+                remove(pid_file)
+            elif state == UNKNOWN:
+                left.append(kind)
+                continue
+        elif kind == "tailscale" and kind in tunnels:
+            exe = shutil.which("tailscale")
+            if not exe:
+                err("tailscale not found on PATH: the funnel may still be public; "
+                    "run: tailscale funnel --https=443 off")
+                left.append(kind)
+                continue
             try:
-                subprocess.run([exe, "funnel", "--https=443", "off"], capture_output=True, timeout=30)
+                r = subprocess.run([exe, "funnel", "--https=443", "off"], capture_output=True, timeout=30)
+                if r.returncode:
+                    raise subprocess.SubprocessError(f"exit {r.returncode}")
                 say("stopped the tailscale funnel (https 443)")
             except (OSError, subprocess.SubprocessError) as e:
-                err(f"tailscale funnel off failed ({type(e).__name__}); run: tailscale funnel --https=443 off")
-    remove(TUNNEL_STATE)
+                err(f"tailscale funnel off failed ({type(e).__name__}: {e}); run: tailscale funnel --https=443 off")
+                left.append(kind)
+                continue
+        tunnels.pop(kind, None)
+    write_tunnels(tunnels)
+    return left
+
+
+def current_urls():
+    """[(kind, url or None)] of every recorded tunnel, plus a running ngrok's tunnel to 8790."""
+    out = []
+    for kind, rec in tunnel_state().items():
+        if kind == "cloudflared":
+            out.append((kind, cloudflared_url()))
+        elif kind == "tailscale":
+            out.append((kind, rec.get("url")))
+        else:
+            out.append((kind, ngrok_url()))
+    if "ngrok" not in dict(out):
+        url = ngrok_url()
+        if url:
+            out.append(("ngrok", url))
+    return out
 
 
 def current_url():
-    st = tunnel_state() or {}
-    kind = st.get("kind")
-    if kind == "cloudflared":
-        return cloudflared_url(), kind
-    if kind == "tailscale":
-        return st.get("url"), kind
-    url = ngrok_url()
-    return url, "ngrok" if url else kind
+    urls = current_urls()
+    for kind, url in urls:
+        if url:
+            return url, kind
+    return None, (urls[0][0] if urls else None)
 
 
 # ------------------------------------------------------------------ commands
@@ -580,6 +705,15 @@ def cmd_up(a):
         if why:
             err(f"refused: {why}")
             return 2
+    if tunnel != "none":               # one public tunnel at a time: switching kinds stops the earlier one first
+        others = [k for k in active_tunnels() if k != tunnel]
+        if others:
+            say(f"switching to {tunnel}: stopping the earlier tunnel ({', '.join(others)})")
+            left = stop_tunnels(others)
+            if left:
+                err(f"refused: the earlier tunnel ({', '.join(left)}) could not be stopped and may still be public; "
+                    f"stop it, then run up again")
+                return 1
     os.makedirs(media, exist_ok=True)
     if not shutil.which("docker"):
         err("docker not found on PATH (start Docker Desktop)")
@@ -599,7 +733,12 @@ def cmd_up(a):
     if not a.no_monitor:
         start_monitor(a)
     if tunnel == "none":
-        say("no tunnel: local only")
+        active = active_tunnels()
+        if active:
+            say(f"WARNING a public tunnel from an earlier `up` is still active ({', '.join(active)}): the dashboard is "
+                f"still public; stop it with: python tools/review/review.py down")
+        else:
+            say("no tunnel: local only")
         return 0
     url, why = start_tunnel(tunnel, exe or shutil.which(tunnel))
     if not url:
@@ -636,8 +775,10 @@ def cmd_down(a):
     else:
         err("docker not found on PATH")
         rc = 1
-    stop_tunnels()
-    return 1 if rc else 0
+    left = stop_tunnels()
+    if left:
+        err(f"not stopped: {', '.join(left)} (may still be public); run down again or stop it yourself")
+    return 1 if rc or left else 0
 
 
 def cmd_url(a):
@@ -674,8 +815,13 @@ def cmd_status(a):
             say_machine(get_json(PUBLIC + "/api/metrics?window=10m"), get_json(PUBLIC + "/api/comfy"))
         except Exception:
             pass
-    url, kind = current_url()
-    say(f"public URL ({kind}): {url}" if url else "no public tunnel (local only)")
+    urls = [(k, u) for k, u in current_urls() if u]
+    for kind, url in urls:
+        say(f"public URL ({kind}): {url}")
+    if len(urls) > 1:
+        say("WARNING more than one public tunnel is active; `down` stops them all")
+    if not urls:
+        say("no public tunnel (local only)")
     return 0 if builds is not None else 1
 
 
@@ -873,7 +1019,7 @@ def main(argv=None):
     q.add_argument("--no-glb", action="store_true", help="do not export GLB when a <slug>.blend is saved")
     q.add_argument("--max-glb-mb", type=float, default=None, help="decimate a GLB larger than this (default 60)")
     q.add_argument("--decimate", type=float, default=None, help="always decimate to this ratio (0.05..1)")
-    q.add_argument("--once", action="store_true", help="one scan in the foreground, then exit")
+    q.add_argument("--once", action="store_true", help="scan twice (3 s apart) in the foreground, then exit")
     q.add_argument("--stop", action="store_true")
     q.add_argument("--restart", action="store_true")
     q.add_argument("--dry-run", action="store_true")

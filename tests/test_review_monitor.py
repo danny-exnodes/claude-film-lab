@@ -523,8 +523,11 @@ class TestReviewCliMonitor(TmpDirCase, unittest.TestCase):
         self.table = {}
         self.mpid, self.npid = self.tmp / "monitor.pid", self.tmp / "ngrok.pid"
         for p in (mock.patch.object(review, "process_info", lambda pid: self.table.get(int(pid)) if pid else None),
+                  mock.patch.object(review, "pid_alive", lambda pid: int(pid) in self.table),
                   mock.patch.object(review, "MONITOR_PID", str(self.mpid)),
                   mock.patch.object(review, "NGROK_PID", str(self.npid)),
+                  mock.patch.object(review, "CLOUDFLARED_PID", str(self.tmp / "cloudflared.pid")),
+                  mock.patch.object(review, "TUNNEL_STATE", str(self.tmp / "tunnel.json")),
                   mock.patch.object(review, "STATE", str(self.tmp)),
                   mock.patch.object(review, "MONITOR_LOG", str(self.tmp / "monitor.log"))):
             p.start()
@@ -547,12 +550,19 @@ class TestReviewCliMonitor(TmpDirCase, unittest.TestCase):
         self.assertEqual(review.monitor_pid(), 100)
         self.table[100] = dict(self.MON, name="/usr/bin/python3.12", cmdline="python3 /lab/tools/review/monitor.py")
         self.assertEqual(review.monitor_pid(), 100)
-        for stale in (self.OTHER_PY, self.CHROME, {"name": "python.exe", "cmdline": None}, None):
-            self.table[100] = stale
+        for stale in (self.OTHER_PY, self.CHROME, {"name": "python.exe", "cmdline": None}, "dead"):
+            self.table.pop(100, None)
+            if stale != "dead":
+                self.table[100] = stale
             self.mpid.write_text("100")
             with mock.patch("sys.stdout"):
                 self.assertIsNone(review.monitor_pid(), stale)
             self.assertFalse(self.mpid.exists(), stale)
+        self.table[100] = None                   # alive, but the process query failed: unknown, the file stays
+        self.mpid.write_text("100")
+        with mock.patch("sys.stdout"):
+            self.assertIsNone(review.monitor_pid())
+        self.assertTrue(self.mpid.exists(), "an unverifiable pid file is kept")
 
     def test_ngrok_pid_and_down_kill_only_verified_processes(self):
         self.fake_procs()
@@ -570,9 +580,12 @@ class TestReviewCliMonitor(TmpDirCase, unittest.TestCase):
         self.npid.write_text("200")
         self.assertEqual(review.ngrok_pid(), 200)
         with mock.patch.object(review.shutil, "which", return_value=None), \
-                mock.patch.object(review.subprocess, "run") as run, mock.patch.object(review.os, "kill") as kill:
+                mock.patch.object(review.subprocess, "run") as run, mock.patch.object(review.os, "kill") as kill, \
+                mock.patch.object(review.os, "getpgid", create=True, side_effect=lambda pid: pid), \
+                mock.patch.object(review.os, "killpg", create=True) as killpg:
             code, out, _ = run_main(review.main, ["down"])
-        killed = {int(c.args[0][2]) for c in run.call_args_list} | {c.args[0] for c in kill.call_args_list}
+        killed = ({int(c.args[0][2]) for c in run.call_args_list} | {c.args[0] for c in kill.call_args_list}
+                  | {c.args[0] for c in killpg.call_args_list})
         self.assertEqual(killed, {100, 200})
         self.assertIn("stopped ngrok (pid 200)", out)
 

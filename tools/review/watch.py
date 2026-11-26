@@ -15,12 +15,15 @@ seconds (`review.py watch <project>` runs it detached, pid in out/_review/watch-
   <episode>/renders3d/<shot>*/            one build per shot (<project>-<episode>-s21, kind render): images are steps,
                                           mp4s are renders
 Frame sequences are skipped: folders named beauty, frames, passes, depth, normal(s), mask(s), control*, canny, pose...,
-and any folder with 8 or more numbered frames (0001.png). A GLB bigger than --max-glb-mb is exported again with a
-Decimate ratio that fits (--decimate R forces one). Tags of each build: kind, engine blender, project, episode,
-subject (the slug) or shot, stage lookdev (characters/locations).
+and any folder with 8 or more numbered frames (0001.png); a folder with fewer numbered frames may be a sequence that is
+still being rendered: its numbered frames wait until the folder has not changed for SEQ_SETTLE seconds. A GLB bigger
+than --max-glb-mb is exported again with a Decimate ratio that fits (--decimate R forces one). Tags of each build:
+kind, engine blender, project, episode, subject (the slug) or shot, stage lookdev (characters/locations).
 State: out/_review/watch-<project>.json (what was published; a restart publishes nothing twice). First run: only files
 changed in the last --since hours (default 12) are published, older ones are marked as seen. A file is published once
-its mtime is 3 s old (a .blend: 20 s); a publish that the server did not take is tried again on the next scan.
+two consecutive scans saw the same size and mtime and that mtime is 3 s old (a .blend: 20 s); a publish that the server
+did not take is tried again on the next scan. Only folders and files inside out/<project>/ are read: --dir must be
+relative without '..', and symlinks, junctions and anything whose real path leads outside are skipped.
 Offline-safe like every publisher: without a server it keeps scanning and retries.
 """
 import argparse
@@ -45,7 +48,10 @@ SKIP_DIRS = re.compile(r"^(?:beauty|frames?|passes|pass|depth|z|normals?|masks?|
                        r"openpose|pose|cryptomatte|ao|mist|__pycache__|\..*)$", re.I)
 FRAME = re.compile(r"(?:^|[_.-])\d{3,6}\.(?:png|jpe?g|exr|tiff?|webp)$", re.I)
 SEQUENCE_MIN = 8
-SETTLE = 3.0                      # seconds since the last write before an image/video is published
+SETTLE = 3.0                      # seconds since the last write before an image/video is published (and the same
+                                  # size + mtime on two consecutive scans)
+SEQ_SETTLE = 180.0                # a folder with a few numbered frames: how long it must stay unchanged (a sequence
+                                  # still rendering is skipped once it has SEQUENCE_MIN frames)
 BLEND_SETTLE = 20.0               # ... before a saved .blend is exported
 DEFAULT_DIRS = ("characters", "locations")
 MAX_PER_SCAN = 40                 # publishes per scan (a big first run is spread over a few scans)
@@ -64,6 +70,27 @@ def build_id(*parts):
     raw = "-".join(re.sub(r"[^A-Za-z0-9._-]+", "-", p).strip("-._") for p in parts if p)
     raw = re.sub(r"-{2,}", "-", raw).strip("-._")[:64].rstrip("-._")
     return raw if client.BUILD_ID.match(raw or "") else None
+
+
+def bad_dir(d):
+    """Why a watched folder is refused (absolute, a drive, '..'), else None: it must stay inside out/<project>/."""
+    s = str(d or "").strip()
+    if not s or os.path.isabs(s) or re.match(r"^(?:[A-Za-z]:|[\\/])", s):
+        return "must be a folder relative to out/<project>/"
+    if ".." in re.split(r"[\\/]+", s):
+        return "must not contain '..'"
+    return None
+
+
+def is_link(path):
+    """A symlink or a Windows junction (never followed: it may lead out of the project folder)."""
+    try:
+        if os.path.islink(path):
+            return True
+        isj = getattr(os.path, "isjunction", None)
+        return bool(isj and isj(path))
+    except OSError:
+        return True
 
 
 def find_blender(explicit=None):
@@ -111,8 +138,12 @@ class Watcher:
                  runner=subprocess.run, registry=None):
         self.project, self.episode = project, episode
         self.root = os.path.abspath(out_root or client.lab_out(project))
+        self.real_root = os.path.realpath(self.root)
         self.dirs = list(dirs) if dirs else list(DEFAULT_DIRS) + ([os.path.join(episode, "renders3d")] if episode
                                                                   else ["*/renders3d"])
+        for d in [d for d in self.dirs if bad_dir(d)]:
+            say(f"--dir {d!r} skipped: {bad_dir(d)}")
+            self.dirs.remove(d)
         self.state_file = state_file or client.lab_out("_review", f"watch-{project}.json")
         self.make_review = make_review or (lambda bid, title, kind, tags: client.Review(
             bid, title, kind, project=project, tags=tags, append=True))
@@ -122,6 +153,8 @@ class Watcher:
         self.labels = ((registry if registry is not None else client.load_registry()).get("subject") or {}).get(
             "values") or {}
         self.reviews = {}
+        self.prev = {}                 # path -> (size, mtime) of the previous scan: a file must look the same twice
+        self.prev_seq = {}             # folder -> (frames, newest mtime) of the previous scan (a possible sequence)
         self.state = self.load()
 
     # ------------------------------------------------------------------ state
@@ -145,21 +178,30 @@ class Watcher:
         os.replace(tmp, self.state_file)
 
     # ------------------------------------------------------------------ what to watch
+    def inside(self, path):
+        """True when path is no link and its real path stays under the real out/<project>/ folder."""
+        if is_link(path):
+            return False
+        real = os.path.realpath(path)
+        return real == self.real_root or real.startswith(self.real_root.rstrip(os.sep) + os.sep)
+
     def watched_dirs(self):
         out = []
         for d in self.dirs:
             if "*" in d:
                 import glob
-                out += sorted(p for p in glob.glob(os.path.join(self.root, d)) if os.path.isdir(p))
-            elif os.path.isdir(os.path.join(self.root, d)):
-                out.append(os.path.join(self.root, d))
+                found = sorted(p for p in glob.glob(os.path.join(self.root, d)) if os.path.isdir(p))
+            else:
+                found = [os.path.join(self.root, d)] if os.path.isdir(os.path.join(self.root, d)) else []
+            out += [p for p in found if self.inside(p)]
         return out
 
     def units(self):
         units = []
         for d in self.watched_dirs():
             try:
-                subs = sorted(e for e in os.listdir(d) if os.path.isdir(os.path.join(d, e)) and not e.startswith("."))
+                subs = sorted(e for e in os.listdir(d) if not e.startswith(".") and os.path.isdir(os.path.join(d, e))
+                              and self.inside(os.path.join(d, e)))
             except OSError:
                 continue
             if os.path.basename(d) == "renders3d":
@@ -190,18 +232,32 @@ class Watcher:
         return units
 
     def files(self, folder):
-        """(path, kind) of the images and videos under folder, frame sequences and pass folders left out."""
+        """(path, kind, seq) of the images and videos under folder, frame sequences and pass folders left out (and
+        links, and whatever leads outside out/<project>/). seq: (folder, frames, newest mtime) for a numbered frame
+        in a folder with fewer than SEQUENCE_MIN of them (it may be a sequence still being rendered), else None."""
         out = []
+        if not self.inside(folder):
+            return out
         for cur, dirs, names in os.walk(folder):
-            dirs[:] = sorted(x for x in dirs if not SKIP_DIRS.match(x))
-            if sum(1 for n in names if FRAME.search(n)) >= SEQUENCE_MIN:
+            dirs[:] = sorted(x for x in dirs if not SKIP_DIRS.match(x) and self.inside(os.path.join(cur, x)))
+            frames = [n for n in names if FRAME.search(n)]
+            if len(frames) >= SEQUENCE_MIN:
                 continue                                         # a frame sequence: its images are not steps
+            seq = None
+            if frames:
+                newest = 0.0
+                for n in frames:
+                    try:
+                        newest = max(newest, os.stat(os.path.join(cur, n)).st_mtime)
+                    except OSError:
+                        pass
+                seq = (cur, len(frames), newest)
             for n in sorted(names):
                 ext = os.path.splitext(n)[1].lower()
-                if ext in IMAGES:
-                    out.append((os.path.join(cur, n), "image"))
-                elif ext in VIDEOS:
-                    out.append((os.path.join(cur, n), "video"))
+                kind = "image" if ext in IMAGES else "video" if ext in VIDEOS else None
+                path = os.path.join(cur, n)
+                if kind and self.inside(path):
+                    out.append((path, kind, seq if n in frames else None))
         return out
 
     def blends(self, unit):
@@ -228,30 +284,38 @@ class Watcher:
         return os.path.relpath(path, self.root).replace("\\", "/")
 
     def scan(self):
-        """One pass over every unit. -> {"published": n, "exported": n, "pending": n}."""
+        """One pass over every unit. -> {"published": n, "exported": n, "pending": n}. A new or changed file is
+        published on the scan after the one that first saw it with this size and mtime (settled)."""
         now = self.clock()
-        first = self.state.pop("first", False)
+        first = self.state.get("first", False)          # cleared only once a scan's state is saved
         cutoff = now - self.since * 3600 if first else None
         files, budget = self.state["files"], MAX_PER_SCAN
         report = {"published": 0, "exported": 0, "pending": 0}
+        seen, seen_seq = {}, {}
         for unit in self.units():
             posted = 0
             for folder in unit.folders:
-                for path, kind in self.files(folder):
+                for path, kind, seq in self.files(folder):
                     try:
                         st = os.stat(path)
                     except OSError:
                         continue
                     key = self.rel(path)
                     sig = [st.st_mtime, st.st_size]
+                    seen[key] = (st.st_size, st.st_mtime)
+                    if seq:
+                        seen_seq[seq[0]] = seq[1:]
                     old = files.get(key)
                     if old and old[:2] == sig and old[2]:
                         continue                                  # published already
                     if cutoff is not None and st.st_mtime < cutoff:
                         files[key] = sig + [True]                 # first run: old work is only marked as seen
                         continue
-                    if now - st.st_mtime < SETTLE:
-                        report["pending"] += 1
+                    if now - st.st_mtime < SETTLE or self.prev.get(key) != seen[key]:
+                        report["pending"] += 1                    # still written, or not seen like this before
+                        continue
+                    if seq and (self.prev_seq.get(seq[0]) != seq[1:] or now - seq[2] < SEQ_SETTLE):
+                        report["pending"] += 1                    # maybe a sequence that is still rendering
                         continue
                     if budget <= 0:
                         report["pending"] += 1
@@ -270,7 +334,9 @@ class Watcher:
             if posted:
                 report["published"] += posted
                 self.review(unit).done(f"{posted} file mới")
+        self.prev, self.prev_seq = seen, seen_seq
         self.save()
+        self.state.pop("first", None)
         return report
 
     def publish(self, unit, path, kind, folder):
@@ -387,7 +453,8 @@ def main(argv=None):
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     p.add_argument("project")
     p.add_argument("--episode", default=None)
-    p.add_argument("--dir", action="append", default=None, help="folder relative to out/<project>/ (repeatable)")
+    p.add_argument("--dir", action="append", default=None,
+                   help="folder relative to out/<project>/ (repeatable; no absolute path, no '..')")
     p.add_argument("--interval", type=float, default=5.0)
     p.add_argument("--since", type=float, default=12.0)
     p.add_argument("--blender", default=None)
@@ -399,6 +466,10 @@ def main(argv=None):
     if not client.BUILD_ID.match(a.project) or (a.episode and not client.BUILD_ID.match(a.episode)):
         print("watch: refused: project/episode must be folder names ([A-Za-z0-9][A-Za-z0-9._-]*)", file=sys.stderr)
         return 2
+    for d in a.dir or []:
+        if bad_dir(d):
+            print(f"watch: refused: --dir {d!r} {bad_dir(d)}", file=sys.stderr)
+            return 2
     if a.decimate is not None and not 0.01 <= a.decimate <= 1:
         print("watch: refused: --decimate must be 0.01..1", file=sys.stderr)
         return 2
@@ -407,8 +478,12 @@ def main(argv=None):
     if not os.path.isdir(w.root):
         print(f"watch: refused: no folder {w.root}", file=sys.stderr)
         return 2
-    if a.once:
+    if a.once:                         # two scans: a file is published once it looked the same twice
+        r1 = w.scan()
+        time.sleep(SETTLE)
         r = w.scan()
+        r["published"] += r1["published"]
+        r["exported"] += r1["exported"]
         say(f"published {r['published']} (GLB {r['exported']}); {r['pending']} waiting")
         return 0
     try:

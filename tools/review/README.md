@@ -17,7 +17,7 @@ Docker trên máy chủ lab.
 | File | Chạy ở đâu | Việc |
 |---|---|---|
 | `server.py` | trong container | cổng 8790 (chỉ đọc): web app, `/api/*`, `/api/stream` (SSE), `/media/<đường dẫn>` có Range; cổng 8791: `POST /ingest/event` |
-| `client.py` | máy chủ lab và Python 3.13 trong Blender | `Review(build, title, kind, project, expected_steps, tags=…)`: `.step()`, `.progress()`, `.render()`, `.job()`, `.done()`, `.fail()`; `JobHook` (`.image()` cho ảnh của job); chép/hard-link file vào `<media>/<build>/`; không bao giờ làm hỏng hay làm chậm lệnh gọi |
+| `client.py` | máy chủ lab và Python 3.13 trong Blender | `Review(build, title, kind, project, expected_steps, tags=…)`: `.step()`, `.progress()`, `.render()`, `.job()`, `.done()`, `.fail()`; `JobHook` (`.image()` cho ảnh của job); chép file vào `<media>/<build>/`; không bao giờ làm hỏng hay làm chậm lệnh gọi |
 | `tags.json` | client, server, web | bộ chip: nhóm (màu, nhãn) và giá trị (nhãn tiếng Việt); thêm giá trị/nhóm ở đây, không sửa code |
 | `review.py` | máy chủ lab | CLI: `up`, `down`, `url`, `status`, `monitor`, `watch`, `publish-video`, `publish-model` |
 | `monitor.py` | máy chủ lab | mỗi 2 giây gửi số đo máy (CPU, RAM, GPU, VRAM, nhiệt độ, công suất, ổ đĩa, tên job nặng, người giữ GPU) và tiến độ ComfyUI (đọc log tqdm) tới cổng ghi; chỉ thư viện chuẩn |
@@ -57,6 +57,12 @@ python tools/review/review.py down               # dừng container (volume dữ
   | `tailscale` | `tailscale funnel --bg 8790`; `down`: `tailscale funnel --https=443 off` | Tailscale đã đăng nhập, Funnel bật cho máy trong admin console | `https://<tên máy>.<tailnet>.ts.net/` cố định |
   | `cloudflared` | `cloudflared tunnel --url http://127.0.0.1:8790` (quick tunnel, chạy nền) | chỉ cần chương trình, không tài khoản | `https://<ngẫu nhiên>.trycloudflare.com`, đổi mỗi lần `up` |
 
+  Mỗi tunnel `up` mở được ghi vào `out/_review/tunnel.json` (mọi loại, không chỉ loại cuối); `down` tắt **hết** (ngrok,
+  cloudflared theo pid đã kiểm, cả cây tiến trình; funnel Tailscale); loại nào không tắt được thì giữ trong file, `down`
+  thoát 1 và lần sau thử lại. `up --tunnel X` khi tunnel loại khác còn mở: tắt cái cũ trước (không tắt được → mã 1, không
+  mở cái mới). `up --no-ngrok` khi tunnel cũ còn mở: in `WARNING` (trang vẫn công khai), không đụng tới nó. Log
+  `cloudflared.log` được làm trống mỗi lần mở; URL chỉ lấy từ log khi cloudflared của ta còn chạy.
+
 - Container `film-lab-review` khởi động lại tự động (`restart: unless-stopped`) khi Docker Desktop chạy.
 - Xoá hết dữ liệu (cẩn thận, không lấy lại được): `docker compose -f tools/review/docker-compose.yml down -v`.
 
@@ -81,11 +87,14 @@ khi hiển thị nếu mọi phần của nó là chip (`name` trong API; `title
   "subject": "phuong-hoang"})`; `publish-video|publish-model --tag engine=blender --tag episode=q01t03`. Giá trị được
   chuẩn hoá thành slug (`"Q01T03"` → `q01t03`, `"Phượng hoàng"` → `phuong-hoang`). Nhóm hoặc giá trị lạ chỉ in `WARN` (không
   bao giờ lỗi); giá trị không thành slug được bỏ. Nhóm đã gửi thay nhóm cũ của build, `[]` xoá nhóm, nhóm khác giữ nguyên.
-- Server: tối đa 16 nhóm × 8 giá trị, nhóm `[a-z][a-z0-9_]{0,23}`, giá trị `[a-z0-9][a-z0-9._-]{0,47}` (sai → 400). Build
+- Server: tối đa 16 nhóm × 8 giá trị, nhóm `[a-z][a-z0-9_]{0,23}` trừ tên khoá sẵn có của object JavaScript
+  (`constructor`, `prototype`, `tostring`, `valueof`…: `RESERVED_GROUPS`, giống nhau ở server, client, web), giá trị
+  `[a-z0-9][a-z0-9._-]{0,47}` (sai → 400). Build
   không có tag (build cũ, lệnh gọi cũ) được **suy tag** từ id, tiêu đề, kind, project: engine, look, khâu, tập, shot,
   dự án, sinh vật có trong registry. `kind`/`project` luôn có chip (lấy từ cột khi tag không nêu).
 - `<media>/_tags.json` (cùng dạng `tags.json`, ghi đè/bổ sung nhãn): nhãn sinh vật/bối cảnh của dự án. Nhãn hiện trên
-  trang công khai.
+  trang công khai. File sửa tay hỏng không bao giờ làm dừng client/watcher: nhóm hay giá trị sai kiểu bị bỏ, `pattern` không
+  biên dịch được bị bỏ kèm một dòng `WARN`.
 - **Lọc**: thanh chip trên bảng theo dõi (chỉ giá trị đang có, kèm số build). **AND giữa các nhóm, OR trong một nhóm**
   ("Q1·T3 hoặc Q1·T4, và Blender"). **Gom theo** một nhóm (build có nhiều giá trị nằm ở giá trị đầu). Bộ lọc nằm trên URL
   (`#/?st=active&t=engine:blender,episode:q01t03&g=episode`): gửi link là gửi cả bộ lọc.
@@ -94,13 +103,14 @@ khi hiển thị nếu mọi phần của nó là chip (`name` trong API; `title
 
 Build `kind: image` (hoặc `concept`) mở **thư viện ảnh** (`#/images/<id>`, không cần three.js; build nào có bước kèm ảnh
 cũng có link "Ảnh (N)"): lưới ảnh, mở lớn (←/→, Esc), so sánh 2–4 ảnh cạnh nhau, đánh dấu **được chọn** (★, phím C;
-lưu trong trình duyệt vì trang công khai chỉ đọc; **Tải danh sách chọn** ra `chosen-<build>-<ngày>.json`), lọc chỉ ảnh được
+lưu trong trình duyệt vì trang công khai chỉ đọc; **Tải danh sách chọn** ra `chosen-<build>-<ngày>.json`, `seed` là chuỗi
+số chính xác), lọc chỉ ảnh được
 chọn. Thanh tiến độ: ảnh k/N của lô và bước i/n của ảnh đang chạy, ETA, giây trung bình mỗi ảnh. Thẻ ComfyUI trên bảng
 hiện build, workflow và ảnh k/N của job đang chạy (job ảnh lẫn video), link tới thư viện ảnh hoặc dòng thời gian.
 
 | Sự kiện | Trường thêm (tuỳ chọn) | Giới hạn |
 |---|---|---|
-| `step` | `prompt` (≤ 2000 ký tự, lọc đường dẫn), `seed`, `model` (≤ 120), `sampler_steps`, `seconds` (giây làm ảnh), `width`, `height`, `workflow` (≤ 60), `item`/`items` (ảnh k/N), `chosen` | seed 0..2⁶⁴−1, bước 1..10000, cỡ 1..65535, item ≤ items |
+| `step` | `prompt` (≤ 2000 ký tự, lọc đường dẫn), `seed` (API trả thêm `seed_str`: số JSON > 2⁵³ bị trình duyệt làm tròn), `model` (≤ 120), `sampler_steps`, `seconds` (giây làm ảnh), `width`, `height`, `workflow` (≤ 60), `item`/`items` (ảnh k/N), `chosen` | seed 0..2⁶⁴−1, bước 1..10000, cỡ 1..65535, item ≤ items |
 | `job` | `label` (workflow), `step`/`steps` (bước i/n), `item`/`items`, `eta` (giây) | step ≤ steps; trường không gửi thì giữ giá trị cũ |
 
 Client: `rv.step(label, image=…, meta={"prompt": …, "seed": …})`, `rv.job(tool, status, …, label=…, step=…, steps=…,
@@ -127,7 +137,9 @@ python tools/review/monitor.py --once --print    # đo một lần, in hai sự 
 - Chạy nền tách khỏi cửa sổ (Windows: `DETACHED_PROCESS`), PID ở `out/_review/monitor.pid`, log ở
   `out/_review/monitor.log`. Trước khi dừng, `review.py` kiểm pid: `monitor.pid` phải là python chạy
   `tools/review/monitor.py`, `watch-<project>.pid` là python chạy `tools/review/watch.py`, `ngrok.pid`/`cloudflared.pid`
-  phải là đúng chương trình đó (Windows: PowerShell `Get-CimInstance`); không đúng thì xoá file pid và không giết gì. `up`
+  phải là đúng chương trình đó (Windows: PowerShell `Get-CimInstance`); tiến trình đã chết hoặc là chương trình khác thì
+  xoá file pid và không giết gì; tiến trình còn sống mà không kiểm được (PowerShell quá giờ, kết quả hỏng) thì **giữ** file
+  pid, không bật thêm, không dừng gì, in `cannot verify pid` (lệnh thoát 1; chạy lại sau). `up`
   bật monitor (trừ `--no-monitor`), `down` tắt, `status` in trạng thái + số đo mới nhất.
 - **Máy**: CPU % (`GetSystemTimes`), RAM (`GlobalMemoryStatusEx`), GPU %, VRAM, nhiệt độ, công suất (`nvidia-smi`; không có
   thì bỏ GPU, thử lại mỗi phút), dung lượng trống mọi ổ cố định (C:, D:…), job nặng. Linux: đọc `/proc`. Biểu đồ vùng
@@ -162,7 +174,7 @@ Agent chỉ ghi file ra đĩa; watcher đăng tiến trình lên bảng mà khô
 
 ```bash
 python tools/review/review.py watch son-hai-kinh --episode q01t03    # chạy nền, pid out/_review/watch-son-hai-kinh.pid
-python tools/review/review.py watch son-hai-kinh --once              # quét một lần ở cửa sổ này
+python tools/review/review.py watch son-hai-kinh --once              # quét hai lần (cách 3 giây) ở cửa sổ này
 python tools/review/review.py watch son-hai-kinh --restart --dir characters --max-glb-mb 40
 python tools/review/review.py watch son-hai-kinh --stop
 ```
@@ -176,6 +188,12 @@ python tools/review/review.py watch son-hai-kinh --stop
   `--max-glb-mb` (60) được xuất lại với Decimate vừa cỡ (`--decimate R` ép tỉ lệ); không dùng Draco (web chưa có decoder).
 - `<episode>/renders3d/<shot>…/` → build `<project>-<episode>-<shot>` (kind `render`, tag `shot`): ảnh thành bước, mp4 thành
   render.
+- Chỉ đọc trong `out/<project>/`: `--dir` phải là đường dẫn tương đối, không `..` (sai → mã 2); symlink, junction và mọi
+  thứ có đường dẫn thật ra ngoài thư mục dự án bị bỏ qua.
+- Một file được đăng khi **hai lần quét liền nhau** thấy cùng cỡ và mtime và mtime đã cũ 3 giây (`.blend`: 20 giây).
+  Thư mục có vài khung đánh số (`0001.png`, ít hơn 8) có thể là chuỗi khung đang render: các khung đó chờ tới khi thư
+  mục không đổi trong `SEQ_SETTLE` (180 giây).
+- `--stop`/`--restart` dừng watcher cùng cả cây tiến trình (lần xuất GLB của Blender đang chạy cũng dừng).
 - Bỏ qua chuỗi khung: thư mục `beauty`, `frames`, `passes`, `depth`, `normal(s)`, `mask(s)`, `control*`, `canny`, `pose`…
   và thư mục có từ 8 khung đánh số (`0001.png`).
 - Trạng thái ở `out/_review/watch-<project>.json`: khởi động lại không đăng trùng. Lần đầu chỉ đăng file đổi trong
@@ -198,9 +216,14 @@ python tools/comfy/comfy.py run h3-i2v --image <start>.png --prompt "..." --out 
   ảnh khung đầu/cuối của `keyframes`) thành một render của build. Mặc định tắt; `--dry-run` không gửi gì.
 - Không có server (chưa `up`) thì mọi lệnh vẫn chạy như cũ: mỗi request chờ tối đa 2 giây; sau một lần quá giờ client
   im 15 giây (bỏ qua tiến độ, vẫn thử build/render/done/fail). `FILM_REVIEW_URL=off` tắt hẳn.
-- File được hard-link (khác ổ thì chép) vào `<media>/<build>/`, **không bao giờ ghi đè**: file khác nội dung cùng tên
+- File được **chép** (không hard-link: file làm việc bị ghi đè tại chỗ sau đó không được làm đổi bước đã đăng) vào
+  `<media>/<build>/` qua file tạm tên riêng, **không bao giờ ghi đè**: file khác nội dung cùng tên
   thành `<tên>-2`, `-3`… Chạy lại cùng build id với `restart` (bản demo làm vậy) thì các bước cũ bị thay.
-  `Review(..., append=True)`: bước không mang số, server đánh số tiếp (watcher).
+  `Review(..., append=True)`: bước không mang số, server đánh số tiếp (watcher). `Review(..., link=True)` hard-link
+  (chỉ cho file không bao giờ đổi; khác ổ thì chép).
+- Tag `project`/`episode`/`shot` của `--review` suy từ đường dẫn (`client.path_tags`) chỉ khi file nằm trong lab (checkout
+  này hoặc checkout chính; đường dẫn tương đối tính từ lab): dự án là thư mục ngay dưới `out/` hoặc `projects/` của lab
+  (không bắt đầu bằng `_`), không bao giờ là tên thư mục bên ngoài (tên người dùng, `Desktop`…).
 - Env: `FILM_REVIEW_URL` (mặc định `http://127.0.0.1:8791`), `FILM_REVIEW_MEDIA` (mặc định `out/_review/media` của
   checkout chính), `FILM_REVIEW_BUILD`, `FILM_REVIEW_PREVIEW`.
 
@@ -256,5 +279,8 @@ hash của `vendor_three.py`; `review.py up --no-ngrok --dry-run`; hook của `b
 (meta, chi tiết job, nối ComfyUI), nâng cấp DB v1, client (chuẩn hoá tag chỉ cảnh báo, meta, `JobHook.image`, JPEG
 preview), checkout chính từ worktree, mount của `up`/`status`, tunnel (thiếu chương trình/chưa đăng nhập → 2), người giữ
 GPU, log ComfyUI từ worktree, `web/tags.js` (lọc AND/OR, gom nhóm, trạng thái trên hash) chạy bằng node.
+`tests/test_review_hardening.py`: tag đường dẫn chỉ trong lab, URL cloudflared, nhiều tunnel và `down`, pid không kiểm
+được, `_tags.json` hỏng, chép file không ghi đè, tên nhóm là khoá object JS (server, client, `tags.js` bằng node), seed
+lớn hơn 2⁵³, dừng watcher cả cây.
 `tests/test_review_watch.py`: watcher với thư mục giả, client giả và Blender giả (ảnh/mp4/GLB, bỏ chuỗi khung, Decimate,
 trạng thái, lần đầu, thử lại), với client thật, `review.py watch`.

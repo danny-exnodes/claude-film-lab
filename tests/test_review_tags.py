@@ -186,7 +186,7 @@ class TestMigration(TmpDirCase, unittest.TestCase):
         store.apply("build", "img1", {"kind": "image", "title": "x"})            # the kind CHECK is gone
         store.apply("job", "ph", {"tool": "comfy", "status": "running", "job": "c", "label": "qwen-t2i", "items": 4})
         store.apply("step", "ph", {"label": "s", "image": "ph/s.jpg", "seed": 7})
-        self.assertEqual(store.rows("steps", "ph")[-1]["meta"], {"seed": 7})
+        self.assertEqual(store.rows("steps", "ph")[-1]["meta"], {"seed": 7, "seed_str": "7"})
         store.db.execute("DELETE FROM builds WHERE id='ph'")                      # cascades still work
         self.assertEqual(store.db.execute("SELECT COUNT(*) FROM steps").fetchone()[0], 0)
         store.close()
@@ -206,7 +206,9 @@ class TestClientTags(TmpDirCase, unittest.TestCase):
                          {"project": "son-hai-kinh", "episode": "q01t03", "shot": "s21"})
         self.assertEqual(client.path_tags("projects/shk/q01-t03-phuong/shots3d/s07.json", "out/shk/q01t03/renders3d"),
                          {"project": "shk", "episode": "q01t03", "shot": "s07"})
-        self.assertEqual(client.path_tags(r"D:\lab\out\shk\ep01\ledger.csv"), {"project": "shk", "episode": "ep01"})
+        self.assertEqual(client.path_tags(str(Path(client.LAB) / "out" / "shk" / "ep01" / "ledger.csv")),
+                         {"project": "shk", "episode": "ep01"})
+        self.assertEqual(client.path_tags(r"D:\lab\out\shk\ep01\ledger.csv"), {}, "outside the lab: nothing")
         self.assertEqual(client.path_tags("out/_comfy/x.png", None, "concepts/huy_v01.png"), {})
 
     def test_tags_are_normalised_and_unknown_ones_only_warn(self):
@@ -350,6 +352,7 @@ class TestMainCheckout(TmpDirCase, unittest.TestCase):
                 mock.patch.object(review.shutil, "which", lambda x: "/usr/bin/" + x), \
                 mock.patch.object(review.subprocess, "run", fake_run), \
                 mock.patch.object(review, "wait_health", lambda *a: True), \
+                mock.patch.object(review, "active_tunnels", list), \
                 mock.patch.object(review, "start_monitor", lambda a: 0):
             code, out, err = run_main(review.main, ["up", "--no-ngrok"])
         self.assertEqual(code, 0, err)
@@ -424,6 +427,7 @@ class TestTunnels(TmpDirCase, unittest.TestCase):
         log = self.tmp / "cf.log"
         log.write_text("INF |  https://bright-owl-1234.trycloudflare.com  |\n", encoding="utf-8")
         with mock.patch.object(review, "CLOUDFLARED_LOG", str(log)), \
+                mock.patch.object(review, "cloudflared_pid", lambda: 1234), \
                 mock.patch.object(review, "get_json", side_effect=OSError("no metrics")):
             self.assertEqual(review.cloudflared_url(), "https://bright-owl-1234.trycloudflare.com")
         with mock.patch.object(review, "get_json", lambda *a, **k: {"hostname": "x-y.trycloudflare.com"}):

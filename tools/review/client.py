@@ -13,10 +13,11 @@ Runs on the host (Windows or Linux, Python 3.10+) and inside Blender's Python 3.
     rv.render("beauty", video="out/beauty.mp4", frames=120, fps=24, duration=5.0)
     rv.done()                                       # or rv.fail("why")
 
-Files given to step()/render() are hard-linked (else copied) into <media>/<build>/ (never overwritten: a different file
-with the same name gets a -2, -3 ... suffix), then the event is POSTed to FILM_REVIEW_URL (default
-http://127.0.0.1:8791/ingest/event). <media> is FILM_REVIEW_MEDIA, else out/_review/media of the lab's MAIN checkout
-(main_checkout(): from a git worktree too, so client and server always agree; review.py up mounts the same folder).
+Files given to step()/render() are copied into <media>/<build>/ (never overwritten: a different file with the same
+name gets a -2, -3 ... suffix; Review(link=True) hard-links files that never change), then the event is POSTed to
+FILM_REVIEW_URL (default http://127.0.0.1:8791/ingest/event). <media> is FILM_REVIEW_MEDIA, else out/_review/media
+of the lab's MAIN checkout (main_checkout(): from a git worktree too, so client and server always agree; review.py up
+mounts the same folder).
 A large PNG/WebP image is published as a JPEG preview (1280 px, q82, preview.py; needs Pillow, else the original goes).
 
 Tags (tags.json, README "Chip"): {group: value or [values]}; values are normalised to slugs ("Q01T03" -> "q01t03");
@@ -61,6 +62,9 @@ NAME_BAD = re.compile(r"[^A-Za-z0-9._-]+")
 # The same as server.py (a test keeps them equal): tags, image metadata of a step, detail of a job.
 TAG_GROUP = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 TAG_VALUE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,47}$")
+# Group names that are keys of every JavaScript object ({}.constructor ...): refused, the dashboard would break.
+RESERVED_GROUPS = frozenset({"constructor", "prototype", "__proto__", "tostring", "valueof", "hasownproperty",
+                             "isprototypeof", "tolocalestring"})
 MAX_TAG_GROUPS = 16
 MAX_TAG_VALUES = 8
 STEP_META = {"prompt": str, "seed": int, "model": str, "sampler_steps": int, "seconds": float, "width": int,
@@ -170,36 +174,85 @@ _EP_SEG = re.compile(r"^(?:(ep[0-9]{2,3})|q([0-9]{2})-?t([0-9]{2}))(?:-|$)")
 _SHOT_SEG = re.compile(r"(?:^|[_-])(s[0-9]{2,3})(?=[_.-]|$)")
 
 
+def lab_roots():
+    """The lab checkouts a path may belong to: this checkout and the main one (absolute, deduplicated)."""
+    out = []
+    for r in (LAB, main_checkout()):
+        r = os.path.abspath(r)
+        if r not in out:
+            out.append(r)
+    return out
+
+
+_ABS_LIKE = re.compile(r"^(?:[A-Za-z]:|[\\/])")
+_SEP = re.compile(r"[\\/]+")
+
+
+def lab_parts(path, roots=None):
+    """[segments] of `path` relative to the lab (this checkout or the main one), else None: an absolute path outside
+    every lab root, one of another OS (D:\\x on Linux), or a relative path with '..' (never 'up' out of the lab). A
+    relative path is taken as relative to the lab."""
+    s = str(path or "").strip()
+    if not s:
+        return None
+    roots = roots or lab_roots()
+    if _ABS_LIKE.match(s):
+        if os.name != "nt" and not s.startswith("/"):
+            return None                                   # a Windows path on Linux: never inside the lab
+        full = os.path.normpath(os.path.abspath(s))
+    else:
+        if ".." in _SEP.split(s):
+            return None
+        full = os.path.normpath(os.path.join(roots[0], s))
+    for root in roots:
+        try:
+            rel = os.path.relpath(full, root)
+        except ValueError:                                # another drive
+            continue
+        parts = [x for x in _SEP.split(rel) if x and x != "."]
+        if parts and parts[0] != ".." and not os.path.isabs(rel):
+            return parts
+    return None
+
+
 def path_tags(*paths):
     """Best-effort project / episode / shot tags from lab paths, for blender.py and comfy.py --review:
     out/<project>/<episode>/..., projects/<project>/<episode>-<slug>/..., <id>_s21_h3_v01.mp4, shots3d/s21.json.
-    Episode folders ep01 / q01t03 / q01-t03-<slug>; a tag already found by an earlier path wins. Never raises."""
+    Only paths inside the lab count (lab_parts: this checkout or the main one; a relative path is relative to the lab):
+    the project is the folder right under out/ or projects/ at the lab root (not _-prefixed); episode and shot are read
+    only in the lab's own segments, never in the folders above it (a user or folder name must not become a public
+    chip). Episode folders ep01 / q01t03 / q01-t03-<slug>; a tag already found by an earlier path wins. Never raises."""
     tags = {}
+    try:
+        roots = lab_roots()
+    except Exception:
+        return tags
     for p in paths:
         try:
-            parts = [x for x in re.split(r"[\\/]+", str(p or "")) if x and x not in (".", "..")]
+            parts = lab_parts(p, roots) if p else None
         except Exception:
+            parts = None
+        if not parts:
             continue
         low = [x.lower() for x in parts]
-        for root in ("out", "projects"):
-            if root in low[:-1]:
-                i = len(low) - 1 - low[::-1].index(root)
-                if i + 1 < len(low) - 1 and not low[i + 1].startswith(("_", ".")):
-                    tags.setdefault("project", low[i + 1])
+        if len(low) > 2 and low[0] in ("out", "projects") and not low[1].startswith(("_", ".")):
+            tags.setdefault("project", low[1])
         for seg in low[:-1]:
             m = _EP_SEG.match(seg)
             if m:
                 tags.setdefault("episode", m.group(1) or f"q{m.group(2)}t{m.group(3)}")
                 break
-        if low:
-            m = _SHOT_SEG.search(os.path.splitext(low[-1])[0])
-            if m:
-                tags.setdefault("shot", m.group(1))
+        m = _SHOT_SEG.search(os.path.splitext(low[-1])[0])
+        if m:
+            tags.setdefault("shot", m.group(1))
     return tags
 
 
 def load_registry(media=None):
-    """{group: {...}} of tags.json merged with <media>/_tags.json (project labels). {} when unreadable."""
+    """{group: {"values": {slug: label}, "open": bool, "pattern": str, "re": compiled}} of tags.json merged with
+    <media>/_tags.json (project labels). Never raises: a file that is not JSON counts as empty; a group or value of the
+    wrong type is skipped; a bad pattern is dropped with one warning (a hand-edited _tags.json must never stop a
+    publisher)."""
     groups = {}
     for path in (TAGS_FILE, os.path.join(media_root(media), "_tags.json")):
         try:
@@ -207,14 +260,35 @@ def load_registry(media=None):
                 doc = json.load(f)
         except (OSError, ValueError):
             continue
-        for name, g in ((doc or {}).get("groups") or {}).items() if isinstance(doc, dict) else ():
-            if isinstance(g, dict):
-                cur = groups.setdefault(name, {"values": {}})
-                cur["values"].update(g.get("values") or {})
-                for k in ("open", "pattern"):
-                    if k in g:
-                        cur[k] = g[k]
+        found = doc.get("groups") if isinstance(doc, dict) else None
+        if not isinstance(found, dict):
+            continue
+        for name, g in found.items():
+            if not isinstance(name, str) or not valid_group(name) or not isinstance(g, dict):
+                continue
+            cur = groups.setdefault(name, {"values": {}})
+            vals = g.get("values")
+            if isinstance(vals, dict):
+                cur["values"].update({k: v for k, v in vals.items() if isinstance(k, str) and isinstance(v, str)})
+            if isinstance(g.get("open"), bool):
+                cur["open"] = g["open"]
+            if "pattern" in g:
+                pat = g["pattern"]
+                try:
+                    if not isinstance(pat, str):
+                        raise TypeError("not a string")
+                    cur["re"] = re.compile(pat)
+                    cur["pattern"] = pat
+                except (re.error, TypeError, ValueError, OverflowError, RecursionError) as e:
+                    cur.pop("re", None)
+                    cur.pop("pattern", None)
+                    warn_once(f"{os.path.basename(path)}: group {name!r}: bad pattern dropped ({type(e).__name__})")
     return groups
+
+
+def valid_group(name):
+    """A tag group name the server takes: TAG_GROUP and not a JavaScript object key (the page keys objects by group)."""
+    return bool(TAG_GROUP.match(name)) and name not in RESERVED_GROUPS
 
 
 _TAG_WARNED = set()
@@ -248,7 +322,7 @@ def normalize_tags(tags, registry=None):
     reg = load_registry() if registry is None else registry
     for group, vals in tags.items():
         g = re.sub(r"[^a-z0-9_]+", "_", fold(group).strip()).strip("_")[:24]
-        if not g or not TAG_GROUP.match(g):
+        if not g or not valid_group(g):
             tag_warn(f"group {str(group)[:30]!r} is not a valid group name: dropped")
             continue
         if reg and g not in reg:
@@ -268,7 +342,7 @@ def normalize_tags(tags, registry=None):
                 continue
             spec = reg.get(g) if reg else None
             if spec and not spec.get("open") and s not in (spec.get("values") or {}) and not (
-                    spec.get("pattern") and re.match(spec["pattern"], s)):
+                    spec.get("re") is not None and spec["re"].match(s)):
                 tag_warn(f"unknown value {g}={s!r}")
             if s not in clean:
                 clean.append(s)
@@ -294,10 +368,15 @@ def clean_fields(given, schema, what):
         try:
             if typ is bool:
                 v = bool(v)
-            elif typ is int:
-                if isinstance(v, bool) or int(v) != float(v):
+            elif typ is int:                     # a Python int as it is: a seed may be > 2**53 (float would round it)
+                if isinstance(v, bool):
                     raise ValueError
-                v = int(v)
+                if isinstance(v, float):
+                    if not v.is_integer():
+                        raise ValueError
+                    v = int(v)
+                elif not isinstance(v, int):
+                    v = int(str(v).strip())
             elif typ is float:
                 v = float(v)
                 if v != v or v in (float("inf"), float("-inf")):
@@ -335,15 +414,35 @@ def safe_name(name):
     return (stem[:80] + ext.lower()[:10]) if ext else stem[:80]
 
 
-def _same_content(a, b):
+def _same_content(a, b, linked_ok=False):
+    """b already holds a's bytes. The same file (a hard link made by an earlier publish) only counts when the caller
+    publishes by link (linked_ok): otherwise the working file may have been rewritten in place since, and the step that
+    shows b would change with it, so a fresh copy is published under the next name."""
     try:
         if os.path.samefile(a, b):
-            return True
+            return linked_ok
         if os.path.getsize(a) != os.path.getsize(b):
             return False
     except OSError:
         return False
     return _sha(a) == _sha(b)
+
+
+def _place_new(tmp, dest):
+    """Give the finished copy `tmp` the name `dest` without ever replacing a file: FileExistsError when dest exists."""
+    try:
+        os.link(tmp, dest)                 # atomic and no-clobber; tmp is removed by the caller
+        return
+    except FileExistsError:
+        raise
+    except OSError:
+        pass                               # a filesystem without hard links
+    if os.name == "nt":
+        os.rename(tmp, dest)               # Windows: never replaces (FileExistsError)
+        return
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    with os.fdopen(fd, "wb") as out, open(tmp, "rb") as src:
+        shutil.copyfileobj(src, out, 1 << 20)
 
 
 def _sha(path):
@@ -358,7 +457,8 @@ class Review:
     """One build on the review server. Every method returns True when the event was delivered."""
 
     def __init__(self, build_id, title=None, kind="model", project=None, expected_steps=None, *, url=None,
-                 media=None, status=None, restart=False, announce=True, tags=None, append=False, preview=None):
+                 media=None, status=None, restart=False, announce=True, tags=None, append=False, preview=None,
+                 link=False):
         self.build = str(build_id)
         self.title = title             # None: not sent (an existing build keeps its title; a new one is named by its id)
         self.kind = kind
@@ -371,6 +471,7 @@ class Review:
         # tags: sent with every announce; given groups replace the build's, other groups stay (server merge_tags)
         self.tags = normalize_tags(tags, load_registry(self.media)) if tags else None
         self.append = bool(append)     # steps carry no n: the server numbers them (a watcher that restarts)
+        self.link = bool(link)         # publish_file: hard-link instead of copy (only for files that never change)
         env_preview = (os.environ.get("FILM_REVIEW_PREVIEW") or "").strip().lower() not in ("off", "0", "no", "false")
         self.preview = env_preview if preview is None else bool(preview)
         self._preview_note = False
@@ -521,9 +622,14 @@ class Review:
                     pass
         return self.publish_file(path)
 
-    def publish_file(self, path):
-        """Hard-link or copy path into <media>/<build>/ -> the media-relative path, or None."""
+    def publish_file(self, path, link=None):
+        """Copy path into <media>/<build>/ -> the media-relative path, or None. A copy, not a hard link: a working file
+        rewritten in place later (a watcher's WIP image, a re-render) must not change a step that was already
+        published. link=True (or Review(link=True)) hard-links when the caller knows the file never changes (else
+        it is copied). Never overwrites: a different file with the same name goes to <name>-2, -3 ..."""
+        tmp = None
         try:
+            want_link = self.link if link is None else bool(link)
             src = os.path.abspath(path)
             if not os.path.isfile(src):
                 self._warn(f"no such file: {path}")
@@ -531,27 +637,45 @@ class Review:
             folder = self.media_dir()
             if os.path.dirname(src) == os.path.abspath(folder):     # already in place (e.g. bpy_snapshot)
                 return f"{self.build}/{os.path.basename(src)}"
-            name = safe_name(src)
-            stem, ext = os.path.splitext(name)
-            k = 1
-            while True:
+            stem, ext = os.path.splitext(safe_name(src))
+            for k in range(1, 10000):
+                name = f"{stem}{ext}" if k == 1 else f"{stem}-{k}{ext}"
                 dest = os.path.join(folder, name)
-                if not os.path.exists(dest):
-                    break
-                if _same_content(src, dest):
+                if os.path.lexists(dest):
+                    if _same_content(src, dest, want_link):
+                        return f"{self.build}/{name}"
+                    continue
+                try:
+                    if want_link:
+                        try:
+                            os.link(src, dest)
+                            return f"{self.build}/{name}"
+                        except FileExistsError:
+                            raise
+                        except OSError:
+                            want_link = False          # another drive: copy
+                    if tmp is None:                    # one copy, whatever name it ends up with
+                        fd, tmp = tempfile.mkstemp(prefix=".publish-", suffix=".part", dir=folder)
+                        with os.fdopen(fd, "wb") as out, open(src, "rb") as f:
+                            shutil.copyfileobj(f, out, 1 << 20)
+                        try:
+                            os.chmod(tmp, 0o644)       # mkstemp makes it 0600: the container must read it
+                        except OSError:
+                            pass
+                    _place_new(tmp, dest)
                     return f"{self.build}/{name}"
-                k += 1
-                name = f"{stem}-{k}{ext}"
-            tmp = dest + ".part"
-            try:
-                os.link(src, dest)
-            except OSError:
-                shutil.copyfile(src, tmp)
-                os.replace(tmp, dest)
-            return f"{self.build}/{name}"
+                except FileExistsError:                # another publisher took this name meanwhile: the next one
+                    continue
+            raise RuntimeError(f"no free name for {name} in {folder}")
         except Exception as e:
             self._failed(e)
             return None
+        finally:
+            if tmp:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
 
     # ------------------------------------------------------------------ transport
     def _post(self, ev):

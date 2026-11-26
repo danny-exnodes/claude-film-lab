@@ -18,21 +18,43 @@ export function registry() { return REG; }
 
 const SLUG = /^[a-z0-9][a-z0-9._-]{0,47}$/;
 const GROUP = /^[a-z][a-z0-9_]{0,23}$/;
+// Keys every plain object has ({}.constructor): never a group (server.py/client.py RESERVED_GROUPS refuse them too).
+export const RESERVED_GROUPS = new Set(['constructor', 'prototype', '__proto__', 'tostring', 'valueof',
+  'hasownproperty', 'isprototypeof', 'tolocalestring']);
+
+export function validGroup(g) { return GROUP.test(g || '') && !RESERVED_GROUPS.has(g); }
+
+// obj[key] only when it is obj's own property: tags and registries come from JSON, so tags.constructor is Object.
+export function own(obj, key) {
+  return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
+// The values of one group of a build's tags (an own array, else []).
+export function tagValues(tags, group) {
+  const v = own(tags, group);
+  return Array.isArray(v) ? v : [];
+}
+
+// A selection {group: Set(values)} without a prototype (sel.constructor is undefined).
+export function emptySel() { return Object.create(null); }
 
 export function groupLabel(group, reg = REG) {
-  return (reg.groups[group] && reg.groups[group].label) || group;
+  const g = own(reg.groups, group);
+  return (g && typeof g.label === 'string' && g.label) || group;
 }
 
 export function groupColor(group, reg = REG) {
-  const c = reg.groups[group] && reg.groups[group].color;
-  return /^#[0-9a-fA-F]{6}$/.test(c || '') ? c : '#8d9ab2';
+  const g = own(reg.groups, group);
+  const c = g && g.color;
+  return /^#[0-9a-fA-F]{6}$/.test(typeof c === 'string' ? c : '') ? c : '#8d9ab2';
 }
 
 // 'q01t03' -> 'Q1·T3' (labels_re), 'phuong-hoang' -> registry label or 'Phuong hoang'.
 export function tagLabel(group, value, reg = REG) {
-  const g = reg.groups[group];
-  if (g && g.values && g.values[value]) return g.values[value];
-  for (const [re, rep] of (g && g.labels_re) || []) {
+  const g = own(reg.groups, group);
+  const label = g && own(g.values, value);
+  if (typeof label === 'string' && label) return label;
+  for (const [re, rep] of (g && Array.isArray(g.labels_re) && g.labels_re) || []) {
     try { const r = new RegExp(re); if (r.test(value)) return value.replace(r, rep); } catch (e) { /* a bad pattern */ }
   }
   const s = String(value).replace(/[-_]+/g, ' ').trim();
@@ -54,7 +76,7 @@ export function tagPairs(tags, reg = REG, skip = []) {
   const out = [];
   for (const g of orderGroups(Object.keys(tags || {}), reg)) {
     if (skip.includes(g)) continue;
-    for (const v of tags[g] || []) out.push([g, v]);
+    for (const v of tagValues(tags, g)) out.push([g, v]);
   }
   return out;
 }
@@ -80,7 +102,7 @@ export function tagChips(tags, { skip = [], cls = 'tags' } = {}) {
 export function matches(build, sel) {
   for (const [g, vals] of Object.entries(sel || {})) {
     if (!vals || !vals.size) continue;
-    const have = ((build && build.tags) || {})[g] || [];
+    const have = tagValues(build && build.tags, g);
     if (!have.some((v) => vals.has(v))) return false;
   }
   return true;
@@ -91,8 +113,9 @@ export function facets(builds, reg = REG) {
   const counts = new Map();
   for (const b of builds) {
     for (const [g, vals] of Object.entries(b.tags || {})) {
+      if (!Array.isArray(vals)) continue;
       if (!counts.has(g)) counts.set(g, new Map());
-      for (const v of vals || []) counts.get(g).set(v, (counts.get(g).get(v) || 0) + 1);
+      for (const v of vals) counts.get(g).set(v, (counts.get(g).get(v) || 0) + 1);
     }
   }
   return orderGroups([...counts.keys()], reg).map((g) => [g, [...counts.get(g).entries()]
@@ -103,7 +126,7 @@ export function facets(builds, reg = REG) {
 export function groupBuilds(builds, group) {
   const by = new Map();
   for (const b of builds) {
-    const v = (((b.tags || {})[group]) || [])[0] || null;
+    const v = tagValues(b.tags, group)[0] || null;
     if (!by.has(v)) by.set(v, []);
     by.get(v).push(b);
   }
@@ -113,29 +136,29 @@ export function groupBuilds(builds, group) {
 // Dashboard state <-> hash query: 'st=active&t=kind:model,episode:q01t03&g=episode'.
 const STATUSES = ['all', 'active', 'done', 'failed'];
 export function parseState(query) {
-  const st = { status: 'all', sel: {}, group: '' };
+  const st = { status: 'all', sel: emptySel(), group: '' };
   for (const part of String(query || '').split('&')) {
     const i = part.indexOf('=');
     if (i < 0) continue;
     let k, v;
     try { k = decodeURIComponent(part.slice(0, i)); v = decodeURIComponent(part.slice(i + 1)); } catch (e) { continue; }
     if (k === 'st' && STATUSES.includes(v)) st.status = v;
-    else if (k === 'g' && GROUP.test(v)) st.group = v;
+    else if (k === 'g' && validGroup(v)) st.group = v;
     else if (k === 't') {
       for (const pair of v.split(',')) {
         const [g, val] = pair.split(':');
-        if (GROUP.test(g || '') && SLUG.test(val || '')) (st.sel[g] = st.sel[g] || new Set()).add(val);
+        if (validGroup(g) && SLUG.test(val || '')) (st.sel[g] = own(st.sel, g) || new Set()).add(val);
       }
     }
   }
   return st;
 }
 
-export function stateQuery({ status = 'all', sel = {}, group = '' } = {}) {
+export function stateQuery({ status = 'all', sel = emptySel(), group = '' } = {}) {
   const parts = [];
   if (status && status !== 'all') parts.push(`st=${status}`);
   const t = [];
-  for (const g of Object.keys(sel).sort()) for (const v of [...sel[g]].sort()) t.push(`${g}:${v}`);
+  for (const g of Object.keys(sel).sort()) for (const v of [...own(sel, g)].sort()) t.push(`${g}:${v}`);
   if (t.length) parts.push(`t=${t.join(',')}`);
   if (group) parts.push(`g=${group}`);
   return parts.join('&');

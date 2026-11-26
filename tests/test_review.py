@@ -643,7 +643,7 @@ class TestContainerFiles(unittest.TestCase):
         for name in ("server.py", "client.py", "review.py", "vendor_three.py", "monitor.py", "watch.py", "preview.py"):
             src = (REPO / "tools" / "review" / name).read_text(encoding="utf-8")
             mods = {m.split(".")[0] for m in re.findall(r"^\s*(?:import|from) ([\w.]+)", src, re.M)}
-            self.assertLessEqual(mods - stdlib - {"client", "vendor_three", "review"}, set(), name)
+            self.assertLessEqual(mods - stdlib - {"client", "vendor_three", "review", "monitor"}, set(), name)
 
 
 # ------------------------------------------------------------------ hooks of blender.py and comfy.py

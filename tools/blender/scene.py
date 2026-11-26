@@ -142,10 +142,16 @@ def build_asset(a, k, base_dir, seed, coll):
         ob.parent = root
         ob["film_role"] = "prim"
     else:
-        path = src if os.path.isabs(src) else os.path.join(base_dir, src)
+        blend = spec.blend_src(src)
+        is_blend = blend[0].lower().endswith(".blend")
+        path = blend[0] if is_blend else src
+        path = path if os.path.isabs(path) else os.path.join(base_dir, path)
         before = set(bpy.data.objects)
-        bpy.ops.import_scene.gltf(filepath=path)
-        new = [o for o in bpy.data.objects if o not in before]
+        if is_blend:
+            new = _append_blend(path, blend[1])
+        else:
+            bpy.ops.import_scene.gltf(filepath=path)
+            new = [o for o in bpy.data.objects if o not in before]
         root = presets._empty(a["id"], coll)
         for o in new:
             for c in list(o.users_collection):
@@ -168,8 +174,9 @@ def build_asset(a, k, base_dir, seed, coll):
     meshes = [o for o in _descendants(root) if o.type == "MESH"]
     if "fit" in a:
         _fit(root, meshes, a["fit"], coll)
-    for o in meshes:
+    for o in _descendants(root):                # hair curves too: they belong to the asset's mask
         o.pass_index = k
+    for o in meshes:
         if "color" in a and (not src.startswith("preset:") or o.get("film_role") in
                              ("mountain", "rock", "ground", "water", "foliage", "body", "tuft", "limb", "prim", "glb")):
             o["film_color"] = a["color"]
@@ -178,6 +185,22 @@ def build_asset(a, k, base_dir, seed, coll):
         if a.get("lines") is False:
             o["film_lines"] = False
     return root, rig, meshes
+
+
+def _append_blend(path, collection):
+    """Append the objects of a .blend (all of them, or those of one collection, nested collections included) with
+    their materials, modifiers, geometry nodes and hair curves. -> the new objects (not linked to a scene yet)."""
+    with bpy.data.libraries.load(path, link=False) as (src, dst):
+        if collection:
+            if collection not in src.collections:
+                raise RuntimeError(f"collection {collection!r} is not in {os.path.basename(path)} "
+                                   f"({', '.join(src.collections) or 'none'})")
+            dst.collections = [collection]
+        else:
+            dst.objects = list(src.objects)
+    if collection:
+        return list(dst.collections[0].all_objects)
+    return [o for o in dst.objects if o is not None]
 
 
 def _assign_action(objects, name):
@@ -497,6 +520,12 @@ def main():
     sc.render.image_settings.color_mode = "RGB"
     sc.render.image_settings.color_depth = "8"
     device = setup_engine(sc, engine, samples, seed)
+    if engine == "cycles" and cfg.get("adaptive"):          # noise threshold: fewer samples where the frame is clean
+        sc.cycles.use_adaptive_sampling = True
+        sc.cycles.adaptive_threshold = float(cfg["adaptive"])
+    if cfg.get("motion_blur"):
+        sc.render.use_motion_blur = True
+        sc.render.motion_blur_shutter = float(cfg["motion_blur"])
 
     coll = sc.collection
     built, masks = [], []
@@ -515,6 +544,12 @@ def main():
     cam.data.clip_end = max(1000.0, shot["depth_range"][1] * 4)
 
     ctx = looks.Context(sc, cfg, shot, engine, masks, H / 1080.0)
+    if "hdri" in shot["world"]:
+        ctx.hdri_path = spec.resolve_hdri(shot["world"]["hdri"], shot.get("asset_root"), base_dir)
+    for role, m in (shot.get("materials") or {}).items():
+        m = {"tex": m} if isinstance(m, str) else m
+        ctx.textures[role] = {"maps": spec.resolve_texture(m["tex"], shot.get("asset_root"), base_dir),
+                              "scale": float(m.get("scale", 4.0)), "displace": float(m.get("displace", 0.0))}
     looks.apply(ctx, shot["look"], [o for o in bpy.data.objects if o.type == "MESH"])
     outs = setup_compositor(sc, out, shot["passes"], masks, shot["depth_range"], float(cfg.get("grain", 0)), H)
 

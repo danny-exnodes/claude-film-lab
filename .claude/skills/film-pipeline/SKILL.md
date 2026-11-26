@@ -206,7 +206,7 @@ Việc của đạo diễn theo khâu:
 phiên local trên máy chủ lab** (Blender, GPU); phiên cloud chỉ làm phần chữ (kịch bản, `shots3d/*.json`, `ASSETS.md`) và
 kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quick` dòng `blender` phải `OK` trước khâu 4.
 - **Khâu 0:** nêu lựa chọn thứ tư cùng lượt: "model 3D render bằng Blender trên máy của anh/chị, 0 đồng, máy quay 3D
-  thật và bố cục nhất quán; cần phiên local". Style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`; xem thử bằng
+  thật và bố cục nhất quán; cần phiên local". Style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender`; xem thử bằng
   `blender.py lookbook` ở phiên local). `budget.yaml`: `images: 0`, `video_seconds: 0` (trừ khi chọn clip Seedance).
 - **Khâu 3:** `film-3d-artist` (miễn phí): model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json`.
 - **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm

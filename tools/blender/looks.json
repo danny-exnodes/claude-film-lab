@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Look ids for shot3d.json `look` and style.yaml `render.look` (engine: blender). tools/blender/looks.py builds each one (materials, lines, world, colour management); spec.py reads the ids from here. Colours are sRGB hex; world.paper / world.ink of a shot override paper / ink. samples = EEVEE TAA samples / Cycles samples (final, preview). lines: Freestyle ink lines in the beauty pass (line_px at 1080 lines tall, scaled with the frame). The line/depth/normal/mask control passes are the same for every look.",
+  "note": "Look ids for shot3d.json `look` and style.yaml `render.look` (engine: blender). tools/blender/looks.py builds each one (materials, lines, world, colour management); spec.py reads the ids from here. Colours are sRGB hex; world.paper / world.ink of a shot override paper / ink. samples = EEVEE TAA samples / Cycles samples (final, preview). lines: Freestyle ink lines in the beauty pass (line_px at 1080 lines tall, scaled with the frame). The line/depth/normal/mask control passes are the same for every look. materials \"keep\" = the physically based look (looks.py _apply_real): adaptive = Cycles noise threshold, motion_blur = shutter in frames, sun_strength = sun lamp strength unless world.sun_strength, view_look = AgX contrast look.",
   "looks": {
     "grey-layout": {
       "name": "Grey layout", "name_vi": "Khối xám dựng cảnh",
@@ -31,6 +31,14 @@
       "lines": true, "line_px": 1.5, "line_taper": true, "line_fade": 0.85, "steps": 0,
       "view": "Standard", "mist": true, "grain": 0.05,
       "samples": {"eevee": [16, 4], "cycles": [64, 16]}
+    },
+    "realistic": {
+      "name": "Realistic", "name_vi": "Chân thực",
+      "use": "physically based (Cycles): HDRI (world.hdri) or physical sky, sun lamp, the assets' own materials kept (glTF; .blend with hair curves and geometry nodes), PBR texture sets for presets from the shot's materials + asset_root; no lines",
+      "paper": "#BFC8D2", "ink": "#1A1A1A", "base": "#8A8378",
+      "lines": false, "materials": "keep", "view": "AgX", "view_look": "AgX - Medium High Contrast",
+      "mist": false, "grain": 0, "adaptive": 0.02, "motion_blur": 0.5, "sun_strength": 4.0,
+      "samples": {"eevee": [64, 16], "cycles": [256, 32]}
     }
   }
 }

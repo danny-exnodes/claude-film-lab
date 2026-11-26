@@ -77,11 +77,18 @@ Toạ độ của Blender: mét, **Z hướng lên**, mặt đất là mặt XY;
 Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.json`.
 
 - Gốc: `version` (= 1), `size` [w, h] (chẵn), `fps`, `seconds`, `seed`, `look`, `engine` (`eevee|cycles`), `world`,
-  `assets`, `camera`, `passes` (`depth, normal, line, mask`), `depth_range` [gần, xa], tuỳ chọn `samples`, `title`, `note`.
+  `assets`, `camera`, `passes` (`depth, normal, line, mask`), `depth_range` [gần, xa], tuỳ chọn `samples`, `title`, `note`,
+  `asset_root` (thư mục asset CC0, tương đối với file spec: `hdri/`, `textures/<id>/`, `models/`; vd.
+  `out/<project>/assets/`), `materials` (look `realistic`: vai trò preset `mountain, rock, ground, water, trunk, foliage,
+  prim` → id bộ texture trong `asset_root/textures/` hoặc thư mục, hoặc `{tex, scale, displace}`: `scale` mét mỗi ô lặp,
+  mặc định 4; `displace` mét, Cycles).
 - `world`: `paper`, `ink` (màu `#rrggbb`, đè màu của look), `mist` (0–1), `mist_range` [bắt đầu, hết] mét, `sun`
-  [độ cao, phương vị] (phương vị 0 = từ phía sau cảnh, 90 = từ bên phải, 180 = từ phía máy quay, 270 = từ bên trái).
+  [độ cao, phương vị] (phương vị 0 = từ phía sau cảnh, 90 = từ bên phải, 180 = từ phía máy quay, 270 = từ bên trái);
+  look `realistic`: `hdri` (id trong `asset_root/hdri/` hoặc đường dẫn `.hdr/.exr`; không có = trời vật lý theo `sun`),
+  `hdri_strength` (0–20, mặc định 1), `hdri_rot` (độ, xoay trời quanh Z), `sun_strength` (0–50; 0 = không đèn mặt trời).
 - `assets[]`: `id`, `src` = `preset:<id>` | `prim:<cube|sphere|ico|cylinder|cone|plane|torus>` | đường dẫn `.glb/.gltf`
-  (tương đối với file spec), `at`, `rot`, `scale`, `fit` (co asset cho cạnh lớn nhất bằng `fit` mét, đặt đứng trên z = 0),
+  | `<file>.blend` hoặc `<file>.blend#<Collection>` (append mọi object hoặc một collection, giữ vật liệu, modifier,
+  geometry nodes, hair curves; tương đối với file spec), `at`, `rot`, `scale`, `fit` (co asset cho cạnh lớn nhất bằng `fit` mét, đặt đứng trên z = 0),
   `color`, `ink` (0–1, độ đậm mực ở look ink-wash), `lines` (false = không nét mực), `mask`, `params` (tham số preset),
   `anim`: `action` (preset: `giot` có `idle, hop, walk, wave`; `pines` có `sway`; `.glb`: tên action trong file; không ghi `action` thì model `.glb` đứng yên),
   `path` [[t, [dx, dy, dz]], …] (độ lệch so với `at`), `ease`, `face_path` (quay mặt theo hướng đi, mặc định bật), `speed`.
@@ -100,6 +107,7 @@ Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.j
 | `clay` | đất nặn có màu của asset, ánh sáng mềm: turntable, duyệt asset (G2) |
 | `toon-ink` | tô phẳng ba tông + nét mực đặc trên giấy ấm |
 | `ink-wash` | bản 3D của `styles/thuy-mac`: giấy dó `#EFE6D3`, mực phân tầng theo bóng, vệt bút (披麻皴 trên núi, 斧劈皴 trên đá), mép loang, nét mảnh vuốt hai đầu nhạt dần theo xa, sương theo độ sâu và dưới chân núi, vân giấy |
+| `realistic` | chân thực (Cycles): trời HDRI (`world.hdri`) hoặc trời vật lý, đèn mặt trời ấm dần khi thấp, AgX Medium High Contrast, adaptive sampling 0,02, motion blur 0,5 khung; **giữ vật liệu của asset** (GLB quét, `.blend` có lông), preset nhận PBR theo `materials`; không nét. Style `chan-thuc-blender` |
 
 EEVEE lấy độ sáng bằng Shader to RGB (có bóng đổ). Cycles không có Shader to RGB nên ở ba look tô phẳng ánh sáng là N·L
 của mặt trời (không bóng đổ): bảng màu giữ nguyên, bóng đổ thì không.
@@ -117,6 +125,10 @@ seed`: đá tảng mặt vát), `pines` (`count, spread, height, seed`: thông t
 - `ink-wash-mountains.json`: ink-wash, push-in về phía Giọt giữa núi xa núi gần, hồ, đá, thông, sương; đủ bốn pass.
 - `giot-walk.json`: toon-ink, Giọt đi ngang (action `walk` + `path`), máy `track` theo.
 - `lookbook.json`: khung tĩnh có mọi preset, dùng cho `blender.py lookbook`.
+
+Look `realistic` không đổi vật liệu asset mang theo, chỉ thêm các AOV điều khiển (`film_normal`, `film_cover`,
+`film_m<k>`) nên pass depth/normal/line/mask vẫn có như mọi look. Đo 2026-11-26: 1920x1080, Cycles OptiX, 256 sample
+adaptive, núi + nước + đá quét GLB + thông `.blend` + HDRI ≈ 15 giây/khung.
 
 ## Thời gian đo được (RTX 5070 Ti, Blender 5.3, EEVEE)
 

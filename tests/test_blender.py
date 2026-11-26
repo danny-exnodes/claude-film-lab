@@ -83,7 +83,7 @@ class TestValidation(unittest.TestCase):
             self.assertIn(want, joined)
         d = shot()
         d["assets"][0]["src"] = "hero.fbx"
-        self.assertIn("assets[0].src: must be preset:<id>, prim:<shape> or a .glb/.gltf path", errs(d))
+        self.assertIn("assets[0].src: must be preset:<id>, prim:<shape>, a .glb/.gltf path or <file>.blend[#Collection]", errs(d))
 
     def test_preset_params(self):
         d = shot()
@@ -120,6 +120,51 @@ class TestValidation(unittest.TestCase):
             self.assertEqual(errs(d, str(tmp)), [])
             self.assertEqual(errs(d), [], "without base_dir the file is not looked up")
 
+    def test_blend_paths(self):
+        self.assertEqual(spec.blend_src("m/fox.blend#Fox"), ("m/fox.blend", "Fox"))
+        self.assertEqual(spec.blend_src("m/fox.blend"), ("m/fox.blend", None))
+        with helpers_tmp() as tmp:
+            d = shot()
+            d["assets"][1]["src"] = "models/fox.blend#Fox"
+            self.assertIn("assets[1].src: file not found: models/fox.blend#Fox", errs(d, str(tmp)))
+            (tmp / "models").mkdir()
+            (tmp / "models" / "fox.blend").write_bytes(b"BLENDER")
+            self.assertEqual(errs(d, str(tmp)), [])
+            d["assets"][1]["src"] = "models/fox.obj"
+            self.assertIn("a .glb/.gltf path or <file>.blend[#Collection]", "\n".join(errs(d)))
+
+    def test_realistic_world_and_materials(self):
+        with helpers_tmp() as tmp:
+            root = tmp / "assets"
+            (root / "hdri").mkdir(parents=True)
+            (root / "hdri" / "dawn_sky_4k.hdr").write_bytes(b"#?RADIANCE")
+            (root / "textures" / "wet_rock").mkdir(parents=True)
+            for n in ("wet_rock_diff_2k.jpg", "wet_rock_nor_gl_2k.png", "wet_rock_rough_2k.jpg", "wet_rock_disp_2k.png"):
+                (root / "textures" / "wet_rock" / n).write_bytes(b"x")
+            (root / "textures" / "no_colour").mkdir()
+            (root / "textures" / "no_colour" / "no_colour_rough_2k.jpg").write_bytes(b"x")
+            d = shot(look="realistic", engine="cycles", asset_root="assets",
+                     world={"hdri": "dawn_sky", "hdri_strength": 1.2, "hdri_rot": 90, "sun": [10, 80], "sun_strength": 3},
+                     materials={"rock": "wet_rock", "ground": {"tex": "wet_rock", "scale": 3, "displace": 0.05}})
+            self.assertEqual(errs(d, str(tmp)), [])
+            self.assertTrue(spec.resolve_hdri("dawn_sky", "assets", str(tmp)).endswith("dawn_sky_4k.hdr"))
+            maps = spec.resolve_texture("wet_rock", "assets", str(tmp))
+            self.assertEqual(set(maps), {"diff", "nor_gl", "rough", "disp"})
+            self.assertEqual(spec.resolve_texture("no_colour", "assets", str(tmp)), {}, "no colour map = no set")
+            bad = shot(look="realistic", world={"hdri": "dusk", "hdri_strength": 50, "sun_strength": -1},
+                       materials={"sky": "x", "rock": {"tex": "no_colour", "tint": 1}, "ground": 5})
+            joined = "\n".join(errs(bad))
+            for want in ("world.hdri: id 'dusk' needs asset_root", "world.hdri_strength: must be between 0 and 20",
+                         "world.sun_strength: must be between 0 and 50", "materials.sky: unknown role",
+                         "materials.rock.tint: unknown key", "materials.rock.tex: id 'no_colour' needs asset_root",
+                         "materials.ground: must be a texture id or folder"):
+                self.assertIn(want, joined)
+            bad = shot(asset_root="nowhere", world={"hdri": "dusk"}, materials={"rock": "no_colour"})
+            joined = "\n".join(errs(bad, str(tmp)))
+            for want in ("asset_root: folder not found: nowhere", "world.hdri: not found: dusk",
+                         "materials.rock.tex: no texture set with a colour map found for 'no_colour'"):
+                self.assertIn(want, joined)
+
     def test_camera_rules(self):
         cases = [
             ({"move": "dolly", "from": [0, 0, 1], "target": [0, 5, 1]}, "camera.to: dolly needs `to`"),
@@ -143,7 +188,7 @@ class TestValidation(unittest.TestCase):
 
     def test_look_ids_match_looks_json(self):
         looks = json.loads((BL / "looks.json").read_text(encoding="utf-8"))["looks"]
-        self.assertEqual(set(spec.look_ids()), {"grey-layout", "clay", "toon-ink", "ink-wash"})
+        self.assertEqual(set(spec.look_ids()), {"grey-layout", "clay", "toon-ink", "ink-wash", "realistic"})
         self.assertEqual(tuple(looks), spec.look_ids())
         for lid, cfg in looks.items():
             with self.subTest(look=lid):

@@ -165,13 +165,14 @@ status, base, engine: blender, render, palette`; không khóa của model ảnh 
 ```yaml
 engine: blender
 render:
-  look: ink-wash            # look của Blender: grey-layout | clay | toon-ink | ink-wash (tools/blender/looks.json khi có)
+  look: ink-wash            # look của Blender: grey-layout | clay | toon-ink | ink-wash | realistic (tools/blender/looks.json khi có)
   engine: eevee             # eevee (mặc định, cần GPU) | cycles
   line: 2.0                 # độ dày nét Line Art ở 1080p, 0 = không nét
   mist: 0.35                # sương theo độ sâu, 0–1
   palette: {paper: "#EFE6D3"}   # "#RRGGBB"
 ```
-Hai pack có sẵn: `styles/thuy-mac-blender/`, `styles/toon-3d-blender/` (draft); cách dùng:
+Ba pack có sẵn: `styles/thuy-mac-blender/`, `styles/toon-3d-blender/`, `styles/chan-thuc-blender/` (chân thực: Cycles,
+HDRI, PBR; draft); cách dùng:
 `.claude/skills/film-compose-shot/references/blender-method.md`.
 
 ## 4. Dự án (series) và tập

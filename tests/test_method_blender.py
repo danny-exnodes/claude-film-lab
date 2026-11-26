@@ -374,7 +374,7 @@ class SeedanceWithComfy(TmpDirCase, unittest.TestCase):
 
 
 class BlenderStyles(unittest.TestCase):
-    IDS = ["thuy-mac-blender", "toon-3d-blender"]
+    IDS = ["thuy-mac-blender", "toon-3d-blender", "chan-thuc-blender"]
 
     def test_packs_pass_clean(self):
         for sid in self.IDS:

@@ -11,6 +11,11 @@ Every material also writes the control AOVs that scene.py's compositor reads, wh
 Shading: EEVEE turns the light into a value with Shader to RGB (cast shadows included); Cycles has no Shader to RGB,
 so the light value there is the analytic sun term N·L (no cast shadows) — the looks keep their palette, not their
 shadows (research §B2).
+
+Look `realistic` (looks.json "materials": "keep") is physically based instead: the world is an HDRI (world.hdri, resolved
+by scene.py into ctx.hdri_path) or a physical sky, a sun lamp follows world.sun, the materials an asset brings (glTF,
+.blend: hair, geometry nodes) are kept and only get the control AOVs added, and preset/primitive meshes get a Principled
+material: a PBR texture set when the shot's `materials` names one for their role (ctx.textures), else a plain colour.
 """
 import math
 
@@ -84,6 +89,9 @@ class Context:
             self.mist_range = [max(near, far * 0.08), far]
         el, az = world.get("sun", [35.0, 120.0])
         self.sun = sun_vector(el, az)
+        self.sun_elev, self.sun_azim = float(el), float(az)
+        self.hdri_path = None                  # look realistic: set by scene.py from world.hdri
+        self.textures = {}                     # look realistic: role -> {"maps": {diff, nor_gl, ...}, "scale", "displace"}
         self._mats = {}
 
 
@@ -380,6 +388,176 @@ def material_for(ctx, look, role, color, ink=None, height=None):
     return ctx._mats[key]
 
 
+# ------------------------------------------------------------------ look realistic
+# Principled defaults per role when no texture set is given (sRGB colour of the object wins over the base colour)
+REAL_ROUGH = {"mountain": 0.85, "rock": 0.8, "trunk": 0.75, "foliage": 0.6, "ground": 0.9, "water": 0.04,
+              "prim": 0.55, "glb": 0.55}
+
+
+def _image(path, colour):
+    img = bpy.data.images.load(path, check_existing=True)
+    if not colour:
+        img.colorspace_settings.name = "Non-Color"
+    return img
+
+
+def _mat_real(ctx, role, color, ink, height):
+    mat, b = _new_material(f"film_real_{role}_{color.lstrip('#')}")
+    bsdf = b.n("ShaderNodeBsdfPrincipled")
+    out = b.n("ShaderNodeOutputMaterial")
+    b.link(bsdf.outputs[0], out.inputs["Surface"])
+    tex = ctx.textures.get(role) or {}
+    maps = tex.get("maps") or {}
+    if maps:
+        coord = b.n("ShaderNodeTexCoord")
+        mp = b.n("ShaderNodeMapping")
+        k = 1.0 / max(0.01, float(tex.get("scale", 4.0)))          # metres per tile -> object-space scale
+        mp.inputs["Scale"].default_value = (k, k, k)
+        b.link(coord.outputs["Object"], mp.inputs["Vector"])
+
+        def tex_node(key, colour):
+            node = b.n("ShaderNodeTexImage", projection="BOX", projection_blend=0.25)
+            node.image = _image(maps[key], colour)
+            b.link(mp.outputs["Vector"], node.inputs["Vector"])
+            return node
+        diff = tex_node("diff", True)
+        if "ao" in maps:
+            ao = tex_node("ao", False)
+            mul = b.n("ShaderNodeMix", data_type="RGBA", blend_type="MULTIPLY")
+            mul.inputs["Factor"].default_value = 0.6
+            b.link(diff.outputs["Color"], mul.inputs["A"])
+            b.link(ao.outputs["Color"], mul.inputs["B"])
+            b.link(mul.outputs["Result"], bsdf.inputs["Base Color"])
+        else:
+            b.link(diff.outputs["Color"], bsdf.inputs["Base Color"])
+        if "rough" in maps:
+            b.link(tex_node("rough", False).outputs["Color"], bsdf.inputs["Roughness"])
+        else:
+            bsdf.inputs["Roughness"].default_value = REAL_ROUGH.get(role, 0.6)
+        if "nor_gl" in maps:
+            nm = b.n("ShaderNodeNormalMap")
+            b.link(tex_node("nor_gl", False).outputs["Color"], nm.inputs["Color"])
+            b.link(nm.outputs["Normal"], bsdf.inputs["Normal"])
+        disp = float(tex.get("displace", 0.0))
+        if disp > 0 and "disp" in maps:
+            dn = b.n("ShaderNodeDisplacement")
+            dn.inputs["Scale"].default_value = disp
+            dn.inputs["Midlevel"].default_value = 0.5
+            b.link(tex_node("disp", False).outputs["Color"], dn.inputs["Height"])
+            b.link(dn.outputs[0], out.inputs["Displacement"])
+            if hasattr(mat, "displacement_method"):
+                mat.displacement_method = "BOTH"
+    else:
+        bsdf.inputs["Base Color"].default_value = rgba(color)
+        bsdf.inputs["Roughness"].default_value = REAL_ROUGH.get(role, 0.6)
+        if role == "water":
+            bsdf.inputs["Base Color"].default_value = rgba("#0E1A1C")
+            bsdf.inputs["IOR"].default_value = 1.33
+    _aovs(ctx, b)
+    return mat
+
+
+BUILD["realistic"] = _mat_real
+
+
+def _add_aovs(ctx, mat, done):
+    """Add the control AOVs to a material the asset brought (once per material); its shading is not touched."""
+    if mat is None or mat.name in done or not mat.use_nodes or mat.node_tree is None:
+        return
+    done.add(mat.name)
+    if any(n.type == "OUTPUT_AOV" and n.aov_name == "film_cover" for n in mat.node_tree.nodes):
+        return
+    b = NB(mat.node_tree)
+    b.x = -1600
+    _aovs(ctx, b)
+
+
+def _world_real(ctx):
+    sc = ctx.scene
+    world = bpy.data.worlds.new("film_world")
+    sc.world = world
+    nt = world.node_tree
+    for node in list(nt.nodes):
+        nt.nodes.remove(node)
+    b = NB(nt)
+    w = ctx.shot.get("world", {})
+    bg = b.n("ShaderNodeBackground")
+    if ctx.hdri_path:
+        coord = b.n("ShaderNodeTexCoord")
+        mp = b.n("ShaderNodeMapping")
+        mp.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(float(w.get("hdri_rot", 0.0))))
+        b.link(coord.outputs["Generated"], mp.inputs["Vector"])
+        env = b.n("ShaderNodeTexEnvironment")
+        env.image = bpy.data.images.load(ctx.hdri_path, check_existing=True)
+        b.link(mp.outputs["Vector"], env.inputs["Vector"])
+        b.link(env.outputs["Color"], bg.inputs["Color"])
+        bg.inputs["Strength"].default_value = float(w.get("hdri_strength", 1.0))
+    else:
+        sky = b.n("ShaderNodeTexSky")
+        for kind in ("MULTIPLE_SCATTERING", "NISHITA", "HOSEK_WILKIE"):
+            try:
+                sky.sky_type = kind
+                break
+            except TypeError:
+                continue
+        if hasattr(sky, "sun_elevation"):
+            sky.sun_elevation = math.radians(ctx.sun_elev)
+            sky.sun_rotation = math.radians(ctx.sun_azim)
+        if hasattr(sky, "sun_disc"):
+            sky.sun_disc = False                       # the sun lamp gives the sun; the sky only its light
+        b.link(sky.outputs["Color"], bg.inputs["Color"])
+        bg.inputs["Strength"].default_value = float(w.get("hdri_strength", 0.35))
+    out = b.n("ShaderNodeOutputWorld")
+    b.link(bg.outputs[0], out.inputs["Surface"])
+
+
+def sun_colour(elev):
+    """Sunlight tint by elevation: warm near the horizon, near white high up (linear RGB)."""
+    k = max(0.0, min(1.0, elev / 40.0))
+    return (1.0, 0.62 + 0.36 * k, 0.42 + 0.52 * k)
+
+
+def _sun_real(ctx):
+    w = ctx.shot.get("world", {})
+    strength = float(w.get("sun_strength", ctx.cfg.get("sun_strength", 4.0)))
+    if strength <= 0:
+        return None
+    light = bpy.data.lights.new("film_sun", "SUN")
+    light.energy = strength
+    light.angle = math.radians(0.53)
+    light.color = sun_colour(ctx.sun_elev)
+    ob = bpy.data.objects.new("film_sun", light)
+    ctx.scene.collection.objects.link(ob)
+    ob.rotation_euler = (-ctx.sun).to_track_quat("-Z", "Y").to_euler()
+    return ob
+
+
+def _apply_real(ctx, objects):
+    _colour(ctx, "realistic")
+    _world_real(ctx)
+    _sun_real(ctx)
+    ctx.scene.render.use_freestyle = False
+    done = set()
+    for ob in objects:
+        if ob.type != "MESH":
+            continue
+        role = ob.get("film_role", "prim")
+        kept = [m for m in ob.data.materials if m is not None]
+        if kept and role == "glb":
+            for m in kept:
+                _add_aovs(ctx, m, done)
+            continue
+        color = ob.get("film_color", ctx.cfg.get("base", "#8A8378"))
+        mat = material_for(ctx, "realistic", role, color, None, None)
+        ob.data.materials.clear()
+        ob.data.materials.append(mat)
+    for ob in bpy.data.objects:                     # hair curves and other non-mesh geometry the assets brought
+        if ob.type in ("CURVES", "CURVE", "SURFACE", "META", "FONT", "POINTCLOUD", "VOLUME") and \
+                getattr(ob, "data", None) is not None and hasattr(ob.data, "materials"):
+            for m in ob.data.materials:
+                _add_aovs(ctx, m, done)
+
+
 # ------------------------------------------------------------------ world, sun, colour, lines
 def _world(ctx, look):
     sc = ctx.scene
@@ -426,6 +604,11 @@ def _colour(ctx, look):
     vs = ctx.scene.view_settings
     vs.view_transform = ctx.cfg.get("view", "Standard")
     vs.look = "None"
+    if ctx.cfg.get("view_look"):
+        try:
+            vs.look = ctx.cfg["view_look"]
+        except TypeError:                          # look names differ between Blender versions: keep "None"
+            pass
     vs.exposure = 0.0
     vs.gamma = 1.0
     ctx.scene.display_settings.display_device = "sRGB"
@@ -521,6 +704,9 @@ def _lines(ctx, line_objects):
 
 def apply(ctx, look, objects):
     """World, sun, colour management, one material per (role, colour) and (when the look has lines) Freestyle."""
+    if ctx.cfg.get("materials") == "keep":
+        _apply_real(ctx, objects)
+        return
     _colour(ctx, look)
     _world(ctx, look)
     _sun(ctx, look)

@@ -61,8 +61,16 @@ CAMERA_DEFAULTS = {"lens": 35.0, "ease": "inout", "roll": 0.0, "amount": 0.3, "r
 MOVE_DEGREES = {"pan": 20.0, "tilt": 10.0, "orbit": 30.0}
 
 TOP_KEYS = {"version", "title", "note", "size", "fps", "seconds", "seed", "look", "engine", "world", "assets",
-            "camera", "passes", "depth_range", "samples"}
-WORLD_KEYS = {"paper", "ink", "mist", "mist_range", "sun"}
+            "camera", "passes", "depth_range", "samples", "asset_root", "materials"}
+WORLD_KEYS = {"paper", "ink", "mist", "mist_range", "sun", "hdri", "hdri_strength", "hdri_rot", "sun_strength"}
+# look `realistic`: preset roles that get a PBR texture set from `materials` (role -> texture id, folder or object)
+MATERIAL_ROLES = ("mountain", "rock", "ground", "water", "trunk", "foliage", "prim")
+MATERIAL_KEYS = {"tex", "scale", "displace"}
+# file name parts of a texture set folder (Poly Haven <id>_<map>_<res>.<ext>, ambientCG <id>_<Map>.<ext>), first match
+TEXTURE_MAPS = {"diff": ("_diff_", "_diffuse", "_albedo", "_basecolor", "_color"), "nor_gl": ("_nor_gl", "_normalgl"),
+                "rough": ("_rough", "_roughness"), "ao": ("_ao_", "_ambientocclusion"), "disp": ("_disp", "_displacement")}
+IMAGE_EXT = (".jpg", ".jpeg", ".png", ".exr", ".tif", ".tiff")
+HDRI_EXT = (".hdr", ".exr")
 ASSET_KEYS = {"id", "src", "at", "rot", "scale", "fit", "color", "ink", "params", "anim", "mask", "lines", "note"}
 ANIM_KEYS = {"action", "path", "ease", "face_path", "speed"}
 CAMERA_KEYS = {"move", "from", "to", "target", "target_to", "aim", "lens", "lens_to", "roll", "ease", "t", "amount",
@@ -121,7 +129,65 @@ def _src_kind(src):
         return "prim"
     if src.lower().endswith((".glb", ".gltf")):
         return "file"
+    if blend_src(src)[0].lower().endswith(".blend"):
+        return "blend"
     return None
+
+
+def blend_src(src):
+    """(path, collection name or None) of a `<file>.blend` or `<file>.blend#<Collection>` asset src."""
+    path, _, coll = str(src).partition("#")
+    return path, (coll or None)
+
+
+def _abs(base_dir, path):
+    return path if os.path.isabs(path) else os.path.join(base_dir or ".", path)
+
+
+def _is_path(ref):
+    return "/" in str(ref) or "\\" in str(ref)
+
+
+def resolve_hdri(ref, asset_root, base_dir):
+    """Path of an HDRI: a .hdr/.exr path (relative to the spec) or an id looked up as <asset_root>/hdri/<id>*.hdr|exr.
+    -> path or None."""
+    if str(ref).lower().endswith(HDRI_EXT):
+        path = _abs(base_dir, ref)
+        return path if os.path.isfile(path) else None
+    if not asset_root:
+        return None
+    folder = os.path.join(_abs(base_dir, asset_root), "hdri")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return None
+    for n in names:
+        if n.startswith(str(ref)) and n.lower().endswith(HDRI_EXT):
+            return os.path.join(folder, n)
+    return None
+
+
+def resolve_texture(ref, asset_root, base_dir):
+    """{map: path} of a PBR texture set (keys of TEXTURE_MAPS): a folder path (relative to the spec) or a texture id
+    under <asset_root>/textures/<id>/. -> dict, empty when the folder is missing or has no colour map."""
+    if _is_path(ref):
+        folder = _abs(base_dir, ref)
+    elif asset_root:
+        folder = os.path.join(_abs(base_dir, asset_root), "textures", str(ref))
+    else:
+        return {}
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return {}
+    found = {}
+    for key, parts in TEXTURE_MAPS.items():
+        for n in names:
+            low = n.lower()
+            if any(pt in low for pt in parts) and low.endswith(IMAGE_EXT):
+                found[key] = os.path.join(folder, n)
+                break
+    return found if "diff" in found else {}
 
 
 def validate(data, base_dir=None):
@@ -182,6 +248,28 @@ def validate(data, base_dir=None):
                 err.add("world.sun", "must be [elevation, azimuth] in degrees")
             elif not 0 <= s[0] <= 90:
                 err.add("world.sun", f"elevation must be between 0 and 90 (got {s[0]})")
+        if "hdri" in world:
+            h = world["hdri"]
+            if not (isinstance(h, str) and h):
+                err.add("world.hdri", "must be an HDRI id (with asset_root) or a .hdr/.exr path")
+            elif not h.lower().endswith(HDRI_EXT) and not data.get("asset_root"):
+                err.add("world.hdri", f"id {h!r} needs asset_root (or give a .hdr/.exr path)")
+            elif base_dir is not None and resolve_hdri(h, data.get("asset_root"), base_dir) is None:
+                err.add("world.hdri", f"not found: {h}")
+        if "hdri_strength" in world:
+            _range(err, "world.hdri_strength", world["hdri_strength"], 0, 20)
+        if "hdri_rot" in world:
+            _range(err, "world.hdri_rot", world["hdri_rot"], -360, 360)
+        if "sun_strength" in world:
+            _range(err, "world.sun_strength", world["sun_strength"], 0, 50)
+    if "asset_root" in data:
+        r = data["asset_root"]
+        if not (isinstance(r, str) and r):
+            err.add("asset_root", "must be a folder path (relative to the spec)")
+        elif base_dir is not None and not os.path.isdir(_abs(base_dir, r)):
+            err.add("asset_root", f"folder not found: {r}")
+    if "materials" in data:
+        _validate_materials(err, data["materials"], data.get("asset_root"), base_dir)
 
     seconds = data.get("seconds", DEFAULTS["seconds"]) if _num(data.get("seconds", 5)) else DEFAULTS["seconds"]
     ids = _validate_assets(err, data.get("assets"), base_dir, seconds)
@@ -201,6 +289,34 @@ def validate(data, base_dir=None):
         if not (_vec(dr, 2) and 0 < dr[0] < dr[1]):
             err.add("depth_range", "must be [near, far] metres with 0 < near < far")
     return list(err)
+
+
+def _validate_materials(err, mats, asset_root, base_dir):
+    if not isinstance(mats, dict):
+        err.add("materials", f"must be an object role -> texture ({', '.join(MATERIAL_ROLES)})")
+        return
+    for role, m in mats.items():
+        p = f"materials.{role}"
+        if role not in MATERIAL_ROLES:
+            err.add(p, f"unknown role (one of {', '.join(MATERIAL_ROLES)})")
+            continue
+        if isinstance(m, str):
+            m = {"tex": m}
+        if not isinstance(m, dict):
+            err.add(p, "must be a texture id or folder, or {tex, scale, displace}")
+            continue
+        _unknown(err, m, MATERIAL_KEYS, p)
+        tex = m.get("tex")
+        if not (isinstance(tex, str) and tex):
+            err.add(f"{p}.tex", "missing (a texture id under asset_root/textures/ or a folder path)")
+        elif not _is_path(tex) and not asset_root:
+            err.add(f"{p}.tex", f"id {tex!r} needs asset_root (or give a folder path)")
+        elif base_dir is not None and not resolve_texture(tex, asset_root, base_dir):
+            err.add(f"{p}.tex", f"no texture set with a colour map found for {tex!r}")
+        if "scale" in m:
+            _range(err, f"{p}.scale", m["scale"], 0.01, 1000)
+        if "displace" in m:
+            _range(err, f"{p}.displace", m["displace"], 0, 50)
 
 
 def _validate_assets(err, assets, base_dir, seconds):
@@ -226,7 +342,7 @@ def _validate_assets(err, assets, base_dir, seconds):
         if "src" not in a:
             err.add(f"{p}.src", "missing")
         elif kind is None:
-            err.add(f"{p}.src", "must be preset:<id>, prim:<shape> or a .glb/.gltf path")
+            err.add(f"{p}.src", "must be preset:<id>, prim:<shape>, a .glb/.gltf path or <file>.blend[#Collection]")
         elif kind == "preset":
             name = src[7:]
             if name not in PRESETS:
@@ -234,8 +350,8 @@ def _validate_assets(err, assets, base_dir, seconds):
         elif kind == "prim":
             if src[5:] not in PRIMS:
                 err.add(f"{p}.src", f"unknown primitive {src[5:]!r} ({', '.join(PRIMS)})")
-        elif kind == "file" and base_dir is not None:
-            path = src if os.path.isabs(src) else os.path.join(base_dir, src)
+        elif kind in ("file", "blend") and base_dir is not None:
+            path = _abs(base_dir, blend_src(src)[0] if kind == "blend" else src)
             if not os.path.isfile(path):
                 err.add(f"{p}.src", f"file not found: {src}")
         for k in ("at", "rot"):

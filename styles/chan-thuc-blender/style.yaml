@@ -1,0 +1,23 @@
+# Chân thực Blender (Realistic, Blender 3D) – style pack render bằng Blender (engine: blender), schema: docs/CONVENTIONS.md §3.
+# Cho tập method: blender cần hình chân thực: Cycles, trời HDRI, vật liệu PBR (texture CC0 + model quét trong
+# out/<project>/assets/), model có lông (hair curves trong .blend). Không model ảnh, không trả tiền. Bảng màu lấy từ
+# styles/thuy-mac (chỉ cho chữ trên hình và triện). Hướng dẫn: .claude/skills/film-compose-shot/references/blender-method.md
+id: chan-thuc-blender
+name: Chân thực Blender
+name_en: Realistic (Blender 3D)
+status: draft
+base: null
+engine: blender
+render:
+  look: realistic         # look của Blender (tools/blender/looks.json): Cycles, HDRI/trời vật lý, PBR, AgX
+  engine: cycles          # cycles (OptiX trên RTX); eevee chỉ để thử bố cục
+  line: 0                 # không nét
+  mist: 0                 # sương bằng compose (mist-bands) hoặc volume trong cảnh, không sương theo độ sâu
+  palette: {ink: '#1A1714', paper: '#EFE6D3', ochre: '#C89A5A'}
+palette: {ink: '#1A1714', grey: '#8C8378', paper: '#EFE6D3', ochre: '#C89A5A', accent: '#B02E22'}
+motion: [mist-bands, embers, sun-glow, smoke]
+sound:
+  scale: D minor pentatonic
+  instruments: [plucked zither, end-blown flute, frame drum, small gong, bowed drone]
+  notes: Như thuy-mac (cùng series); tiếng động theo chất liệu thật của cảnh (đá ướt, nước, gió, lông vũ).
+type: {latin: Cormorant Garamond, cjk: Noto Serif CJK TC}

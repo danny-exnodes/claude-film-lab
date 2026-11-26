@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-26
+
 ### Đợt issue #52–#65: thiết kế sinh vật, hàng đợi GPU, Qwen-Image, review có chip tag (2026-11-26)
 - Cổng thiết kế sinh vật (khâu 3a, #52): `ICONOGRAPHY.md` mỗi sinh vật, 2–3 concept Qwen-Image local, người dùng chọn rồi
   mới dựng 3D; bảng `## Sinh vật của tập` trong `EPISODE.md` và khoá `owner_refs` trong `SERIES.md` (xin ảnh sách của chủ
@@ -567,7 +569,8 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.1.0...v1.2.0

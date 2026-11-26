@@ -1133,11 +1133,14 @@ class TestQwenImage(ComfyCase):
         self.assertEqual([s[1].split(" · ")[0] for s in steps], ["step 1/4", "step 2/4", "step 3/4", "step 4/4"])
         self.assertEqual([round(s[0], 2) for s in steps], [0.25, 0.5, 0.75, 0.99])
         self.assertTrue(all(c.kwargs.get("force") for c in hook.update.call_args_list if c.args[1].startswith("step ")))
-        (st,) = hook.rv.step.call_args_list
-        self.assertEqual(st.args[0], "phuong-hoang_v01")
-        self.assertEqual(st.kwargs["image"], self.png)
-        self.assertEqual(st.kwargs["stats"]["engine"], "comfy:qwen-image")
-        self.assertNotIn("prompt", json.dumps(st.kwargs["stats"]), "the public page never gets the prompt")
+        last = [c for c in hook.update.call_args_list if c.args[1].startswith("step 4/4")][0]
+        self.assertEqual((last.kwargs["step"], last.kwargs["steps"]), (4, 4))
+        (im,) = hook.image.call_args_list
+        self.assertEqual(im.args, (self.png, "phuong-hoang_v01"))
+        self.assertEqual({k: im.kwargs[k] for k in ("seed", "model", "sampler_steps", "width", "height")},
+                         {"seed": 11, "model": "comfy:qwen-image", "sampler_steps": 4, "width": 1664, "height": 928})
+        self.assertEqual(im.kwargs["prompt"], "a mythic phoenix of ink and fire, concept sheet")
+        hook.rv.step.assert_not_called()
         hook.finish.assert_called_once()
         self.assertEqual(hook.finish.call_args.args[0], [])
 
@@ -1167,6 +1170,9 @@ class TestQwenImage(ComfyCase):
         self.assertEqual(types[-3:], ["step", "job", "done"])
         step = events[-3]
         self.assertEqual((step["label"], step["image"]), ("phuong-hoang_v01", "concept-a/phuong-hoang_v01.png"))
+        self.assertEqual((step["seed"], step["sampler_steps"], step["workflow"], step["prompt"]),
+                         (11, 3, "qwen-t2i", "a mythic phoenix of ink and fire, concept sheet"))
+        self.assertEqual(events[0]["tags"]["engine"], ["comfy-qwen"])
         self.assertEqual((self.tmp / "media" / "concept-a" / "phuong-hoang_v01.png").read_bytes(), PNG)
         msgs = [e.get("message", "") for e in events if e["type"] == "job"]
         self.assertTrue(any(m.startswith("step 3/3") for m in msgs), msgs)
@@ -1178,17 +1184,21 @@ class TestQwenImage(ComfyCase):
         calls = []
         client = self.tmp / "client.py"
         client.write_text("import json, os\n"
-                          "def job_hook(build, tool, kind='render', **kw):\n"
+                          "def path_tags(*paths):\n"
+                          "    return {'project': 'shk', 'episode': 'q01t03'}\n"
+                          "def job_hook(build, tool, kind='render', tags=None, label=None, **kw):\n"
                           "    with open(os.environ['HOOK_LOG'], 'a') as f:\n"
-                          "        f.write(json.dumps([build, tool, kind]) + '\\n')\n"
+                          "        f.write(json.dumps([build, tool, kind, tags, label]) + '\\n')\n"
                           "    return None\n", encoding="utf-8")
         log = self.tmp / "hook.log"
         import argparse
         with mock.patch.object(comfy, "REVIEW_CLIENT", str(client)), mock.patch.dict(os.environ, {"HOOK_LOG": str(log)}):
-            comfy.review_hook(argparse.Namespace(review="concept-a", dry_run=False), "image")
-            comfy.review_hook(argparse.Namespace(review="clip-a", dry_run=False))
+            comfy.review_hook(argparse.Namespace(review="concept-a", dry_run=False, workflow="qwen-t2i"), "image")
+            comfy.review_hook(argparse.Namespace(review="clip-a", dry_run=False, workflow="h3-i2v"))
         calls = [json.loads(l) for l in log.read_text().splitlines()]
-        self.assertEqual(calls, [["concept-a", "comfy", "image"], ["clip-a", "comfy", "clip"]])
+        tag = {"project": "shk", "episode": "q01t03"}
+        self.assertEqual(calls, [["concept-a", "comfy", "image", dict(tag, engine="comfy-qwen"), "qwen-t2i"],
+                                 ["clip-a", "comfy", "clip", dict(tag, engine="comfy-h3"), "h3-i2v"]])
 
     def test_gpu_lock_is_taken_and_a_busy_gpu_refuses(self):
         f = self.server()

@@ -792,7 +792,9 @@ def review_hook(a, kind="clip"):
         sp = importlib.util.spec_from_file_location("film_review_client", REVIEW_CLIENT)
         mod = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(mod)
-        return mod.job_hook(bid, "comfy", kind)
+        tags = dict(getattr(mod, "path_tags", lambda *_: {})(getattr(a, "out", None), getattr(a, "ledger", None)),
+                    engine="comfy-qwen" if kind == "image" else "comfy-h3")
+        return mod.job_hook(bid, "comfy", kind, tags=tags, label=getattr(a, "workflow", None))
     except Exception as e:
         warn(f"review publishing off ({type(e).__name__}: {e})")
         return None
@@ -1334,7 +1336,8 @@ def run_image(a, wid, template, meta, wf_sha):
         for v, m in steps.drain():
             print(f"step {v}/{m} elapsed {int(el)}s", flush=True)
             if hook and m:
-                hook.update(min(0.99, v / m), f"step {v}/{m} · {int(el)} s", force=True)
+                hook.update(min(0.99, v / m), f"step {v}/{m} · {int(el)} s", force=True, step=v, steps=m,
+                            eta=round(el / v * (m - v), 1) if v else None)
 
     try:
         try:
@@ -1433,9 +1436,11 @@ def run_image(a, wid, template, meta, wf_sha):
         write_json_atomic(a.out + ".json", sidecar)
         final("ok", "", usage)
         if hook:
-            hook.rv.step(os.path.splitext(os.path.basename(a.out))[0], image=a.out,
-                         stats={"engine": model, "size": f"{w}x{h}", "steps": plan["steps"], "cfg": plan["cfg"],
-                                "seed": plan["seed"], "turbo": plan["turbo"], "gpu_s": gpu})
+            # The gallery of the review build (#64): the prompt is shown there on purpose (the owner picks concepts
+            # by it); the client scrubs paths out of it. Nothing else of the run leaves the ledger/sidecar.
+            hook.image(a.out, os.path.splitext(os.path.basename(a.out))[0], prompt=prompt, seed=plan["seed"],
+                       model=model + (" turbo" if plan["turbo"] else ""), sampler_steps=plan["steps"], seconds=gpu,
+                       width=w, height=h)
             hook.finish([], gpu_s=gpu, message=f"{gpu:g} GPU s")
         print(f"saved {a.out} ({w}x{h}, {gpu:g} GPU s) + {os.path.basename(a.out)}.json")
         return 0

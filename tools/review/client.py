@@ -166,6 +166,38 @@ def slug(value):
     return s if s and TAG_VALUE.match(s) else None
 
 
+_EP_SEG = re.compile(r"^(?:(ep[0-9]{2,3})|q([0-9]{2})-?t([0-9]{2}))(?:-|$)")
+_SHOT_SEG = re.compile(r"(?:^|[_-])(s[0-9]{2,3})(?=[_.-]|$)")
+
+
+def path_tags(*paths):
+    """Best-effort project / episode / shot tags from lab paths, for blender.py and comfy.py --review:
+    out/<project>/<episode>/..., projects/<project>/<episode>-<slug>/..., <id>_s21_h3_v01.mp4, shots3d/s21.json.
+    Episode folders ep01 / q01t03 / q01-t03-<slug>; a tag already found by an earlier path wins. Never raises."""
+    tags = {}
+    for p in paths:
+        try:
+            parts = [x for x in re.split(r"[\\/]+", str(p or "")) if x and x not in (".", "..")]
+        except Exception:
+            continue
+        low = [x.lower() for x in parts]
+        for root in ("out", "projects"):
+            if root in low[:-1]:
+                i = len(low) - 1 - low[::-1].index(root)
+                if i + 1 < len(low) - 1 and not low[i + 1].startswith(("_", ".")):
+                    tags.setdefault("project", low[i + 1])
+        for seg in low[:-1]:
+            m = _EP_SEG.match(seg)
+            if m:
+                tags.setdefault("episode", m.group(1) or f"q{m.group(2)}t{m.group(3)}")
+                break
+        if low:
+            m = _SHOT_SEG.search(os.path.splitext(low[-1])[0])
+            if m:
+                tags.setdefault("shot", m.group(1))
+    return tags
+
+
 def load_registry(media=None):
     """{group: {...}} of tags.json merged with <media>/_tags.json (project labels). {} when unreadable."""
     groups = {}

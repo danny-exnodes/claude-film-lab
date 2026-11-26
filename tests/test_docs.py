@@ -28,10 +28,7 @@ DOC_SKIP = ("docs/BACKLOG.md",)
 PREFIXES = (".claude", "tools", "docs", "lambda", "tests", "templates", "styles", "formats")
 
 # "<kind>:<item>" -> reason. Kinds: path, subcommand (<tool> <name>), option (<tool> <--flag>).
-ALLOW = {
-    "path:tools/gpu_run.py": "lab-wide GPU queue of issue #57, built on a parallel branch merged with this one; "
-                             "drop this entry once tools/gpu_run.py is in the tree",
-}
+ALLOW = {}
 
 KNOWN_AGENT_TOOLS = {"Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebSearch", "WebFetch",
                      "NotebookEdit", "TodoWrite", "Agent", "Task", "Skill"}

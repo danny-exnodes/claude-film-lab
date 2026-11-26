@@ -329,8 +329,10 @@ def _contiguous(frames):
 
 
 # ------------------------------------------------------------------ review hook (tools/review/client.py)
-def review_hook(a):
-    """A JobHook when --review BUILD or $FILM_REVIEW_BUILD is set (never on --dry-run), else None. Never raises."""
+def review_hook(a, **extra_tags):
+    """A JobHook when --review BUILD or $FILM_REVIEW_BUILD is set (never on --dry-run), else None. Never raises.
+    Tags (tools/review/tags.json): engine blender, the --look, project/episode/shot from the spec and --out paths,
+    plus extra_tags (turntable: kind turntable, subject <asset>)."""
     bid = (getattr(a, "review", None) or os.environ.get("FILM_REVIEW_BUILD") or "").strip()
     if not bid or getattr(a, "dry_run", False):
         return None
@@ -338,7 +340,12 @@ def review_hook(a):
         sp = importlib.util.spec_from_file_location("film_review_client", REVIEW_CLIENT)
         mod = importlib.util.module_from_spec(sp)
         sp.loader.exec_module(mod)
-        return mod.job_hook(bid, "blender", "render")
+        tags = dict(getattr(mod, "path_tags", lambda *_: {})(getattr(a, "spec", None), getattr(a, "out", None)),
+                    engine="blender")
+        if getattr(a, "look", None):
+            tags["look"] = a.look
+        tags.update({k: v for k, v in extra_tags.items() if v})
+        return mod.job_hook(bid, "blender", "render", tags=tags)
     except Exception as e:
         print(f"blender: review publishing off ({type(e).__name__}: {e})", file=sys.stderr)
         return None
@@ -620,8 +627,8 @@ def cmd_turntable(a):
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
     if not ff:
         extra += ["--mp4", mp4]
-    hook = review_hook(a)
     stem = os.path.splitext(asset_label(a.asset).replace("preset:", "").split("#")[0])[0]
+    hook = review_hook(a, kind="turntable", subject=stem)
 
     def work():
         info = render_into(path, a.out, extra, data["engine"], a, keep=("turntable.json",), hook=hook)

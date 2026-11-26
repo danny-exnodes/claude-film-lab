@@ -201,6 +201,14 @@ class TestClientTags(TmpDirCase, unittest.TestCase):
         self.media = self.tmp / "media"
         client._TAG_WARNED.clear()
 
+    def test_path_tags_from_lab_paths(self):
+        self.assertEqual(client.path_tags("out/son-hai-kinh/q01t03/clips/x_s21_h3_v01.mp4"),
+                         {"project": "son-hai-kinh", "episode": "q01t03", "shot": "s21"})
+        self.assertEqual(client.path_tags("projects/shk/q01-t03-phuong/shots3d/s07.json", "out/shk/q01t03/renders3d"),
+                         {"project": "shk", "episode": "q01t03", "shot": "s07"})
+        self.assertEqual(client.path_tags(r"D:\lab\out\shk\ep01\ledger.csv"), {"project": "shk", "episode": "ep01"})
+        self.assertEqual(client.path_tags("out/_comfy/x.png", None, "concepts/huy_v01.png"), {})
+
     def test_tags_are_normalised_and_unknown_ones_only_warn(self):
         err = io.StringIO()
         with redirect_stderr(err):

@@ -1071,6 +1071,55 @@ class TestSave(SaveCase):
         self.assertIn("--from-file", err)
         self.assertFalse((self.pd / "ep01-bac-thi" / "x.md").exists())
 
+    def test_transcript_outside_the_store_reads_only_its_own_session_folder(self):
+        """A --transcript kept outside the Claude store: a file the tool result names is read only from that
+        transcript's <session>/tool-results (subagent: the session's), never from the folders above it (a drive root)."""
+        data = b"# tap 4\n"
+        kept = self.tmp / "kept" / "sess"
+        kept.mkdir(parents=True)
+        mine = kept / "abc" / "tool-results" / "mcp-claude_ai_Google_Drive-blob-1-mine.md"
+        mine.parent.mkdir(parents=True)
+        mine.write_bytes(data)
+        above = self.tmp / "kept" / "mcp-claude_ai_Google_Drive-blob-2-above.md"     # old rule: dirname(dirname(t))
+        above.write_bytes(data)
+        t = kept / "abc.jsonl"
+        t.write_text("".join(json.dumps(r) + "\n" for r in
+                             self.blob_result("toolu_FAKE_71", "FAKE-MINE-0071", mine)
+                             + self.blob_result("toolu_FAKE_72", "FAKE-ABOV-0072", above)))
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-MINE-0071", "--to", "ep01-bac-thi/a.md", "--size", str(len(data)),
+                                   "--transcript", str(t))
+        self.assertEqual(code, 0, err)
+        code, _, err = self.save("--id", "FAKE-ABOV-0072", "--to", "ep01-bac-thi/b.md", "--size", str(len(data)),
+                                 "--transcript", str(t))
+        self.assertEqual(code, 2, err)
+        self.assertIn("outside the Claude transcript store", err)
+        self.assertIn("--from-file", err)
+        self.assertFalse((self.pd / "ep01-bac-thi" / "b.md").exists())
+        roots = ds.store_roots(str(t))
+        self.assertNotIn(os.path.realpath(str(self.tmp / "kept")), roots)
+        self.assertIn(os.path.join(os.path.realpath(str(kept)), "abc", "tool-results"), roots)
+        sub = ds.store_roots(str(kept / "abc" / "subagents" / "agent-x.jsonl"))
+        self.assertIn(os.path.join(os.path.realpath(str(kept)), "abc", "tool-results"), sub)
+        top = os.path.abspath(os.sep)
+        for r in ds.store_roots(os.path.join(top, "t.jsonl")):                    # a transcript at a drive root
+            self.assertNotEqual(os.path.normcase(r.rstrip("\\/")), os.path.normcase(top.rstrip("\\/")), r)
+        # a persisted (large) result outside the allowed folders is refused with a reason, not silently skipped
+        big = self.tmp / "kept" / "toolu_FAKE_73.txt"
+        big.write_text(json.dumps({"id": "FAKE-BIGO-0073", "content": base64.b64encode(data).decode()}))
+        t2 = kept / "abd.jsonl"
+        t2.write_text("".join(json.dumps(r) + "\n" for r in (
+            {"type": "assistant", "timestamp": "2026-11-26T09:00:00Z", "message": {"content": [
+                {"type": "tool_use", "id": "toolu_FAKE_73", "name": "mcp__x__download_file_content",
+                 "input": {"fileId": "FAKE-BIGO-0073"}}]}},
+            {"type": "user", "timestamp": "2026-11-26T09:00:01Z", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "toolu_FAKE_73", "content": [{"type": "text", "text":
+                 f"<persisted-output>\nOutput too large (2KB). Full output saved to: {big}\n</persisted-output>"}]}]}})))
+        code, _, err = self.save("--id", "FAKE-BIGO-0073", "--to", "ep01-bac-thi/c.md", "--size", str(len(data)),
+                                 "--transcript", str(t2))
+        self.assertEqual(code, 2, err)
+        self.assertIn("outside the Claude transcript store and the transcript's session folder", err)
+
     def test_separately_sent_without_a_file_hints_from_file(self):
         rec = self.blob_result("toolu_FAKE_64", "FAKE-SEP-0064", "x")
         rec[1]["message"]["content"][0]["content"] = rec[1]["message"]["content"][0]["content"][1:]   # JSON part only

@@ -1119,9 +1119,16 @@ def meta_of(d):
 
 
 def store_roots(transcript):
-    """Folders a file named by a tool result may be read from: the Claude transcript store, and the folder two
-    levels above the transcript (the store of a --transcript file kept elsewhere)."""
-    return {os.path.realpath(claude_projects_dir()), os.path.realpath(os.path.dirname(os.path.dirname(transcript)))}
+    """Folders a file named by a tool result may be read from: the Claude transcript store, and the transcript's own
+    session folder <dir>/<session>/tool-results (a subagent's <session>/subagents/x.jsonl: <session>/tool-results),
+    for a --transcript file kept outside the store. Never a whole drive or the folder above the transcript."""
+    t = os.path.realpath(transcript)
+    d = os.path.dirname(t)
+    roots = {os.path.realpath(claude_projects_dir()),
+             os.path.join(d, os.path.splitext(os.path.basename(t))[0], "tool-results")}
+    if os.path.basename(d) == "subagents":
+        roots.add(os.path.join(os.path.dirname(d), "tool-results"))
+    return roots
 
 
 def native_path(p):
@@ -1198,6 +1205,13 @@ def result_hit(block, fid, transcript, n, ts, mtime):
         got = payload_of_text(text, fid, transcript)
         if got:
             return Hit(transcript, n, ts, mtime, b64=got[0], meta=got[1])
+    for text in texts:
+        m = RE_PERSISTED.search(text)
+        if m and escapes(native_path(m.group(1)), store_roots(transcript)):
+            return Hit(transcript, n, ts, mtime,
+                       error=f"Claude Code saved the result to {native_path(m.group(1))}, outside the Claude transcript "
+                             "store and the transcript's session folder: not read (decode that file yourself and "
+                             "copy it with --from-file <file> --size <Drive fileSize> if you trust it)")
     return Hit(transcript, n, ts, mtime, error="the result has no base64 \"content\"")
 
 

@@ -90,6 +90,8 @@ Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho
 - `shots3d/`: `^s(\d{2}|\d{3})\.json$`; `renders3d/`: thư mục `^(s(\d{2}|\d{3})(_(preview|keys))?|turntable-[a-z0-9][a-z0-9_-]*)(_v\d{2})?$`
   (tên khác → WARN). Nội dung một render: `beauty/0001.png…`, `depth/`, `normal/`, `line/`, `mask/<asset>/`, `beauty.mp4`,
   `render.json` (`tools/blender/README.md`)
+- `graded/`: render đã grade bằng `tools/compose/grade.py`, `s<NN>[_v<NN>]/` (chuỗi PNG, cùng tên khung với `beauty/`)
+  hoặc `s<NN>[_v<NN>].mp4`; dựng lại được từ render + khối `grade:`, không vào gói shot
 
 Plate tư thế của `method: layers` (shot có `pose-cycle`): mã lớp `L4b`, `L4c`… (`L4` là tư thế gốc), file
 `<id>_s<NN>_L4b_<chủ-thể>_v<NN>.png`; cùng khung vẽ, cùng điểm neo chân và cùng cách tách nền với `L4` (`matte.py`
@@ -174,6 +176,17 @@ render:
 Ba pack có sẵn: `styles/thuy-mac-blender/`, `styles/toon-3d-blender/`, `styles/chan-thuc-blender/` (chân thực: Cycles,
 HDRI, PBR; draft); cách dùng:
 `.claude/skills/film-compose-shot/references/blender-method.md`.
+
+**Grade (`grade:`, tuỳ chọn, mọi engine).** Tham số của `tools/compose/grade.py`: grade hai lớp (cảnh / chủ thể theo pass
+mask) áp lên khung đã render ở khâu 7–10; thiếu khóa = không đổi gì. Khóa và khoảng: `blender-method.md` §7; khóa lạ hay
+ngoài khoảng là ERROR của `check_episode.py style`.
+```yaml
+grade:
+  seed: 7                   # vân giấy, cố định
+  scene:   {saturation: {...}, keep_red: {...}, hue_pull: {<tên>: {to: "#RRGGBB", amount}}, tone: {...},
+            split: {...}, mist: {...}, paper: {...}, vignette: {...}}
+  subject: {saturation: {...}, tone: {...}, layer: {opacity, mist_keep, edge, rim, rim_width}}   # ghi đè scene trong mask
+```
 
 ## 4. Dự án (series) và tập
 

@@ -83,7 +83,7 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 | 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần); duyệt xong: `bundle.py … --shot <shot mẫu> --with-turntables` (§3) |
 | 5 | `film-3d-artist`: `render` mọi shot không dùng lại (`renders3d/s<NN>/`); Nhật ký ghi phút GPU; mỗi shot duyệt: `bundle.py … --shot s<NN>` (§3) |
 | 6 | chỉ khi có `ai_motion`: `video_engine: comfy` → `film-animator` chạy `comfy.py run h3-i2v` với khung `keyframes` (`local-video.md`); `seedance` → như tập `seedance`; không có thì bỏ qua (Nhật ký: `khâu 6 bỏ qua`) |
-| 7–10 | `film-compositor` dùng `beauty/` (chuỗi PNG) hoặc `beauty.mp4` như một clip; sương, nắng, chữ bằng compose kit; âm thanh như mọi tập |
+| 7–10 | `film-compositor`: style có khối `grade:` (vd. `chan-thuc-blender`) thì grade mỗi render trước (§7), rồi dùng chuỗi đã grade (hoặc `beauty/`, `beauty.mp4`) như một clip; sương, nắng, chữ bằng compose kit; âm thanh như mọi tập |
 
 ## 5. `shots.csv` của tập `blender`
 
@@ -104,3 +104,54 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 - [ ] Model trong turntable đúng `ASSETS.md` (nguồn, giấy phép); tỉ lệ giữa các model hợp lý (linh vật `giot` cao 1.0).
 - [ ] Không vật nào xuyên đất, không trượt (model có chân đi bằng `anim.action`; preset không chân chỉ trôi/bay/đứng).
 - [ ] Mọi shot có render bản dùng; cùng look, cùng engine, cùng `seed` như shot mẫu đã duyệt.
+- [ ] Style có `grade:`: mọi shot grade cùng tham số như shot mẫu đã duyệt (cùng `--params`), chủ thể có mask.
+
+## 7. Grade thuỷ mặc hai lớp (`tools/compose/grade.py`, khâu 7–10)
+
+Hình chân thực (`chan-thuc-blender`) thành thuỷ mặc: **cảnh nhạt, sương, hư ảo; chủ thể đậm và tươi hơn để nổi giữa bối
+cảnh**, giữ một phần sương và một vành sương mỏng ở mép mask nên vẫn nằm trong không khí. Miễn phí, chạy CPU (numpy +
+Pillow, không GPU, không mạng): chạy được cả ở phiên cloud khi đã có render. Khoảng 0,6 s mỗi khung 1080p.
+
+Cần pass: `depth` (sương theo độ sâu) và `mask` (chủ thể). `shot3d.json` ghi `"passes": ["depth", "mask"]` hoặc
+`blender.py render … --passes depth mask`; asset là chủ thể giữ `"mask"` mặc định (bật). Không có depth → không sương;
+không có mask → chỉ một lớp cảnh (lệnh in `note`).
+
+```
+python3 tools/compose/grade.py --check --style styles/chan-thuc-blender [--params <tập>/grade.json]   # chỉ kiểm tham số
+python3 tools/compose/grade.py out/<project>/<id>/renders3d/s03 --preview review/grade-s03.png \
+    --style styles/chan-thuc-blender --subject <asset> [--frame 60]        # trước | sau, một khung: duyệt trước khi chạy cả shot
+python3 tools/compose/grade.py out/<project>/<id>/renders3d/s03 out/<project>/<id>/graded/s03 \
+    --style styles/chan-thuc-blender --subject <asset>                     # chuỗi PNG cùng tên (hoặc OUT graded/s03.mp4)
+python3 tools/compose/grade.py <clip>.mp4 <clip>_grade.mp4 --style ... --depth <render>/depth --mask <render>/mask/<asset>
+python3 tools/compose/grade.py --export-lut review/grade-scene.cube --style ... [--layer subject] [--lut-size 33]
+```
+- IN là thư mục render (`renders3d/s<NN>/`): khung lấy ở `beauty/`, depth ở `depth/`, `depth_range` và fps ở
+  `render.json`; `--subject <asset>` (nhiều asset = hợp các mask) chọn `mask/<asset>/`. IN cũng có thể là một ảnh, thư mục
+  PNG hoặc video (ffmpeg); pass truyền bằng `--depth`, `--mask` (file hoặc thư mục, khớp theo tên khung rồi theo thứ tự),
+  `--depth-range NEAR FAR` khi không có `render.json`. Clip H3 nối từ render: cùng số khung thì dùng lại pass của render.
+- Đầu ra: `out/<project>/<id>/graded/s<NN>[_v<NN>]/` (chuỗi PNG) hoặc `graded/s<NN>[_v<NN>].mp4`, không đặt trong
+  `renders3d/` (tên lạ ở đó là WARN). Không vào gói shot: dựng lại được từ render + tham số grade. Không ghi đè: OUT đã có
+  (thư mục không rỗng) → mã 2. Đầu ra PNG cùng đầu vào + cùng tham số → cùng byte (vân giấy theo `seed`, cố định trên mọi
+  khung). Mã thoát: 0 xong, 1 ffmpeg/đọc file lỗi, 2 từ chối trước khi ghi (tham số sai, OUT đã có).
+- Tham số: `style.yaml` khối `grade:` (`docs/CONVENTIONS.md` §3); chỉnh theo tập bằng `--params <tập>/grade.json` (cùng
+  dạng, ghi đè từng khóa; dữ liệu dự án, đẩy Drive như `shots.csv`). Khóa sai hay ngoài khoảng → mã 2 với đường dẫn khóa;
+  `check_episode.py style` báo ERROR tương tự.
+- LUT `.cube` chỉ chứa **phần màu** (bão hoà theo dải màu, kéo màu, đường cong tông, tách tông) của một lớp; sương, lớp
+  chủ thể, vân giấy, tối viền là phép theo không gian, trình dựng khác không làm được: bản cuối luôn qua `grade.py`.
+
+| Khối | Khóa (mặc định = không đổi gì) |
+|---|---|
+| `seed` | số nguyên, vân giấy |
+| `scene.saturation` | `global`, `red`, `orange`, `yellow`, `green`, `cyan`, `blue`, `purple`: hệ số bão hoà 0–3 theo dải màu |
+| `scene.keep_red` | `amount` 0–1, `min_sat`, `gain`: đỏ son bão hoà không bị giảm (điểm nhấn) |
+| `scene.hue_pull.<tên>` | `to` `#RRGGBB`, `amount` 0–1, `width` (độ, 25), `centre` (độ, mặc định màu của `to`) |
+| `scene.tone` | `black` 0–0,5, `white` 0,5–1, `pivot`, `contrast` (< 1 mềm hơn), `gamma` |
+| `scene.split` | `shadow`, `shadow_amount`, `highlight`, `highlight_amount`: bóng về màu mực, sáng về màu giấy |
+| `scene.mist` | `color`, `amount`, `start` (m), `falloff` (m), `sky` (trời và xa hơn `depth_range`), `max`, `low`/`low_from` (dày hơn về đáy khung) |
+| `scene.paper` | `amount`, `fibres` (số sợi ở 1080p), `fibre_amount`, `dark`, `tint`, `color` |
+| `scene.vignette` | `amount`, `radius`, `color` |
+| `subject.*` | như `scene` trừ `paper`, `vignette` (phủ một lần lên cả hai lớp); khóa thiếu lấy của `scene` |
+| `subject.layer` | `opacity`, `mist_keep` (phần sương chủ thể giữ lại), `edge` (px mép mềm ở 1080p), `rim`, `rim_width` (vành sương quanh mép) |
+
+Chủ thể chưa đủ nổi: tăng `subject.saturation.global`/`tone.contrast` hoặc giảm `layer.mist_keep`; mép cứng hay viền
+trắng: tăng `layer.edge`, giảm `layer.rim`. Duyệt bằng `--preview` trước, rồi grade cả shot.

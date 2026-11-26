@@ -35,7 +35,12 @@ Phương pháp dựng: đọc `method` trong `EPISODE.md` trước khi dựng sh
   camera); `references/code-method.md`. Chân không trượt, đổi hướng bằng `turn`.
 - **`method: blender`**: không plate. Mỗi shot dùng render Blender `out/<project>/ep<NN>/renders3d/s<NN>/` (bản mới nhất
   `_v<NN>`; chuỗi `beauty/` hoặc `beauty.mp4`) như một clip cả khung; sương, nắng, chữ bằng compose kit
-  (`references/blender-method.md`). Thiếu render: báo đạo diễn, không tự chạy Blender.
+  (`references/blender-method.md`). Thiếu render: báo đạo diễn, không tự chạy Blender. Style có khối `grade:`
+  (`chan-thuc-blender`): grade thuỷ mặc hai lớp mỗi render trước khi dựng (`references/blender-method.md` §7), duyệt một
+  khung bằng `python3 tools/compose/grade.py <render> --preview review/grade-s<NN>.png --style styles/<style> --subject <asset>`,
+  rồi `python3 tools/compose/grade.py <render> out/<project>/ep<NN>/graded/s<NN> --style styles/<style> --subject <asset>`
+  và dựng từ chuỗi đã grade. Cùng tham số cho mọi shot (chỉnh theo tập: `--params <tập>/grade.json`, báo đạo diễn để
+  đẩy Drive). Thiếu pass `depth`/`mask`: báo đạo diễn (render lại với `--passes depth mask`).
 - **Clip H3 local** (`video_engine: comfy`, `references/local-video.md`): clip 1344×768 có âm thanh tự sinh; quyết định
   giữ hay tắt từng clip và ghi vào `review/sound-audit.md` (mặc định tắt dưới lời bình).
 

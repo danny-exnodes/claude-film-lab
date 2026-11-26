@@ -26,7 +26,8 @@ API bộ ghép: `references/compose-api.md`. Clip Seedance thành lớp: `refere
 và cảnh vẽ hoàn toàn bằng code, không lớp tranh): đọc `references/code-method.md` thay cho mọi mục về plates của file này;
 khởi tạo bằng `python3 tools/compose/inline.py <film>/film.html --init --toon`. `method: blender` (model 3D render bằng
 Blender, không lớp tranh): đọc `references/blender-method.md`; render `renders3d/s<NN>/beauty/` (chuỗi PNG) hoặc
-`beauty.mp4` dùng như một clip cả khung, compose kit chỉ phủ sương, nắng, chữ. Clip H3 local (`video_engine: comfy`):
+`beauty.mp4` dùng như một clip cả khung, compose kit chỉ phủ sương, nắng, chữ; style có khối `grade:` thì grade thuỷ mặc
+hai lớp trước bằng `tools/compose/grade.py` (`references/blender-method.md` §7). Clip H3 local (`video_engine: comfy`):
 `references/local-video.md` (âm thanh tự sinh của clip mặc định tắt dưới lời bình).
 
 | `method` | Cử động lớn của nhân vật | Đọc | Bỏ qua |

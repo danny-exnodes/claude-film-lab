@@ -33,11 +33,20 @@ HDRI có nhà cửa/đường dây; nhiều nguồn sáng không có lý do.
 | `look` | `realistic` (Cycles, AgX Medium High Contrast, adaptive sampling 0,02, motion blur 0,5 khung) |
 | `engine` | `cycles` (OptiX trên RTX); `eevee` chỉ để thử bố cục |
 | `line` | `0` (không nét) |
-| `mist` | `0`: sương bằng `mist-bands` khi dựng hoặc volume trong cảnh |
+| `mist` | `0`: sương do grade (pass depth), `mist-bands` khi dựng hoặc volume trong cảnh |
 | `palette` | màu chữ và triện (lấy từ `thuy-mac`) |
 
 Đo 2026-11-26 (RTX 5070 Ti, Blender 5.3): một khung 1920×1080, 256 sample adaptive, núi + nước + đá quét + thông
 `.blend` + HDRI ≈ 15 s/khung.
+
+## Grade thuỷ mặc (`style.yaml: grade`)
+
+Phong cách lai: hình chân thực (Cycles) rồi grade thuỷ mặc hai lớp ở khâu 7–10 (`tools/compose/grade.py`). Cảnh: bão hoà
+thấp (lục, lam giảm mạnh), kéo về chàm/lục đá/son đất, đen mực nâng và trắng giấy nén, sương theo pass `depth`, vân giấy,
+tối viền ấm. Chủ thể (pass `mask/<asset>`): giữ màu và độ tương phản, mực đậm hơn, chỉ giữ một phần sương, vành sương
+mỏng ở mép để vẫn nằm trong không khí. Đỏ son bão hoà luôn giữ nguyên (điểm nhấn). Render cần `"passes": ["depth",
+"mask"]`. Lệnh, khóa, LUT `.cube`: `.claude/skills/film-compose-shot/references/blender-method.md` §7. Tham số hiện là
+điểm khởi đầu, chưa duyệt trên một tập thật.
 
 ## Duyệt
 

@@ -364,3 +364,17 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   có id khác slug (không phải `<slug>` hay `<slug>-<hậu tố>`) bị báo "in no shot".
 - **#72** Luật hai shot liền nhau trùng cả cỡ cảnh và chuyển động đã là ERROR từ trước (issue đề xuất WARN): giữ ERROR.
   `CAMERA-BIBLE.md` chưa được kiểm tự động (chỉ là tài liệu của `film-dop`); khâu 2b không có số `stage` riêng (nằm trong khâu 2).
+
+## Qwen-Image-Edit local (#68) và quản lý model (#75): việc còn nợ
+
+- **#68** Graph `qwen-edit` chưa chạy với `/object_info` của server thật (`"verified": false`): lần chạy đầu trên máy chủ
+  lab (`run qwen-edit … --lightning 4 --dry-run` rồi chạy thật một ảnh) xác nhận tên input (`resolution_steps` của
+  `ImageScaleToTotalPixels`, `crop` của `ImageScale`) rồi đặt `verified: true`. Mô-đun `python_module` của node H3 trên
+  server chưa biết: lớp nào không ở `nodes`/`comfy_extras.*` thì `run` chỉ cảnh báo (ghi tên mô-đun vào đây).
+- **#68** Mỗi lần `run` một ảnh (script tạm của dự án chạy lô ≤ 4 ảnh trong một lần giữ GPU): lô dùng `--keep-models` cho
+  các ảnh trước, ảnh cuối bỏ cờ. Chưa có `--megapixels` (cỡ làm việc cố định 1 MP trong meta). Chưa thử denoise 0.85–0.9.
+- **#75** sha256 của bộ `qwen-image-edit-2511` và `hunyuan3d-2.1` chưa ghim (`null`; không băm file nhiều GB trên ổ C:):
+  ghi LFS oid từ trang Hugging Face hoặc từ lần `--fetch` kế tiếp vào `comfy.lock.json`. Repo/đường dẫn `hf` của hai bộ
+  ghi theo tài liệu ComfyUI, chưa kiểm với Hugging Face (sai thì `--fetch --yes` dừng trước khi tải). `minimax-h3` và
+  `qwen-image` chưa có nguồn `hf`. `--fetch` chưa kiểm thử với Hugging Face thật (chỉ server giả).
+- **#75** `--inventory` không biết `extra_model_paths` có thư mục tuyệt đối riêng cho từng loại (chỉ đọc `base_path`).

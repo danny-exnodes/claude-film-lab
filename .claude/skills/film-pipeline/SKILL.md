@@ -241,7 +241,7 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
 - **Khâu 6:** chỉ ở phiên local, sau `comfy.py ping` thành công: `film-animator` chạy `comfy.py run h3-i2v` (tập `blender`:
   hai khung của `blender.py keyframes`), vẫn với `--ledger`. ComfyUI luôn offline; không bao giờ node API trả tiền.
   Sinh vật trong render còn "3D" mà shot có `ai_motion`: shot lai `tools/comfy/hybrid.py` (khung khoá → Qwen-Edit → người
-  dùng kiểm bằng mắt rồi `approve` → H3 → ghép; `local-video.md` §8). Bước kiểm bằng mắt chỉ người dùng qua.
+  dùng kiểm bằng mắt rồi `approve` → H3 → ghép; `local-video.md` §9). Bước kiểm bằng mắt chỉ người dùng qua.
 
 ### 2.2 Sinh vật: tư liệu của chủ dự án (khâu 1) và cổng thiết kế (khâu 3a)
 

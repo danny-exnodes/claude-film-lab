@@ -198,8 +198,12 @@ class TestDriveSyncBooks(TmpDirCase, unittest.TestCase):
         self.assertEqual(folders["projects/demo/q01-t01-nam-son/script.md"], "03_KichBan/q01-t01-nam-son")
         self.assertEqual(folders["out/demo/q01t01/ledger.csv"], "04_SanXuat/q01-t01-nam-son")
         self.assertEqual(folders["out/demo/q01t01/bundles/q01t01_s01_20261109.zip"], "04_SanXuat/q01-t01-nam-son/2026-11-09")
-        self.assertEqual(folders["out/demo/q01t01/renders/q01t01_draft_v01.mp4"], "04_SanXuat/q01-t01-nam-son/2026-11-10")
-        self.assertEqual(folders["out/demo/q01t01/renders/q01t01_final_v01.mp4"], "05_ThanhPham/q01-t01-nam-son")
+        # renders go up before approval (#62); the move target once approved is in "unapproved"
+        self.assertEqual(folders["out/demo/q01t01/renders/q01t01_draft_v01.mp4"], "04_SanXuat/q01-t01-nam-son/_ChuaDuyet")
+        self.assertEqual(folders["out/demo/q01t01/renders/q01t01_final_v01.mp4"], "04_SanXuat/q01-t01-nam-son/_ChuaDuyet")
+        moves = {a["local"]: a["unapproved"]["move_when_approved"] for a in json.loads(so)["actions"] if "unapproved" in a}
+        self.assertEqual(moves, {"out/demo/q01t01/renders/q01t01_draft_v01.mp4": "04_SanXuat/q01-t01-nam-son/2026-11-10",
+                                 "out/demo/q01t01/renders/q01t01_final_v01.mp4": "05_ThanhPham/q01-t01-nam-son"})
 
 
 class TestRenameEpisode(TmpDirCase, unittest.TestCase):

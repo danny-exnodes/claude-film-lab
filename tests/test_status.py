@@ -350,7 +350,7 @@ class BudgetTest(StatusCase):
         jcode, d = self.data()
         self.assertEqual(code, jcode)
         self.assertEqual(sorted(d), ["attention", "blocked", "budget", "creatures", "forecast", "gate", "gates", "local", "media",
-                                     "method", "next", "notes", "shots", "stage", "video_engine"])
+                                     "method", "next", "notes", "shots", "stage", "style_frames", "video_engine"])
         for c in d["budget"]["caps"]:
             self.assertIn(f"{c['name']} {c['used']:g}/{c['cap']:g} ({c['left']:g} left)", out)
         self.assertEqual(len(d["attention"]["open"]), len(re.findall(r"^\s*OPEN\b", out, re.M)))
@@ -1089,6 +1089,58 @@ class CreatureTest(StatusCase):
         self.table("| phuong-hoang | Phượng hoàng | có | có | chờ |")
         code, g = self.gate("--gate", "G2")
         self.assertFalse(any("concept" in r["text"] for r in g["requirements"]))
+
+
+
+class StyleFramesTest(StatusCase):
+    """STYLE-FRAMES.md (#71): the STYLE FRAMES section and the G2 requirement of blender/code episodes."""
+    method, table = CreatureTest.method, CreatureTest.table
+    REFS = "\n## Khung chuẩn đã duyệt\n\n| Vai | Khung | Ngày | Lời chủ dự án |\n|---|---|---|---|\n"
+
+    def frames(self, n, *refs):
+        rows = "".join(f"| sf0{i} | {i} | s0{i} | f{i}.png | toon still | |\n" for i in range(1, n + 1))
+        (self.ep / "STYLE-FRAMES.md").write_text(
+            "# SF\n\n## Khung\n\n| id | Chương | Shot | File | Cách làm | Ghi chú |\n|---|---|---|---|---|---|\n"
+            + rows + self.REFS + "".join(r + "\n" for r in refs), encoding="utf-8")
+
+    def test_not_shown_for_seedance_without_file(self):
+        code, out = self.run_status("--gate", "G2")
+        self.assertNotIn("STYLE FRAMES", out)
+        self.assertNotIn("style frames", out)
+        code, d = self.data()
+        self.assertEqual(d["style_frames"]["gated"], False)
+
+    def test_g2_of_a_code_episode(self):
+        self.method("code")
+        self.table("| huy | Huỷ | có | không | chờ |", "| rong | Rồng | không | không | chờ |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("STYLE FRAMES  no STYLE-FRAMES.md (stage 3b, before G2)", out)
+        self.assertIn("[MISSING] approved style frames (STYLE-FRAMES.md ## Khung chuẩn đã duyệt: one 'không khí' "
+                      "frame + one per main creature) (not yet: no STYLE-FRAMES.md)", out)
+        self.frames(3, "| không khí | sf02 | 2026-11-26 | nhạt hơn nữa |", "| ??? | sf01 | 2026-11-26 | |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("STYLE FRAMES (STYLE-FRAMES.md) 3 frame(s) (5-8 expected)", out)
+        self.assertIn("reference không khí: sf02 (2026-11-26)", out)
+        self.assertIn("not approved yet: no reference frame for huy", out)
+        self.assertRegex(out, r"note: ## Khung chuẩn đã duyệt row 2: Vai '\?\?\?' is neither")
+        self.assertIn("[MISSING] approved style frames", out)
+        self.frames(6, "| không khí | sf02 | 2026-11-26 | |", "| C-huy | sf05 | 2026-11-27 | đậm |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("STYLE FRAMES (STYLE-FRAMES.md) 6 frame(s)\n", out)
+        self.assertIn("[ok] approved style frames", out)
+        self.assertNotIn("not approved yet", out)
+        code, d = self.data("--gate", "G2")
+        self.assertEqual(d["style_frames"]["refs"][1], {"role": "huy", "frame": "sf05", "date": "2026-11-27"})
+        self.assertEqual(d["style_frames"]["gaps"], [])
+        code, g = self.gate("--gate", "G3")
+        self.assertFalse(any("style frames" in r["text"] for r in g["requirements"]))
+
+    def test_layers_episode_with_a_file_shows_it_without_gate(self):
+        self.method("layers")
+        self.frames(5, "| không khí | sf01 | 2026-11-26 | |")
+        code, out = self.run_status("--gate", "G2")
+        self.assertIn("STYLE FRAMES (STYLE-FRAMES.md) 5 frame(s)", out)
+        self.assertNotIn("approved style frames", out)
 
 
 if __name__ == "__main__":

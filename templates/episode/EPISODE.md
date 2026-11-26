@@ -47,7 +47,8 @@ drive: "ClaudeFilmLab/<ProjectName>/03_KichBan/q01-t01-<slug>"   # thư mục ch
      Chính: có | không (sinh vật chính cần concept duyệt trước khi dựng model, tập blender/code).
      Ảnh sách: có (ảnh chụp trang trong out/<project>/assets/refs/<slug>/book/) | không (chủ dự án xác nhận sách không có)
      | chờ. Concept: chờ | duyệt <ngày> <file> (chủ dự án chọn; ghi thêm vào characters/<slug>/CHARACTER.md
-     mục "## Concept đã duyệt"). status.py: OWNER_REFS, cổng G1/G2. -->
+     mục "## Concept đã duyệt"). status.py: OWNER_REFS, cổng G1/G2. Tập blender/code: khung chuẩn mỗi sinh vật chính
+     ghi trong STYLE-FRAMES.md (khâu 3b); mỗi sinh vật chính có ≥ 1 cận chi tiết và ≥ 1 extreme-wide trong shots.csv. -->
 
 | slug | Tên | Chính | Ảnh sách | Concept |
 |---|---|---|---|---|

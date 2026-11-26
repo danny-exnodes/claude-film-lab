@@ -73,6 +73,7 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Clip local (ComfyUI, `video_engine: comfy`) | như clip AI, model ngắn `h3`, kèm file `.json` cạnh clip (`<clip>.mp4.json` hoặc `<tên clip không đuôi>.json`) | `ep01_s03_h3_v01.mp4` + `ep01_s03_h3_v01.mp4.json` |
 | Shot 3D (`method: blender`, chữ) | `<thư mục tập>/shots3d/s<NN>.json` | `shots3d/s03.json` |
 | Render Blender (media) | `out/<project>/<id>/renders3d/s<NN>/` (render lại `s<NN>_v<NN>/`), `s<NN>_preview/`, `s<NN>_keys/`, `turntable-<asset>/` | `renders3d/s03/beauty/0001.png` |
+| Style frame (khâu 3b, media) | `out/<project>/<id>/styleframes/<id>_sf<NN>_<chủ-đề>_v<NN>.png` (nâng chất: `…_edit_v<NN>.png`); contact sheet `<id>_contact_v<NN>.png`, bảng màu `<id>_palette_v<NN>.png` trong `<thư mục tập>/review/styleframes/` | `ep01_sf03_dan-te_v01.png` |
 
 Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho `check_episode.py`, `status.py`, `bundle.py`,
 `drive_sync.py`, `layers/anchors.py`, `layers/matte.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`, `<S>` = `s(?:\d{2}|\d{3})`,
@@ -230,7 +231,9 @@ Thư mục tập `projects/<project>/ep<NN>-<slug>/` (dự án chia quyển: `pr
 | `prompts.csv` | film-art-director / film-plate-maker | §6 |
 | `anchors.json` | film-plate-maker | điểm neo theo file lớp: `{"<file lớp>": {"<tên>": [x, y]}}` (pixel); vùng chữ nhật lưu bằng cặp điểm `<tên>_tl` / `<tên>_br`; `tools/layers/anchors.py` ghi, `tools/compose` đọc |
 | `score.json` | film-compositor | (tuỳ chọn) nhạc code và foley theo sự kiện cho `tools/audio/score.py`: `length_s`, `seed`, `scale`, `music`, `foley`, `silence` (`tools/audio/README.md`; mẫu `templates/episode/score.json`). Dữ liệu dự án: không commit, đẩy lên Drive như file chữ khác. Phần `music` chỉ khi người dùng đã chọn nhạc code |
-| `review/` | film-reviewer, compositor | `qc-<v>.md`, `sound-audit.md`, `check-v<N>.txt` |
+| `review/` | film-reviewer, compositor, film-dop | `qc-<v>.md`, `sound-audit.md`, `check-v<N>.txt`, `dop-pass.md` (khâu 2b); `styleframes/` (khâu 3b: contact sheet, bảng màu, bản sao khung chuẩn) |
+| `CAMERA-BIBLE.md` | film-dop | (khâu 2b) ngôn ngữ máy quay của tập: thang cỡ cảnh (tam viễn), kỹ thuật nối, tham chiếu, nhịp theo chương, cận và toàn cảnh mỗi sinh vật chính; mẫu `templates/episode/CAMERA-BIBLE.md` |
+| `STYLE-FRAMES.md` | film-3d-artist / đạo diễn | (khâu 3b, tập `blender`/`code`) 5–8 style frame, bảng màu, quy tắc đối chiếu, khung chuẩn chủ dự án chọn (§5); mẫu `templates/episode/STYLE-FRAMES.md` |
 | `publish.md` | film-publisher | tiêu đề, mô tả, chương, credit, tag |
 | `prompts/` | film-art-director / film-animator | prompt đã dùng, mỗi ảnh/clip một file `.txt` |
 | `shots3d/s<NN>.json` | film-3d-artist | (`method: blender`) một `shot3d.json` mỗi shot không dùng lại: model, máy quay, look; schema phiên bản 1 trong `tools/blender/README.md` (kiểm bằng `tools/blender/spec.py`), mẫu `templates/episode/shot3d.json`. Bắt buộc từ khâu 5; `seconds` và `camera.move` khớp `shots.csv` (lệch → WARN) |
@@ -293,6 +296,15 @@ Concept được tính là duyệt khi bảng ghi `duyệt` **và** `characters/
 (sau G2). `tools/status.py` in mục `CREATURES` (và `OWNER_REFS` khi bắt buộc); `--gate G2` của tập `blender`/`code` cần
 bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thiếu).
 
+Style frame (khâu 3b, tập `blender`/`code`): file `STYLE-FRAMES.md` trong thư mục tập (mẫu
+`templates/episode/STYLE-FRAMES.md`). Bảng `## Khung` một dòng mỗi khung (5–8, mỗi chương một; ngoài khoảng đó → WARN).
+Bảng `## Khung chuẩn đã duyệt` `| Vai | Khung | Ngày | Lời chủ dự án |`: `Vai` = `không khí` hoặc slug của bảng
+`## Sinh vật của tập` (`A-`/`C-`/`M-` đứng trước được bỏ qua); một dòng chỉ tính khi có `Khung` và ngày `YYYY-MM-DD`.
+Duyệt đủ = có dòng `không khí` và một dòng cho mỗi sinh vật chính. Không phải cổng mới (G1–G4 giữ nguyên): `tools/status.py`
+in mục `STYLE FRAMES`, `--gate G2` của tập `blender`/`code` cần duyệt đủ (`[MISSING] approved style frames`);
+`tools/check_episode.py` WARN từ khâu 3 khi chưa duyệt đủ (file thiếu, thiếu dòng, ô sai), INFO khi tập đã ghi ngày G2 và
+ở khâu ≥ 5 (tập làm trước khi có bước này vẫn hợp lệ). Tập `layers`/`seedance` không cần file này.
+
 ## 6. CSV (RFC 4180, UTF-8, có header, trường có dấu phẩy/xuống dòng phải đặt trong ngoặc kép)
 
 `shots.csv`:
@@ -300,7 +312,13 @@ bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thi
 - `shot` = `s<NN>` (`s01`…`s99`) hoặc `s<NNN>` (`s001`…`s999`, tập trên 99 shot); cả tập một độ dài, trộn là ERROR. `from_s`/`to_s` số giây (thập phân được), liên tục: `from_s` = `to_s` shot trước; shot đầu từ 0; shot cuối kết thúc = `length_s`.
 - Thời lượng mỗi shot 3–13 s. `shot_size` ∈ `extreme-wide, wide, medium, close, extreme-close, insert`.
 - `camera` = một chuyển động (`static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down, drift, handheld`).
-  Hai shot liền nhau không cùng cả `shot_size` lẫn `camera`.
+  Hai shot liền nhau không cùng cả `shot_size` lẫn `camera` (ERROR).
+- Tập `blender`/`code`: mỗi sinh vật chính của bảng `## Sinh vật của tập` (§5) có ≥ 1 shot cận chi tiết (`close`,
+  `extreme-close`, `insert`) và ≥ 1 shot `extreme-wide` (nhỏ giữa non sông); sinh vật nằm trong shot khi cột `layers`
+  có `A-<slug>` (blender) hoặc `C-<slug>`/`M-<slug>` (code), kể cả biến thể `A-<slug>-<hậu tố>` khi `<slug>-<hậu tố>`
+  không phải slug của sinh vật khác; shot `reuse_of` không có lớp dùng lớp của shot gốc. Thiếu (hoặc sinh vật không có
+  trong shot nào) → WARN. Tập `layers`/`seedance` không kiểm (mã lớp không nêu tên sinh vật). `film-dop` soát luật này ở
+  khâu 2b (`CAMERA-BIBLE.md`).
 - `layers` = mã lớp cách nhau bởi `;` (vd. `L1;L2;L3;L4;P1-duoi`). `code_motion`, `ai_motion` cách nhau bởi `;`; `ai_motion` trống = không dùng Seedance.
   Tập `method: layers` (§5): `ai_motion` phải trống ở mọi shot, có giá trị là ERROR nêu tên shot; cử động viết ở
   `code_motion` (cử động lớn = `pose-cycle`: đổi bậc giữa 2–4 tranh tư thế), hoặc đổi tập sang `method: seedance`.

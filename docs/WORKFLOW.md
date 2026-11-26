@@ -9,9 +9,12 @@ Bản cho người đọc. Phiên chính (đạo diễn) làm theo skill `.claud
 flowchart TD
   S0[0 Mở tập<br/>EPISODE.md, budget.yaml] --> S1[1 Nghiên cứu nguồn<br/>film-researcher]
   S1 --> S2[2 Kịch bản, shot list<br/>film-writer]
-  S2 --> G1{{G1 duyệt kịch bản}}
+  S2 --> S2b[2b Máy quay, CAMERA-BIBLE<br/>film-dop]
+  S2b --> G1{{G1 duyệt kịch bản và máy quay}}
   G1 -- sửa --> S2
   G1 -- duyệt --> S3[3 Nhân vật, bối cảnh, prompt<br/>film-art-director]
+  G1 -- blender/code --> S3b[3a concept sinh vật<br/>3b style frame, khung chuẩn]
+  S3b --> S3
   S3 --> S4[4 Ảnh khóa + 1 shot mẫu<br/>film-plate-maker]
   S4 --> G2{{G2 duyệt ảnh khóa, shot mẫu}}
   G2 -- sửa --> S3
@@ -35,8 +38,10 @@ flowchart TD
 |---|---|---|---|---|
 | 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, **phương pháp dựng**, trần chi phí |
 | 1 | Nghiên cứu nguồn | đạo diễn → `film-researcher` | bảng `## Sinh vật của tập` (khi `SERIES.md` có `owner_refs.required`: xin ảnh sách của chủ dự án **trước**), `research.md` (nguyên văn, link, cách đọc tên) | – |
-| 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
+| 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | – |
+| 2b | Máy quay (đạo diễn hình ảnh) | `film-dop` | `CAMERA-BIBLE.md` (mẫu `templates/episode/CAMERA-BIBLE.md`), cột `shot_size`/`camera`/`action` của `shots.csv` (giữ mốc giây, lời bình), `review/dop-pass.md` | **G1** (kịch bản + máy quay) |
 | 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept Qwen-Image local, `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
+| 3b | Style frame (tập `blender`/`code`) | `film-3d-artist` (blender) / đạo diễn (code) | 5–8 khung (mỗi chương một: bối cảnh dựng nhanh + proxy sinh vật + nâng chất + grade), contact sheet và bảng màu (`tools/styleframes.py sheet`), `STYLE-FRAMES.md` (mẫu `templates/episode/STYLE-FRAMES.md`) | người dùng duyệt, chọn khung chuẩn (`không khí` + mỗi sinh vật chính một khung); `status.py --gate G2` kiểm |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
 | 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
@@ -107,6 +112,18 @@ không có GPU nên chỉ làm phần chữ và kiểm tra của các tập dùn
   riêng (`LOCAL`) và dự báo phút GPU (ước lượng) trong `FORECAST`.
 - Một việc GPU một lúc: không render Blender khi clip ComfyUI đang chạy.
 
+**Style frame và khung chuẩn (khâu 3b, tập `blender`/`code`).** Trước khi dựng hàng loạt, mỗi chương một khung hoàn
+chỉnh (5–8 khung) cho chủ dự án chốt thẩm mỹ chung; chủ dự án chọn khung chuẩn: một khung `không khí` và mỗi sinh vật
+chính một khung, ghi ở `## Khung chuẩn đã duyệt` của `STYLE-FRAMES.md`. Mọi shot sau đối chiếu khung chuẩn (bằng mắt và
+`python3 tools/styleframes.py compare`). Không phải cổng mới: `status.py --gate G2` của tập `blender`/`code` cần khung
+chuẩn (như concept sinh vật của khâu 3a). Chi tiết: `.claude/skills/film-pipeline/SKILL.md` mục 2.3.
+
+**Máy quay (khâu 2b).** `film-dop` đọc kịch bản và viết `CAMERA-BIBLE.md`: thang cỡ cảnh theo tam viễn của tranh sơn
+thuỷ, kỹ thuật nối (rack focus, pull-back reveal, graphic match cut, scale reveal), tham chiếu (phim tài liệu thiên nhiên,
+Malick, Tarkovsky, Kurosawa, Anh hùng, Ngoạ hổ tàng long, Ảnh: chỉ mượn ý); làm lại cột `shot_size`/`camera`/`action`
+để chi tiết sinh vật và non sông xen kẽ. Luật: không hai shot liền nhau cùng cỡ cảnh và chuyển động (ERROR); mỗi sinh
+vật chính ≥ 1 cận chi tiết và ≥ 1 `extreme-wide` (WARN, tập `blender`/`code`).
+
 Trước G2 đạo diễn đưa người dùng mục `FORECAST` của `python3 tools/status.py <thư mục tập>` (ảnh còn phải tạo, giây
 video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản muốn gì → làm thế nào" và danh sách kiểm trước G3 của
 `layers`: `.claude/skills/film-compose-shot/references/layers-method.md`.
@@ -118,10 +135,11 @@ video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản
 | *(phiên chính)* | Đạo diễn | `film-pipeline` | tất cả | – | giữ cổng, nói chuyện với người dùng, cập nhật EPISODE.md, kéo/đẩy Drive |
 | `film-researcher` | Nghiên cứu nguồn; hình tượng sinh vật (khâu 3a) | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` (và `ICONOGRAPHY.md` ở khâu 3a) |
 | `film-writer` | Biên kịch | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash |
+| `film-dop` | Đạo diễn hình ảnh (khâu 2b): `CAMERA-BIBLE.md`, cỡ cảnh và máy quay của `shots.csv` | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash; không đổi mốc giây, lời bình, lớp |
 | `film-art-director` | Thiết kế, prompt lớp | `film-prompt-layers` | Read, Write, Edit, Glob, Grep | opus | `memory: project`, không tạo ảnh |
 | `film-plate-maker` | Tạo, tách lớp tranh | `film-prompt-layers` | Bash, Read, Write, Edit, Glob, Grep | sonnet | `FILM_AGENT`, `--ledger/--budget` |
 | `film-animator` | Clip AI (Seedance, hoặc H3 local khi `video_engine: comfy`) | – | Bash, Read, Write, Glob | sonnet | `background: true`, `--ledger/--budget`; `method: seedance` hoặc `blender` |
-| `film-3d-artist` | Model 3D, `shot3d.json`, render Blender (khâu 3–5 của `method: blender`) | – | Bash, Read, Write, Edit, Glob, Grep | sonnet | chỉ phiên local; không gọi dịch vụ trả tiền; `maxTurns: 120`; chỉ dựng sinh vật có concept duyệt; đội song song theo `templates/episode/TEAM-3d.md` |
+| `film-3d-artist` | Style frame (khâu 3b), model 3D, `shot3d.json`, render Blender (khâu 3–5 của `method: blender`) | – | Bash, Read, Write, Edit, Glob, Grep | sonnet | chỉ phiên local; không gọi dịch vụ trả tiền; `maxTurns: 120`; chỉ dựng sinh vật có concept duyệt; đội song song theo `templates/episode/TEAM-3d.md` |
 | `film-compositor` | Dựng, âm thanh, render | `film-compose-shot`, `cinecode` | Bash, Read, Write, Edit, Glob, Grep | opus | một agent mỗi tập; không gọi ark.py |
 | `film-reviewer` | Kiểm tra độc lập | – | Read, Write, Edit, Glob, Grep | opus | `memory: project`; không Bash, đọc số đo của check_episode; chỉ ghi `review/qc-*.md` và MEMORY.md |
 | `film-publisher` | Xuất bản YouTube | – | Read, Write, Edit, Glob, Grep | sonnet | `publish.md`, không tự đăng |

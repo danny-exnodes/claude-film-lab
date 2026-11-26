@@ -336,6 +336,19 @@ class TestDocsMatchTheCode(unittest.TestCase):
         self.assertTrue({"tools/ark.py", "tools/status.py", "tools/check_episode.py"} <= tools, tools)
 
 
+class TestAgentsAreRegistered(unittest.TestCase):
+    """Every agent of .claude/agents/ has a row in the agent table of docs/WORKFLOW.md §3 and is named in the
+    film-pipeline skill (the director only hands work to agents it knows)."""
+
+    def test_agents_listed(self):
+        workflow = (REPO / "docs" / "WORKFLOW.md").read_text(encoding="utf-8")
+        pipeline = (REPO / ".claude" / "skills" / "film-pipeline" / "SKILL.md").read_text(encoding="utf-8")
+        agents = sorted(p.stem for p in (REPO / ".claude" / "agents").glob("*.md"))
+        self.assertIn("film-dop", agents)
+        self.assertEqual([a for a in agents if f"| `{a}` |" not in workflow], [], "add a row to docs/WORKFLOW.md §3")
+        self.assertEqual([a for a in agents if f"`{a}`" not in pipeline], [], "name the agent in film-pipeline")
+
+
 @unittest.skipIf(yaml is None, "PyYAML is not installed")
 class TestFrontMatter(unittest.TestCase):
     def test_agents(self):

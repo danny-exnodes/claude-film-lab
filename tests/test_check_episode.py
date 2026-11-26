@@ -775,6 +775,154 @@ class TestEpisodeCreatures(EpisodeCase):
         self.assertIn("WARN  EPISODE.md: ## Sinh vật của tập row 1 (Huy): chính 'maybe' is not có | không", out)
 
 
+
+SF_REFS = "\n## Khung chuẩn đã duyệt\n\n| Vai | Khung | Ngày | Lời chủ dự án (nguyên văn) |\n|---|---|---|---|\n"
+
+
+def style_frames_md(frames=6, refs=()):
+    rows = "".join(f"| sf{i:02d} | {i} | s{i:02d} | ep01_sf{i:02d}_x_v01.png | blender still | |\n"
+                   for i in range(1, frames + 1))
+    return ("# Style frame\n\n## Khung\n<!-- | not | a | row | -->\n| id | Chương | Shot | File | Cách làm | Ghi chú |\n"
+            "|---|---|---|---|---|---|\n" + rows + "\n## Bảng màu\n- Palette: #112233\n" + SF_REFS
+            + "".join(r + "\n" for r in refs))
+
+
+class TestEpisodeStyleFrames(EpisodeCase):
+    """STYLE-FRAMES.md (#71): stage 3b of blender/code, the reference frames approved before G2. WARN only."""
+    CREATURES = ("\n## Sinh vật của tập\n\n| slug | Tên | Chính | Ảnh sách | Concept |\n|---|---|---|---|---|\n"
+                 "| phuong-hoang | Phượng hoàng | có | có | duyệt |\n| rong | Rồng | không | không | chờ |\n")
+
+    def run_sf(self, method, stage, text=None, g2=None, creatures=True):
+        md = self.ep / "EPISODE.md"
+        body = md.read_text(encoding="utf-8").split("\n## Sinh vật của tập", 1)[0]
+        md.write_text(body + (self.CREATURES if creatures else ""), encoding="utf-8")
+        p = self.ep / ce.STYLEFRAMES_FILE
+        if text is None:
+            if p.exists():
+                p.unlink()
+        else:
+            p.write_text(text, encoding="utf-8")
+        rep = ce.Report()
+        ce.check_style_frames(str(self.ep), {"method": method, "stage": stage, "gates": {"G2": g2}}, rep)
+        return rep
+
+    def test_read_style_frames(self):
+        (self.ep / ce.STYLEFRAMES_FILE).write_text(style_frames_md(7, [
+            "| Không khí | sf03 | 2026-11-26 | đẹp |", "| `A-phuong-hoang` | sf05 | duyệt 2026-11-27 | đậm |",
+            "| rong | sf06 | hôm qua | |", "| ??? | sf01 | 2026-11-26 | |", "| huy |  | 2026-11-26 | |",
+            "|  |  |  |  |"]), encoding="utf-8")
+        sf = ce.read_style_frames(str(self.ep))
+        self.assertEqual(sf["frames"], 7)
+        self.assertEqual(sf["refs"], [{"role": "atmosphere", "frame": "sf03", "date": "2026-11-26"},
+                                      {"role": "phuong-hoang", "frame": "sf05", "date": "2026-11-27"}])
+        self.assertEqual(len(sf["problems"]), 3, sf["problems"])
+        self.assertIn("row 3 (rong): Ngày 'hôm qua' has no YYYY-MM-DD date", sf["problems"][0])
+        self.assertIn("row 4: Vai '???' is neither", sf["problems"][1])
+        self.assertIn("row 5 (huy): no frame", sf["problems"][2])
+        self.assertIsNone(ce.read_style_frames(str(self.tmp)))
+        (self.ep / ce.STYLEFRAMES_FILE).write_text("## Khung chuẩn đã duyệt\n| Vai | Khung |\n|---|---|\n| a | b |\n",
+                                                   encoding="utf-8")
+        self.assertIn("column(s) ngày missing", ce.read_style_frames(str(self.ep))["problems"][0])
+
+    def test_template_parses_empty(self):
+        shutil.copy(Path(ce.LAB, "templates/episode", ce.STYLEFRAMES_FILE), self.ep / ce.STYLEFRAMES_FILE)
+        self.assertEqual(ce.read_style_frames(str(self.ep)), {"frames": 0, "refs": [], "problems": []})
+
+    def test_gaps(self):
+        rows = [{"slug": "phuong-hoang", "main": True}, {"slug": "rong", "main": False}]
+        self.assertEqual(ce.style_frame_gaps(None, rows), ["no STYLE-FRAMES.md"])
+        sf = {"frames": 6, "refs": [], "problems": []}
+        self.assertEqual(ce.style_frame_gaps(sf, rows), ["no approved reference frame in ## Khung chuẩn đã duyệt"])
+        sf["refs"] = [{"role": "phuong-hoang", "frame": "sf05", "date": "2026-11-26"}]
+        self.assertEqual(ce.style_frame_gaps(sf, rows), ["no atmosphere frame ('không khí')"])
+        sf["refs"] = [{"role": "atmosphere", "frame": "sf01", "date": "2026-11-26"}]
+        self.assertEqual(ce.style_frame_gaps(sf, rows), ["no reference frame for phuong-hoang"])
+        self.assertEqual(ce.style_frame_gaps(sf, None), [])                  # no creature table: atmosphere only
+
+    def test_warn_from_stage_3_never_error(self):
+        self.assertEqual(self.run_sf("blender", 2).lines, [])                    # before stage 3: nothing yet
+        rep = self.run_sf("blender", 3)
+        self.assertEqual((rep.errors, rep.warns), (0, 1), rep.lines)
+        self.assertIn("style frames not approved: no STYLE-FRAMES.md", rep.lines[0])
+        rep = self.run_sf("code", 5, style_frames_md(6, ["| không khí | sf01 | 2026-11-26 | |"]))
+        self.assertEqual((rep.errors, rep.warns), (0, 1), rep.lines)
+        self.assertIn("no reference frame for phuong-hoang", rep.lines[0])
+        ok = style_frames_md(6, ["| không khí | sf01 | 2026-11-26 | |", "| phuong-hoang | sf04 | 2026-11-26 | |"])
+        self.assertEqual(self.run_sf("blender", 5, ok).lines, [])
+        rep = self.run_sf("blender", 4, style_frames_md(3, ["| không khí | sf01 | 2026-11-26 | |",
+                                                            "| phuong-hoang | sf02 | 2026-11-26 | |"]))
+        self.assertEqual(rep.warns, 1, rep.lines)
+        self.assertIn("3 frame(s) in the ## Khung table: 5-8 expected", rep.lines[0])
+
+    def test_old_episode_past_g2_is_info(self):
+        rep = self.run_sf("blender", 7, g2="2026-11-01")
+        self.assertEqual((rep.errors, rep.warns), (0, 0), rep.lines)
+        self.assertTrue(rep.lines[0].startswith("INFO  STYLE-FRAMES.md: style frames not approved"), rep.lines)
+        rep = self.run_sf("blender", 4, g2="2026-11-01")                          # G2 dated but stage 4: still WARN
+        self.assertEqual(rep.warns, 1, rep.lines)
+
+    def test_other_methods_ignore_it(self):
+        self.assertEqual(self.run_sf("seedance", 7).lines, [])
+        self.assertEqual(self.run_sf("layers", 7).lines, [])
+        rep = self.run_sf("layers", 7, style_frames_md(6, ["| ??? | sf01 | 2026-11-26 | |"]))
+        self.assertEqual(rep.warns, 1, rep.lines)                                 # a file that exists is still read
+        self.assertIn("Vai '???'", rep.lines[0])
+
+    def test_whole_check_stays_clean(self):
+        """The fixture (seedance, stage 5) passes without a STYLE-FRAMES.md and says nothing about it."""
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("STYLE-FRAMES", out)
+
+
+class TestCreatureShots(EpisodeCase):
+    """film-script rhythm rule (#72): each main creature of a blender/code episode has a close-up and an extreme-wide."""
+    ROWS = [{"slug": "huy", "main": True}, {"slug": "huy-con", "main": True}, {"slug": "rong", "main": False}]
+
+    def shots(self, *rows):
+        return {f"s{i:02d}": {"shot_size": size, "_codes": codes, "reuse_of": ru}
+                for i, (size, codes, ru) in enumerate(rows, 1)}
+
+    def test_coverage(self):
+        shots = self.shots(("extreme-wide", ["E-nui", "A-huy-xa"], ""), ("close", ["A-huy"], ""),
+                           ("medium", ["A-huy-con"], ""), ("insert", [], "s03"), ("wide", ["A-rong"], ""))
+        # s04 reuses s03 (A-huy-con) as an insert: huy-con has its close-up, not its extreme-wide
+        self.assertEqual(ce.creature_coverage(self.ROWS, shots, "blender"),
+                         [("huy-con", ["no shot small in a vast landscape (extreme-wide)"])])
+        # A-huy-con is huy-con's model, not a variant of huy: without s02 huy has no close-up
+        shots["s02"]["shot_size"] = "medium"
+        self.assertEqual(ce.creature_coverage(self.ROWS, shots, "blender")[0],
+                         ("huy", ["no detail close-up (close, extreme-close, insert)"]))
+        code = self.shots(("extreme-wide", ["C-huy"], ""), ("extreme-close", ["M-huy"], ""))
+        self.assertEqual(ce.creature_coverage(self.ROWS[:1], code, "code"), [])
+        self.assertEqual(ce.creature_coverage(self.ROWS[:1], code, "blender"), [("huy", ["in no shot (layers A-huy)"])])
+        self.assertEqual(ce.creature_coverage(self.ROWS, shots, "layers"), [])
+
+    def test_warn_in_a_blender_episode(self):
+        self.edit("EPISODE.md", "stage: 5", "method: blender\nstage: 5")
+        (self.ep / "shots.csv").write_text(
+            "shot,from_s,to_s,shot_size,camera,action,layers,code_motion,ai_motion,sound,reuse_of\n"
+            "s01,0,8,wide,crane,Núi,E-nui;A-huy,,,,\ns02,8,15,close,push-in,Mắt,A-huy,,,,\n"
+            "s03,15,24.5,medium,orbit,Rồng,A-rong,,,,\ns04,24.5,30,wide,static,Núi,E-nui,,,,\n", encoding="utf-8")
+        md = self.ep / "EPISODE.md"
+        md.write_text(md.read_text(encoding="utf-8") + "\n## Sinh vật của tập\n\n| slug | Tên | Chính | Ảnh sách | "
+                      "Concept |\n|---|---|---|---|---|\n| huy | Huỷ | có | không | chờ |\n"
+                      "| rong | Rồng | không | không | chờ |\n", encoding="utf-8")
+        meta = {"method": "blender", "stage": 5, "length_s": 30}
+        shots = ce.check_shots(str(self.ep), meta, ce.Report())
+        rep = ce.Report()
+        ce.check_creature_shots(str(self.ep), meta, shots, rep)
+        self.assertEqual((rep.errors, rep.warns), (0, 1), rep.lines)
+        self.assertIn("WARN  shots.csv: main creature huy: no shot small in a vast landscape (extreme-wide)",
+                      rep.lines[0])
+        self.assertNotIn("rong", rep.lines[0])                                    # secondary creature: not checked
+        code, out, _ = self.check()
+        self.assertIn("main creature huy: no shot small in a vast landscape", out)
+        rep = ce.Report()
+        ce.check_creature_shots(str(self.ep), dict(meta, method="seedance"), shots, rep)
+        self.assertEqual(rep.lines, [])
+
+
 class TestEpisodeStageGates(EpisodeCase):
     def gates(self, stage, g1="null", g2="null", g3="null", g4="null"):
         self.edit("EPISODE.md", "stage: 5", f"stage: {stage}")

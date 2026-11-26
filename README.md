@@ -23,10 +23,10 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `docs/WORKFLOW.md` | Quy trình một tập: khâu 0–11, cổng G1–G4, ngân sách, chuyển giao phiên |
 | `docs/MODELS.md` · `docs/RUNBOOK.md` | Model Ark đã kiểm chứng · sự cố đã gặp và cách xử lý |
 | `.claude/skills/` | `film-pipeline`, `film-script`, `film-prompt-layers`, `film-compose-shot` |
-| `.claude/agents/` | 9 agent theo vai: researcher, writer, art-director, plate-maker, animator, compositor, reviewer, publisher, narrator (lồng tiếng, chưa gắn vào khâu nào) |
+| `.claude/agents/` | 11 agent theo vai: researcher, writer, dop (đạo diễn hình ảnh, khâu 2b), art-director, plate-maker, animator, 3d-artist, compositor, reviewer, publisher, narrator (lồng tiếng, chưa gắn vào khâu nào) |
 | `styles/` | Style pack ảnh: `thuy-mac` (ổn định), `moc-ban` (nháp), `_template`; style vẽ bằng code (`engine: code`, nháp): `dat-nan-3d`, `hoat-hinh-phang`, `ban-ve-ky-thuat`, `in-riso`, `pixel-16bit`, `bong-muc`, `ong-cao-su`, `chu-ascii`, `bia-cat-dan`, `low-poly-90`, `sach-pop-up`, `_template-code` |
 | `templates/project/` | Mẫu dự án mới: `PROJECT.md` (manifest ID Drive), `SERIES.md`, `README_CauTruc.md`, `TienDo_SanXuat.csv` |
-| `templates/episode/` | Mẫu `EPISODE.md`, `budget.yaml`, `shots.csv`, `prompts.csv` |
+| `templates/episode/` | Mẫu `EPISODE.md`, `budget.yaml`, `shots.csv`, `prompts.csv`, `CAMERA-BIBLE.md` (khâu 2b), `STYLE-FRAMES.md` (khâu 3b) |
 | `tools/ark.py` | CLI Ark: `ping`, `image`, `video`, có `--budget`/`--ledger`; `lambda-job prepare/finish` (ảnh qua Lambda vào ledger), `ledger-merge` |
 | `tools/check_episode.py` | Kiểm tra tập và style pack (schema, nhịp, tên file) |
 | `tools/layers/` | Tách alpha (`matte.py`), điểm neo (`anchors.py`), upscale |
@@ -34,6 +34,7 @@ mỗi phiên – xem `docs/CONVENTIONS.md` §11.
 | `tools/toon/` | Bộ TOON cho `method: code`: nhân vật vẽ bằng code (rig, đi/chạy/nhảy/vẫy, chân không trượt), 8 look (canvas + three.js) và 3 hậu kỳ (riso, pixel, ASCII); `toon.py` xem thử miễn phí, `lookbook` cả 11 style; linh vật `demo/giot.json` |
 | `tools/blender/`, `tools/comfy/` | Engine local trên máy chủ lab (phiên local, miễn phí): Blender render shot 3D cho `method: blender`; ComfyUI + MiniMax H3 làm clip cho `video_engine: comfy`; `docs/WORKFLOW.md` mục engine local |
 | `tools/bundle.py` | Gói zip theo shot để lưu Google Drive |
+| `tools/styleframes.py` | Style frame (khâu 3b): contact sheet, bảng màu, đo một khung so với khung chuẩn (`compare`); local, miễn phí |
 | `tools/audio/` | Âm thanh tổng hợp local: dây gảy (cổ cầm, tỳ bà, koto), tiếng động theo sự kiện, `score.py` xuất stem WAV từ bản nhạc JSON |
 | `tools/status.py` | Một màn hình chỉ đọc cho một tập: khâu, cổng, ngân sách còn lại, request dở, độ phủ lớp tranh, điều kiện cổng kế tiếp |
 | `tools/layers/matte_seq.py` | Tách nền cả clip Seedance thành chuỗi khung, kèm số đo nhấp nháy |

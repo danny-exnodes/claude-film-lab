@@ -324,3 +324,19 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - `sach-pop-up` (popup-paper) so với tham chiếu Papertrails còn thiếu: nhà, hàng rào, cầu, sông in trên trang có nước
   chạy, động vật giấy, lá rơi, bokeh thật theo độ sâu, AO, cửa sổ sáng ban đêm, con đường uốn theo lối đi (hiện thẳng
   theo trục x). ~250 ms/khung ở 960×540, ~500 ms ở 1080p (đêm chậm hơn vì bóng đèn lồng).
+
+## Style frame và DoP (#71, #72): việc còn nợ
+
+- **#71** Không phải cổng mới: duyệt khung chuẩn là một dòng `[MISSING]` của `status.py --gate G2` (tập `blender`/`code`);
+  `check_episode.py` chỉ WARN (tập đã qua G2 trước bước này: INFO), không ERROR. Chưa có tập thật đi qua khâu 3b.
+- **#71** Ảnh gốc của style frame (`out/<project>/<id>/styleframes/`) không nằm trong `drive_sync.py plan` (không phải
+  `renders/`/`vo/`/`audio/`, không có gói shot): chỉ contact sheet, bảng màu và bản sao khung chuẩn trong
+  `<tập>/review/styleframes/` lên Drive cùng chữ của tập.
+- **#71** Ngưỡng `styleframes.py compare` (`LIMITS`: luma 8, contrast 8, saturation 10, palette 12 trên thang 0–100) là ước
+  lượng, chưa đo trên khung thật của chủ dự án; `--tol` chỉnh tạm. `grade.py` và `comfy.py run qwen-edit` chỉ được nhắc
+  tên (làm ở nhánh song song, #68 #70): cờ cụ thể theo công cụ đó.
+- **#72** Luật "mỗi sinh vật chính ≥ 1 cận chi tiết + ≥ 1 `extreme-wide`" chỉ kiểm được ở tập `blender`/`code` (mã lớp
+  `A-`/`C-`/`M-<slug>` nêu tên sinh vật); tập `layers`/`seedance` (`L4`, `P<n>`) không biết lớp nào là sinh vật nào. Model
+  có id khác slug (không phải `<slug>` hay `<slug>-<hậu tố>`) bị báo "in no shot".
+- **#72** Luật hai shot liền nhau trùng cả cỡ cảnh và chuyển động đã là ERROR từ trước (issue đề xuất WARN): giữ ERROR.
+  `CAMERA-BIBLE.md` chưa được kiểm tự động (chỉ là tài liệu của `film-dop`); khâu 2b không có số `stage` riêng (nằm trong khâu 2).

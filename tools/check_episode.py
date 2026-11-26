@@ -33,6 +33,10 @@ with engine: toon are method code actions; their project.js moves are camera val
 two approved images (or clips) of one shot layer = ERROR; files in plates/ without a prompts.csv row = WARN;
 from stage 8 (G3) a seedance shot with ai_motion and no clip in clips/ = ERROR. A key given twice in the
 EPISODE.md front matter or in budget.yaml = ERROR.
+
+method blender/code (WARN only): a main creature of `## Sinh vật của tập` without a close-up or an extreme-wide shot
+in shots.csv (its model A-<slug> / C-<slug> / M-<slug> in the layers); STYLE-FRAMES.md (stage 3b) with 5-8 frames and
+its `## Khung chuẩn đã duyệt` table (one atmosphere frame, one per main creature) from stage 3.
 """
 import argparse, csv, datetime, io, json, math, os, re, shutil, subprocess, sys, unicodedata
 
@@ -1412,6 +1416,194 @@ def check_creatures(ep_dir, meta, rep):
                    + f" – creature design gate before any {method} model (film-pipeline stage 3a)")
 
 
+# --- creature coverage in shots.csv (film-script §2, docs/CONVENTIONS.md §6; issue #72) ------------------------------
+# Every main creature of a blender/code episode gets at least one detail close-up and one shot small in a vast
+# landscape. A creature is in a shot when its model is in the shot's layers: A-<slug> (blender), C-<slug> / M-<slug>
+# (code), or a variant <prefix>-<slug>-<suffix> when <slug>-<suffix> is not another creature of the table.
+CLOSE_SIZES = ("close", "extreme-close", "insert")
+VAST_SIZES = ("extreme-wide",)
+CREATURE_PREFIXES = {"blender": ("A-",), "code": ("C-", "M-")}
+
+
+def creature_in_codes(slug, codes, prefixes, others):
+    for c in codes:
+        for p in prefixes:
+            if not c.startswith(p):
+                continue
+            name = c[len(p):]
+            if name == slug or (name.startswith(slug + "-") and name not in others):
+                return True
+    return False
+
+
+def creature_coverage(rows, shots, method):
+    """[(slug, [what is missing])] for the main creatures of a blender/code episode: 'in no shot', or no close-up
+    (close, extreme-close, insert) and/or no vast shot (extreme-wide). A reuse_of shot without layers uses the layers
+    of the shot it reuses."""
+    prefixes = CREATURE_PREFIXES.get(method)
+    if not prefixes or not shots:
+        return []
+    slugs = {r["slug"] for r in rows}
+    out = []
+    for r in rows:
+        if not r.get("main") or not RE_SLUG.match(r["slug"]):
+            continue
+        sizes = set()
+        for s in shots.values():
+            codes = s.get("_codes") or (shots.get(s.get("reuse_of"), {}).get("_codes") or [])
+            if creature_in_codes(r["slug"], codes, prefixes, slugs - {r["slug"]}):
+                sizes.add(s.get("shot_size"))
+        if not sizes:
+            out.append((r["slug"], [f"in no shot (layers {' or '.join(p + r['slug'] for p in prefixes)})"]))
+            continue
+        miss = []
+        if not sizes & set(CLOSE_SIZES):
+            miss.append(f"no detail close-up ({', '.join(CLOSE_SIZES)})")
+        if not sizes & set(VAST_SIZES):
+            miss.append(f"no shot small in a vast landscape ({', '.join(VAST_SIZES)})")
+        if miss:
+            out.append((r["slug"], miss))
+    return out
+
+
+def check_creature_shots(ep_dir, meta, shots, rep):
+    """WARN for every main creature (EPISODE.md `## Sinh vật của tập`) of a blender/code episode that lacks a close-up
+    or a vast shot in shots.csv (rhythm rule of film-script, the DoP pass of stage 2b). Never an ERROR."""
+    method = episode_method(meta)[0]
+    if method not in CREATURE_PREFIXES or not shots:
+        return
+    try:
+        _, body = split_front_matter(read_text(os.path.join(ep_dir, "EPISODE.md")))
+    except (OSError, CheckError):
+        return
+    tab = read_creatures(body)
+    if not tab:
+        return
+    for slug, miss in creature_coverage(tab["rows"], shots, method):
+        rep.warn("shots.csv", f"main creature {slug}: {'; '.join(miss)} – each main creature needs one detail "
+                              f"close-up and one shot small in a vast landscape (film-dop, CAMERA-BIBLE.md)")
+
+
+# --- style frames (STYLE-FRAMES.md, docs/CONVENTIONS.md §5; issue #71) ----------------------------------------------
+# Stage 3b of a blender/code episode: 5-8 style frames (one per chapter) made before mass production; the owner picks
+# the reference frames ("khung chuẩn": one for the atmosphere, one per main creature) and the director records them in
+# the `## Khung chuẩn đã duyệt` table of STYLE-FRAMES.md. status.py --gate G2 asks for it; check_episode only WARNs
+# (episodes that passed G2 before this step existed keep validating).
+STYLEFRAMES_FILE = "STYLE-FRAMES.md"
+SF_FRAMES_HEADING = "## Khung"
+SF_REF_HEADING = "## Khung chuẩn đã duyệt"
+SF_REF_COLS = {"vai": "role", "khung": "frame", "ngày": "date"}
+SF_ATMOSPHERE = {"không khí", "khong khi", "không-khí", "khong-khi", "atmosphere"}
+SF_COUNT = (5, 8)
+STYLEFRAME_METHODS = CREATURE_METHODS
+RE_ANY_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def md_table(lines):
+    """(header cells lower case, [row cells]) of the Markdown table in lines; the GFM delimiter row and empty rows
+    are skipped. ([], []) when there is no table."""
+    table = [l.strip() for l in lines if l.strip().startswith("|")]
+    if not table:
+        return [], []
+    cells = lambda l: [c.strip() for c in l.strip().strip("|").split("|")]
+    head = [" ".join(nfc(c).lower().split()).strip("`*") for c in cells(table[0])]
+    rows = table[1:]
+    if rows and all(RE_TABLE_SEP.match(c) for c in cells(rows[0]) if c):
+        rows = rows[1:]
+    return head, [r for r in (cells(l) for l in rows) if any(r)]
+
+
+def read_style_frames(ep_dir):
+    """STYLE-FRAMES.md of the episode folder: None when the file is missing, else {"frames": rows of the `## Khung`
+    table, "refs": [{"role": "atmosphere" | <creature slug>, "frame", "date"}], "problems": [...]}.
+    A reference row counts only with a role, a frame and a YYYY-MM-DD date."""
+    path = os.path.join(ep_dir, STYLEFRAMES_FILE)
+    if not os.path.isfile(path):
+        return None
+    out = {"frames": 0, "refs": [], "problems": []}
+    try:
+        text = read_text(path)
+    except (OSError, CheckError) as e:
+        out["problems"].append(f"unreadable ({getattr(e, 'msg', e)})")
+        return out
+    out["frames"] = len(md_table(section_lines(text, SF_FRAMES_HEADING) or [])[1])
+    head, rows = md_table(section_lines(text, SF_REF_HEADING) or [])
+    if not head:
+        return out
+    idx = {SF_REF_COLS[h]: i for i, h in enumerate(head) if h in SF_REF_COLS}
+    missing = [k for k, v in SF_REF_COLS.items() if v not in idx]
+    if missing:
+        out["problems"].append(f"{SF_REF_HEADING}: column(s) {', '.join(missing)} missing "
+                               "(header: | Vai | Khung | Ngày | Lời chủ dự án |)")
+        return out
+    for n, cells in enumerate(rows, 1):
+        get = lambda k: cells[idx[k]].strip() if idx[k] < len(cells) else ""
+        role = " ".join(nfc(get("role")).lower().strip("`* ").split())
+        frame, date = get("frame"), RE_ANY_DATE.search(get("date"))
+        if role in SF_ATMOSPHERE:
+            role = "atmosphere"
+        else:
+            role = role[2:] if role[:2] in ("a-", "c-", "m-") else role
+            if not RE_SLUG.match(role):
+                out["problems"].append(f"{SF_REF_HEADING} row {n}: Vai '{get('role')}' is neither 'không khí' nor a "
+                                       "creature slug of ## Sinh vật của tập")
+                continue
+        if not frame or not date:
+            out["problems"].append(f"{SF_REF_HEADING} row {n} ({role}): "
+                                   + ("no frame" if not frame else f"Ngày '{get('date')}' has no YYYY-MM-DD date")
+                                   + ": not counted as approved")
+            continue
+        out["refs"].append({"role": role, "frame": frame, "date": date.group(0)})
+    return out
+
+
+def style_frame_gaps(sf, creature_rows):
+    """What the style-frame approval still lacks: [] when STYLE-FRAMES.md records an atmosphere reference frame and
+    one for every main creature of the creature table."""
+    if sf is None:
+        return [f"no {STYLEFRAMES_FILE}"]
+    if not sf["refs"]:
+        return [f"no approved reference frame in {SF_REF_HEADING}"]
+    roles = {r["role"] for r in sf["refs"]}
+    gaps = [] if "atmosphere" in roles else ["no atmosphere frame ('không khí')"]
+    need = [r["slug"] for r in creature_rows or [] if r.get("main") and r["slug"] not in roles]
+    if need:
+        gaps.append(f"no reference frame for {', '.join(need)}")
+    return gaps
+
+
+def check_style_frames(ep_dir, meta, rep):
+    """method blender/code: STYLE-FRAMES.md well-formed, 5-8 frames, the reference frames approved before G2
+    (WARN from stage 3; INFO once G2 is dated without them: the step did not exist then). Never an ERROR."""
+    method = episode_method(meta)[0]
+    sf = read_style_frames(ep_dir)
+    if method not in STYLEFRAME_METHODS and sf is None:
+        return
+    stage = meta.get("stage") if isinstance(meta.get("stage"), int) else -1
+    for msg in (sf or {}).get("problems", []):
+        rep.warn(STYLEFRAMES_FILE, msg)
+    if sf is not None and stage >= 3 and not SF_COUNT[0] <= sf["frames"] <= SF_COUNT[1]:
+        rep.warn(STYLEFRAMES_FILE, f"{sf['frames']} frame(s) in the {SF_FRAMES_HEADING} table: "
+                                   f"{SF_COUNT[0]}-{SF_COUNT[1]} expected (one per chapter)")
+    if method not in STYLEFRAME_METHODS or stage < 3:
+        return
+    try:
+        _, body = split_front_matter(read_text(os.path.join(ep_dir, "EPISODE.md")))
+        tab = read_creatures(body)
+    except (OSError, CheckError):
+        tab = None
+    gaps = style_frame_gaps(sf, (tab or {}).get("rows"))
+    if not gaps:
+        return
+    gates = meta.get("gates") if isinstance(meta.get("gates"), dict) else {}
+    msg = (f"style frames not approved: {'; '.join(gaps)} – stage 3b before G2 "
+           f"(templates/episode/{STYLEFRAMES_FILE}, film-pipeline §2.3)")
+    if stage >= 5 and gates.get("G2"):
+        rep.info(f"{STYLEFRAMES_FILE}: {msg} (G2 already dated)")
+    else:
+        rep.warn(STYLEFRAMES_FILE, msg)
+
+
 def ledger_head(path, rep):
     """First line of ledger.csv (a BOM is not part of it), or None after reporting an unreadable file."""
     try:
@@ -1643,6 +1835,8 @@ def cmd_episode(a, rep=None):
     check_shots3d(ep_dir, meta, shots, rep)
     check_assets(ep_dir, meta, rep)
     check_creatures(ep_dir, meta, rep)
+    check_creature_shots(ep_dir, meta, shots, rep)
+    check_style_frames(ep_dir, meta, rep)
     check_script(ep_dir, meta, rep)
     files = check_prompts(ep_dir, meta, shots, rep)
     media = a.media

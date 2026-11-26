@@ -110,7 +110,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    trong container (có thể đã bị thu hồi): kéo gói shot từ Drive (cột `drive_link` trong `prompts.csv`), media chưa lưu
    là mất, ghi vào Nhật ký và báo người dùng trước khi làm lại.
 4. Báo người dùng các dòng `STAGE` / `METHOD` / `BUDGET` / `FORECAST` / `NEXT` (3–6 dòng), và `OWNER_REFS` / `CREATURES`
-   khi có (mục 2.2), `UNSAVED media` khi khác `none` (mục 7). Rồi làm `## Việc tiếp theo`.
+   khi có (mục 2.2), `STYLE FRAMES` khi tập `blender`/`code` chưa duyệt khung chuẩn (mục 2.3), `UNSAVED media` khi khác
+   `none` (mục 7). Rồi làm `## Việc tiếp theo`.
    `METHOD` = phương pháp dựng của tập (`method:` trong EPISODE.md: `layers` | `seedance` | `code` | `blender`; thiếu
    khóa = `seedance`), kèm `video_engine` khi tập ghi khóa đó (`comfy` = clip H3 local). Dòng `LOCAL` trong `BUDGET` =
    lần chạy Blender/ComfyUI (miễn phí, không tính trần); `local GPU` trong `FORECAST` = phút GPU còn phải chạy (ước lượng).
@@ -130,8 +131,10 @@ Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở kh�
 |---|---|---|---|---|
 | 0 | Mở tập | đạo diễn | `EPISODE.md`, `budget.yaml` (chép từ `templates/episode/`) | người dùng chốt độ dài, style, trần chi phí |
 | 1 | Nghiên cứu nguồn | đạo diễn (danh sách sinh vật, ảnh sách của chủ dự án – mục 2.2) → `film-researcher` | bảng `## Sinh vật của tập`, `research.md` | – |
-| 2 | Kịch bản, shot list | `film-writer` (skill `film-script`) | `script.md`, `shots.csv` | **G1** duyệt kịch bản |
+| 2 | Kịch bản, shot list | `film-writer` (skill `film-script`) | `script.md`, `shots.csv` | – |
+| 2b | Máy quay (DoP) | `film-dop` (mục 2.4) | `CAMERA-BIBLE.md`, cột `shot_size`/`camera`/`action` của `shots.csv`, `review/dop-pass.md` | **G1** duyệt kịch bản và máy quay |
 | 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` (hình tượng) → đạo diễn (concept local) | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept mỗi sinh vật chính, `CHARACTER.md` `## Concept đã duyệt` | **người dùng chọn concept** (mục 2.2) |
+| 3b | Style frame (tập `blender`/`code`) | `film-3d-artist` (blender) / đạo diễn (code) | 5–8 khung (mỗi chương một), contact sheet, bảng màu, `STYLE-FRAMES.md` | **người dùng duyệt, chọn khung chuẩn** (mục 2.3) |
 | 3 | Thiết kế nhân vật, bối cảnh, prompt | `film-art-director` (skill `film-prompt-layers`); tập `blender`: `film-3d-artist` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/*.txt`, dòng `prompts.csv` (chưa có ảnh) | – |
 | 4 | Ảnh khóa + 1 shot mẫu | `film-plate-maker` | ảnh khóa nhân vật, đủ lớp của 1 shot (2K hoặc `--fast`) | **G2** duyệt ảnh khóa và shot mẫu |
 | 5 | Tạo lớp tranh | `film-plate-maker`, tối đa 3 song song, mỗi agent một nhóm shot | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
@@ -156,6 +159,7 @@ Quy tắc cổng:
   và đúng một câu hỏi duyệt. Ở G2 có thêm dòng `forecast fits the budget`: `[MISSING]` = phần còn phải tạo vượt phần
   còn lại của trần (xem `FORECAST`), nêu con số cho người dùng quyết trước khi tạo hàng loạt ở khâu 5; hoặc có clip
   `not counted` (`from_s`/`to_s` của shot đó trong `shots.csv` không đọc được): giao `film-writer` sửa rồi chạy lại.
+  Tập `blender`/`code`: G2 còn cần concept duyệt (mục 2.2) và khung chuẩn (`approved style frames`, mục 2.3).
 - Kiểm nguồn trước G1: đối chiếu đoạn nguyên văn trong `research.md` với bản gốc bằng
   `curl -sL "<link>&action=raw"` (WebFetch tóm tắt qua model nhỏ, không bảo đảm nguyên văn).
 - Khâu 9 là cổng cứng: `qc-<v>.md` có mục "Chặn" thì quay về khâu ghi trong mục đó, không lên bản cuối.
@@ -200,7 +204,7 @@ Việc của đạo diễn theo khâu:
 - **Khâu 0:** nêu lựa chọn thứ ba cùng lượt: "vẽ hoàn toàn bằng code, 0 đồng, nhân vật nhất quán tuyệt đối, chất hoạt
   hình (không phải tranh vẽ chi tiết)". Cho người dùng xem lookbook (`python3 tools/toon/toon.py lookbook --draft`, miễn
   phí, gửi `sheet.png` và video) để chọn một trong 11 style `engine: code`. `budget.yaml`: `images: 0`, `video_seconds: 0`.
-- **Khâu 3:** (dị thú chính: cổng thiết kế sinh vật mục 2.2 trước) `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
+- **Khâu 3:** (dị thú chính: cổng thiết kế sinh vật mục 2.2 trước; style frame mục 2.3 trước khi viết hết các shot) `film-art-director` viết `characters/<slug>/character.json` (rig: thân, mắt, tỉ lệ, bảng màu, seed; khóa
   theo `tools/toon/rig.js` `T.DEFAULTS`) và mục **Thông số model** trong `CHARACTER.md`; bối cảnh `E-<slug>` = tham số
   `env` (cây, đá, mây, đồi) và bảng màu của style.
 - **Khâu 4 → G2:** đạo diễn tự chạy (miễn phí) `python3 tools/toon/toon.py turntable --character <...>/character.json
@@ -215,9 +219,9 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
 - **Khâu 0:** nêu lựa chọn thứ tư cùng lượt: "model 3D render bằng Blender trên máy của anh/chị, 0 đồng, máy quay 3D
   thật và bố cục nhất quán; cần phiên local". Style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender`; xem thử bằng
   `blender.py lookbook` ở phiên local). `budget.yaml`: `images: 0`, `video_seconds: 0` (trừ khi chọn clip Seedance).
-- **Khâu 3a → 3:** cổng thiết kế sinh vật (mục 2.2) trước; rồi `film-3d-artist` (miễn phí): model (preset, GLB có giấy
-  phép hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json`. Nhiều sinh vật: chia
-  đội theo mục 4 ("Đội dựng 3D song song").
+- **Khâu 3a → 3b → 3:** cổng thiết kế sinh vật (mục 2.2), rồi style frame (mục 2.3), rồi `film-3d-artist` (miễn phí):
+  model (preset, GLB có giấy phép hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp
+  `shots3d/s<NN>.json`, đối chiếu khung chuẩn. Nhiều sinh vật: chia đội theo mục 4 ("Đội dựng 3D song song").
 - **Khâu 4 → G2:** `film-3d-artist` chạy turntable mỗi model chính và một shot mẫu `--preview`; `status.py --gate G2` kiểm
   turntable, shot mẫu, không vượt trần.
 - **Khâu 5:** `film-3d-artist` render mọi shot không dùng lại (`renders3d/s<NN>/`). Không giao `film-plate-maker`.
@@ -264,6 +268,44 @@ Q1·T3: dựng thẳng từ chữ kinh ("其狀如雞") + ảnh thú thật ra g
 4. Chỉ sau (d) mới giao `film-3d-artist` (blender) hoặc `film-art-director` (code: spec `creature.js`) dựng model; hợp
    đồng ghi đường dẫn concept đã duyệt và `ICONOGRAPHY.md`. `status.py --gate G2` báo `[MISSING] approved concept for
    every main creature` khi còn sinh vật chính chưa duyệt; `check_episode.py` báo ERROR từ khâu 5.
+
+### 2.3 Style frame (khâu 3b, tập `blender`/`code`): kinh thư hình ảnh trước khi dựng hàng loạt
+
+Bài học SHK Q1·T3: dựng model và cảnh trước khi có chuẩn thẩm mỹ chung → làm lại nhiều vòng. Bộ khung chủ đạo giúp chủ
+dự án chốt nhanh độ nhạt, độ đậm của sinh vật, không khí. Làm sau cổng 3a (concept duyệt), trước khi dựng model cuối và
+shot mẫu G2.
+1. Chép `templates/episode/STYLE-FRAMES.md` vào thư mục tập. Chọn **5–8 khung, mỗi chương một** (shot tiêu biểu theo
+   `CAMERA-BIBLE.md`), ghi vào bảng `## Khung`.
+2. Làm khung (miễn phí, phiên local trên máy chủ lab):
+   - `blender`: giao `film-3d-artist` (hợp đồng ghi "style frame", danh sách khung/shot, đường dẫn concept đã duyệt):
+     bối cảnh dựng nhanh, proxy sinh vật đúng silhouette của concept, `blender.py still` mỗi khung, nâng chất bằng
+     `comfy.py run qwen-edit` (chỉ khi tập sẽ dùng cùng đường đó cho shot thật), grade bằng `grade.py` của `tools/compose`.
+   - `code`: đạo diễn tự chạy `python3 tools/toon/toon.py still <style> --character <...>/character.json --out <khung>.png`
+     mỗi khung (hoặc `--creature`), grade nếu style dùng.
+   Khung phải làm lại được ở khâu 5: cột "Cách làm" ghi đủ lệnh và tham số.
+3. Contact sheet + bảng màu (miễn phí, Pillow):
+   `python3 tools/styleframes.py sheet out/<project>/ep<NN>/styleframes --out <tập>/review/styleframes/ep<NN>_contact_v01.png --palette-out <tập>/review/styleframes/ep<NN>_palette_v01.png`
+   → chép dòng `palette:` và số đo vào `## Bảng màu`; viết `## Quy tắc đối chiếu` (độ nhạt, sinh vật đậm/nhạt so với nền,
+   sương, nét).
+4. Gửi người dùng contact sheet (ảnh trong hội thoại), **người dùng duyệt và chọn khung chuẩn**: một khung `không khí` và
+   mỗi sinh vật chính một khung. Ghi bảng `## Khung chuẩn đã duyệt` (`| Vai | Khung | Ngày | Lời chủ dự án |`, Vai =
+   `không khí` hoặc slug của bảng `## Sinh vật của tập`), chép khung chuẩn vào `review/styleframes/`, thêm một dòng vào
+   `## Đã khóa (không làm lại)`, đẩy lên Drive cùng chữ của tập. Bị chê: làm lại bước 2 theo ghi chú đã đổi thành tham số.
+5. Từ đây mọi hợp đồng khâu 3–10 ghi đường dẫn khung chuẩn; render/shot mới đối chiếu bằng
+   `python3 tools/styleframes.py compare <tập>/review/styleframes/<khung chuẩn>.png <khung của shot>.png` (`DRIFT` = lệch
+   độ nhạt, tương phản, bão hoà hay bảng màu quá ngưỡng: xem bằng mắt, sửa look/grade trước khi làm tiếp).
+   `status.py --gate G2` báo `[MISSING] approved style frames` khi bảng chưa đủ; `check_episode.py` WARN từ khâu 3 (tập
+   đã qua G2 trước khi có bước này: INFO).
+
+### 2.4 Đạo diễn hình ảnh (khâu 2b): `CAMERA-BIBLE.md`
+
+Sau khi `film-writer` xong `script.md` + `shots.csv`, trước G1 (người dùng duyệt kịch bản và máy quay cùng lượt): giao
+`film-dop` (`.claude/agents/film-dop.md`). Hợp đồng: thư mục tập, `method`, đầu vào (`script.md`, `shots.csv`,
+`CHARACTER.md`, `STYLE-FRAMES.md` và `LOCATION-REFS.md` nếu có), đầu ra `CAMERA-BIBLE.md` (mẫu
+`templates/episode/CAMERA-BIBLE.md`), cột `shot_size`/`camera`/`action` của `shots.csv` (mốc giây, lời bình, lớp giữ
+nguyên), `review/dop-pass.md`. Xong khi: `check_episode.py` không ERROR, không WARN `main creature …` (thiếu cận chi
+tiết hay cảnh `extreme-wide` của sinh vật chính). DoP đề xuất đổi cắt cảnh (thêm shot, đổi độ dài): giao lại `film-writer`. Sau khi khung
+chuẩn được duyệt (mục 2.3) có thể giao `film-dop` soát lại lần hai theo khung chuẩn; đổi gì sau G1 thì báo người dùng.
 
 ## 3. Mở tập (khâu 0)
 
@@ -323,7 +365,7 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
   `gpu_run.py`), nên đội song song chủ yếu cho phần dựng model, không cho render. Agent hết lượt giữa chừng: đọc
   `NOTES.md` của nó rồi giao tiếp đúng phần "còn lại", không giao lại từ đầu. Xong cả đội: **đạo diễn** gộp các
   `NOTES.md` vào `ASSETS.md` (một người sửa một file), chạy `check_episode.py`.
-- Agent không có Bash (`film-writer`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
+- Agent không có Bash (`film-writer`, `film-dop`, `film-art-director`, `film-researcher`, `film-publisher`, `film-reviewer`)
   không chạy được `check_episode.py`: bạn chạy sau khi agent xong, ERROR thì giao lại kèm nguyên văn dòng lỗi.
 - `film-reviewer` chỉ nhận đường dẫn sản phẩm và `review/check-v<N>.txt`, không nhận mô tả quá trình làm. Trước khâu 9
   bạn ghi file đó bằng `python3 tools/check_episode.py episode <dir> --probe --out review/check-v<N>.txt` (`--probe`:

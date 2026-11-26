@@ -535,6 +535,15 @@ class StatusBlender(BlenderEpisode):
         code, out, _ = self.status("--gate", "G2")
         self.assertIn("[ok] approved concept for every main creature", out)
         self.assertIn("giot  Giọt · main · not in the book · concept approved (characters/giot/CHARACTER.md)", out)
+        self.assertIn("[MISSING] approved style frames", out)          # style frames (#71): stage 3b
+        (self.ep / "STYLE-FRAMES.md").write_text(
+            "# SF\n\n## Khung\n\n| id | Chương | Shot | File | Cách làm | Ghi chú |\n|---|---|---|---|---|---|\n"
+            + "".join(f"| sf0{i} | {i} | s0{i} | sf0{i}.png | blender still | |\n" for i in range(1, 6))
+            + "\n## Khung chuẩn đã duyệt\n\n| Vai | Khung | Ngày | Lời chủ dự án |\n|---|---|---|---|\n"
+              "| không khí | sf01 | 2026-11-26 | đẹp |\n| giot | sf03 | 2026-11-26 | đậm hơn |\n", encoding="utf-8")
+        code, out, _ = self.status("--gate", "G2")
+        self.assertIn("[ok] approved style frames", out)
+        self.assertIn("reference giot: sf03 (2026-11-26)", out)
         self.assertIn("Gate G2: READY", out)
         self.assertIn("turntables (renders3d/): turntable-giot", out)
 

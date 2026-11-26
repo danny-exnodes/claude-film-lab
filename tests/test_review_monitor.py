@@ -457,7 +457,8 @@ class TestApi(ApiCase):
         self.assertEqual(self.post(ev)[0], 200)
         body = self.request("GET", "/api/comfy")[1]
         self.assertTrue(body["online"])
-        self.assertEqual(body["comfy"]["build"], {"id": "ep01-s03", "title": "H3 s03"})
+        self.assertEqual({k: body["comfy"]["build"][k] for k in ("id", "title", "kind")},
+                         {"id": "ep01-s03", "title": "H3 s03", "kind": "clip"})
         self.assertEqual(body["comfy"]["history"][0]["build"]["id"], "ep01-s03")
         self.assertIsNone(body["comfy"]["history"][1]["build"])
         self.assertEqual(self.post({"type": "comfy", "up": "yes"})[0], 400)
@@ -770,7 +771,7 @@ class TestWebFixes(unittest.TestCase):
         r = subprocess.run([NODE, "--input-type=module", "-e", src], capture_output=True, text=True, timeout=30)
         self.assertEqual(r.returncode, 0, r.stderr)
         out = json.loads(r.stdout.strip().splitlines()[-1])
-        self.assertEqual(out["ok"], {"key": "build", "args": ["giot demo"], "error": None})
+        self.assertEqual(out["ok"], {"key": "build", "args": ["giot demo"], "error": None, "query": ""})
         for k in ("bad", "lone"):
             self.assertEqual((out[k]["key"], out[k]["args"]), ("", []), k)
             self.assertIn("không hợp lệ", out[k]["error"])

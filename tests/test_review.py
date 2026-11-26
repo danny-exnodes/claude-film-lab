@@ -628,7 +628,7 @@ class TestContainerFiles(unittest.TestCase):
         self.assertIn("film-lab-review:", text)
         self.assertIn("restart: unless-stopped", text)
         self.assertRegex(text, r"- review-db:/data\b")
-        self.assertRegex(text, r"out/_review/media:/media:ro")
+        self.assertRegex(text, r"- \$\{FILM_REVIEW_MEDIA_MOUNT:-\.\./\.\./out/_review/media\}:/media:ro")
         self.assertRegex(text, r"(?m)^volumes:\n\s+review-db:")
 
     def test_dockerfile(self):
@@ -640,10 +640,10 @@ class TestContainerFiles(unittest.TestCase):
 
     def test_server_and_client_are_stdlib_only(self):
         stdlib = set(sys.stdlib_module_names)
-        for name in ("server.py", "client.py", "review.py", "vendor_three.py", "monitor.py"):
+        for name in ("server.py", "client.py", "review.py", "vendor_three.py", "monitor.py", "watch.py", "preview.py"):
             src = (REPO / "tools" / "review" / name).read_text(encoding="utf-8")
             mods = {m.split(".")[0] for m in re.findall(r"^\s*(?:import|from) ([\w.]+)", src, re.M)}
-            self.assertLessEqual(mods - stdlib - {"client", "vendor_three"}, set(), name)
+            self.assertLessEqual(mods - stdlib - {"client", "vendor_three", "review"}, set(), name)
 
 
 # ------------------------------------------------------------------ hooks of blender.py and comfy.py

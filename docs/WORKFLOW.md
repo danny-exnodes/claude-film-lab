@@ -88,8 +88,8 @@ xem cả 11 style: `python3 tools/toon/toon.py lookbook`.
 mỗi shot một `shots3d/s<NN>.json` (máy quay, đường đi, look), Blender render chuỗi PNG + mp4 + lớp độ sâu/pháp tuyến/nét/
 mặt nạ vào `out/<project>/<id>/renders3d/s<NN>/`. Trả tiền: không (`images: 0`). Khâu 3 = model + `ASSETS.md` + bản nháp
 shot3d (`film-3d-artist`); khâu 4 = turntable + một shot mẫu `--preview` (G2); khâu 5 = render mọi shot; khâu 6 tuỳ chọn
-(clip cho cử động Blender không làm được); khâu 7–11 như cũ, render dùng như một clip. Hai style: `thuy-mac-blender`,
-`toon-3d-blender`. Hướng dẫn: `.claude/skills/film-compose-shot/references/blender-method.md`.
+(clip cho cử động Blender không làm được); khâu 7–11 như cũ, render dùng như một clip. Ba style: `thuy-mac-blender`,
+`toon-3d-blender`, `chan-thuc-blender` (chân thực). Hướng dẫn: `.claude/skills/film-compose-shot/references/blender-method.md`.
 
 ### Engine local (Blender, ComfyUI) – chỉ trên máy chủ lab
 

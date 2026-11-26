@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Look Blender chân thực: `realistic` + style `chan-thuc-blender` (2026-11-26)
+- `tools/blender`: look `realistic` (Cycles, AgX Medium High Contrast, adaptive sampling, motion blur): trời HDRI
+  (`world.hdri`, `hdri_strength`, `hdri_rot`) hoặc trời vật lý theo `world.sun`, đèn mặt trời ấm dần khi thấp
+  (`world.sun_strength`); vật liệu của asset được giữ (chỉ thêm AOV điều khiển nên pass depth/normal/line/mask vẫn có);
+  preset nhận bộ texture PBR theo vai trò qua `materials` + `asset_root` (màu, normal GL, roughness, AO, displacement).
+- `src` nhận `<file>.blend` / `<file>.blend#<Collection>` (append, giữ hair curves và geometry nodes mà glTF làm mất).
+- Style `chan-thuc-blender` (draft). Đo: 1920x1080, 256 sample adaptive, HDRI + đá quét + thông `.blend` ≈ 15 s/khung.
+
 ## [1.4.0] - 2026-11-25
 
 ### Xem trực tiếp bản dựng 3D và render: `tools/review/` (#48, 2026-11-25)

@@ -35,8 +35,9 @@ Dữ liệu dự án (chữ, đẩy Drive như `shots.csv`). Schema phiên bản
 |---|---|
 | `version`, `size`, `fps`, `seconds`, `seed` | `1`; `[1920, 1080]`; 24; **bằng độ dài shot trong `shots.csv`** (lệch → WARN); seed cố định |
 | `look`, `engine` | look của style (`render.look`), `eevee` (mặc định) hoặc `cycles` |
-| `world` | `paper` (màu giấy/trời), `mist` (0–1), `sun` `[độ cao, hướng]` |
-| `assets[]` | `id` (= mã lớp `A-<id>`), `src` (`preset:<id>`, `prim:<cube\|sphere\|...>` hoặc đường dẫn `.glb/.gltf` tính từ file spec), `at`, `rot`, `scale`, `anim` (`action`, `path` `[[giây, [x, y, z]], ...]`) |
+| `world` | `paper` (màu giấy/trời), `mist` (0–1), `sun` `[độ cao, hướng]`; look `realistic`: `hdri`, `hdri_strength`, `hdri_rot`, `sun_strength` |
+| `asset_root`, `materials` | look `realistic`: thư mục asset CC0 (`out/<project>/assets/`: `hdri/`, `textures/<id>/`, `models/`) và bộ texture PBR theo vai trò preset (`mountain`, `rock`, `ground`, `water`, `trunk`, `foliage`, `prim`) |
+| `assets[]` | `id` (= mã lớp `A-<id>`), `src` (`preset:<id>`, `prim:<cube\|sphere\|...>`, đường dẫn `.glb/.gltf` hoặc `<file>.blend[#Collection]` tính từ file spec; `.blend` giữ hair curves và geometry nodes), `at`, `rot`, `scale`, `anim` (`action`, `path` `[[giây, [x, y, z]], ...]`) |
 | `camera` | `move` (**bằng cột `camera` của `shots.csv`**, lệch → WARN), `from`, `to`, `target` (id asset), `lens`, `ease` |
 | `passes`, `depth_range` | `depth`, `normal`, `line`, `mask`; khoảng độ sâu cố định cho cả shot (gần = trắng, không chuẩn hoá từng khung) |
 
@@ -71,7 +72,7 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 
 | Khâu | Việc |
 |---|---|
-| 0 | người dùng chọn `method: blender` và một style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`); có cử động khó thì chọn thêm `video_engine: comfy` (clip H3 local, miễn phí) hoặc `seedance` (trả tiền); `budget.yaml`: `images: 0` |
+| 0 | người dùng chọn `method: blender` và một style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender` cho hình chân thực); có cử động khó thì chọn thêm `video_engine: comfy` (clip H3 local, miễn phí) hoặc `seedance` (trả tiền); `budget.yaml`: `images: 0` |
 | 2 | `film-writer` viết `shots.csv` theo §5 |
 | 3 | `film-3d-artist`: model (preset hoặc GLB có giấy phép) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json` (`blender.py check` sạch) |
 | 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần); duyệt xong: `bundle.py … --shot <shot mẫu> --with-turntables` (§3) |

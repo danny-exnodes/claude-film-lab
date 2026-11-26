@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "about": "Tag chips of the review dashboard (tools/review/README.md). Add a value or a group here, no code change. A group: label (Vietnamese), color (#rrggbb, dark theme), values {slug: label}. open: any slug is a known value (label: the slug, prettified). pattern: values matching it are known; labels_re turns them into labels. Project-specific labels (subject names...) go in <media root>/_tags.json, same shape, merged over this file.",
+  "groups": {
+    "kind": {
+      "label": "Loại",
+      "color": "#5ef2ff",
+      "values": {
+        "model": "Model",
+        "render": "Render",
+        "clip": "Clip",
+        "image": "Ảnh",
+        "concept": "Concept",
+        "turntable": "Turntable",
+        "audio": "Âm thanh",
+        "demo": "Demo"
+      }
+    },
+    "engine": {
+      "label": "Engine",
+      "color": "#b69cff",
+      "values": {
+        "blender": "Blender",
+        "comfy-h3": "ComfyUI H3",
+        "comfy-qwen": "ComfyUI Qwen-Image",
+        "seedance": "Seedance",
+        "seedream": "Seedream",
+        "three": "three.js",
+        "toon": "Toon (code)",
+        "tts": "TTS"
+      }
+    },
+    "look": {
+      "label": "Look",
+      "color": "#ffc857",
+      "values": {
+        "realistic": "Tả thực",
+        "ink-wash": "Thủy mặc",
+        "toon-ink": "Toon mực",
+        "clay": "Đất sét",
+        "grey-layout": "Layout xám"
+      }
+    },
+    "project": {
+      "label": "Dự án",
+      "color": "#8d9ab2",
+      "open": true,
+      "values": {
+        "son-hai-kinh": "Sơn Hải Kinh",
+        "lab": "Lab"
+      }
+    },
+    "episode": {
+      "label": "Tập",
+      "color": "#3ddc97",
+      "pattern": "^(q[0-9]{2}t[0-9]{2}|ep[0-9]{2,3})$",
+      "labels_re": [["^q0*([0-9]+)t0*([0-9]+)$", "Q$1·T$2"], ["^ep0*([0-9]+)$", "Tập $1"]],
+      "values": {}
+    },
+    "subject": {
+      "label": "Sinh vật / bối cảnh",
+      "color": "#ff9f6b",
+      "open": true,
+      "values": {}
+    },
+    "shot": {
+      "label": "Shot",
+      "color": "#7aa2ff",
+      "pattern": "^s[0-9]{2,3}$",
+      "labels_re": [["^s([0-9]+)$", "S$1"]],
+      "values": {}
+    },
+    "stage": {
+      "label": "Khâu",
+      "color": "#ff7eb6",
+      "values": {
+        "lookdev": "Lookdev",
+        "layout": "Layout",
+        "g2": "G2",
+        "g3": "G3",
+        "final": "Bản cuối"
+      }
+    }
+  }
+}

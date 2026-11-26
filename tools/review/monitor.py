@@ -22,13 +22,18 @@ server's ranges before sending; a 4xx answer is logged (once per distinct messag
 only) is sent instead, without backing off. `review.py up` starts it detached
 (out/_review/monitor.pid), `review.py down` or `review.py monitor --stop` stops it.
 Env: FILM_REVIEW_URL, FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_LOG (default
-$FILM_COMFY_WORK/server.log, else <lab>/out/_comfy/server.log: the log that `comfy.py start` writes). For the Comfy
-Desktop app pass --comfy-log %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\logs\\comfyui.log and its URL.
+$FILM_COMFY_WORK/server.log, else out/_comfy/server.log of the lab's main checkout or of this checkout, whichever exists
+and is newer: the log that `comfy.py start` writes, found from a git worktree too). For the Comfy Desktop app pass
+--comfy-log %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI\\logs\\comfyui.log and its URL.
+FILM_GPU_LOCK (default <main checkout>/out/_gpu/gpu.lock): the GPU lock of tools/gpu_run.py; the JSON file gpu.owner
+next to it ({"label", "pid", "since"}) names who holds the GPU. A dead pid or no file = free. The label goes to the
+public page sanitised (gpu_owner_label(): [A-Za-z0-9 _.:/-], at most 60 characters, paths cut to their base name).
 """
 import argparse
 import codecs
 import collections
 import ctypes
+import datetime
 import json
 import os
 import re
@@ -37,6 +42,7 @@ import struct
 import subprocess
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -544,12 +550,114 @@ def comfy_queue(url, timeout=QUEUE_TIMEOUT):
             "pending": len(pend) if isinstance(pend, list) else 0, "prompt_id": pid}
 
 
-def default_comfy_log():
+def comfy_log_candidates():
+    """Where `comfy.py start` writes its log: FILM_COMFY_LOG; else $FILM_COMFY_WORK/server.log; else out/_comfy/server.log
+    of the main checkout (git rev-parse --git-common-dir: the lab's out/ lives there) and of this checkout (a worktree
+    that ran comfy.py start itself)."""
     env = os.environ.get("FILM_COMFY_LOG")
     if env:
-        return os.path.abspath(env)
+        return [os.path.abspath(env)]
     work = os.environ.get("FILM_COMFY_WORK")
-    return os.path.join(os.path.abspath(work) if work else os.path.join(LAB, "out", "_comfy"), "server.log")
+    if work:
+        return [os.path.join(os.path.abspath(work), "server.log")]
+    out = {}
+    for p in (client.lab_out("_comfy", "server.log"), os.path.join(LAB, "out", "_comfy", "server.log")):
+        out.setdefault(os.path.normcase(os.path.abspath(p)), os.path.abspath(p))
+    return list(out.values())
+
+
+def default_comfy_log():
+    """The candidate that exists (the newest when both do), else the main checkout's path (followed once it appears)."""
+    cands = comfy_log_candidates()
+    found = []
+    for p in cands:
+        try:
+            found.append((os.stat(p).st_mtime, p))
+        except OSError:
+            pass
+    return max(found)[1] if found else cands[0]
+
+
+# ------------------------------------------------------------------ who holds the GPU (tools/gpu_run.py)
+OWNER_BAD = re.compile(r"[^A-Za-z0-9 _.:/-]+")
+OWNER_OK = re.compile(r"^[A-Za-z0-9 _.:/-]{1,60}$")       # = server.py GPU_OWNER
+
+
+def gpu_lock_path():
+    env = os.environ.get("FILM_GPU_LOCK")
+    return os.path.abspath(env) if env else client.lab_out("_gpu", "gpu.lock")
+
+
+def gpu_owner_path():
+    return os.path.join(os.path.dirname(gpu_lock_path()), "gpu.owner")
+
+
+def gpu_owner_label(text):
+    """Untrusted text -> a public label: absolute paths cut to their base name, accents folded, every other character
+    outside [A-Za-z0-9 _.:/-] becomes a space, at most 60 characters. None when nothing is left."""
+    s = client.scrub(str(text or ""), 300).replace("\u0111", "d").replace("\u0110", "D")
+    s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
+    s = re.sub(r"\s+", " ", OWNER_BAD.sub(" ", s)).strip()[:60].strip()
+    return s if s and OWNER_OK.match(s) else None
+
+
+def pid_alive(pid):
+    """True when a process with this pid runs (Windows: OpenProcess + GetExitCodeProcess; elsewhere kill 0)."""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if IS_WIN:
+        try:
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.OpenProcess.restype = ctypes.c_void_p
+            k.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+            k.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32)]
+            k.CloseHandle.argtypes = [ctypes.c_void_p]
+            h = k.OpenProcess(0x1000, False, pid)                    # PROCESS_QUERY_LIMITED_INFORMATION
+            if not h:
+                return ctypes.get_last_error() == 5                  # ERROR_ACCESS_DENIED: it exists
+            try:
+                code = ctypes.c_uint32()
+                return bool(k.GetExitCodeProcess(h, ctypes.byref(code))) and code.value == 259    # STILL_ACTIVE
+            finally:
+                k.CloseHandle(h)
+        except (OSError, AttributeError, ValueError):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def iso_seconds(text):
+    """'2026-11-26T08:15:00Z' -> epoch seconds (naive = UTC), None when unreadable."""
+    try:
+        d = datetime.datetime.fromisoformat(str(text).strip().replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=datetime.timezone.utc)
+    return round(d.timestamp(), 1)
+
+
+def read_gpu_owner(path=None, alive=pid_alive):
+    """{"label", "since"} of the GPU lock's holder, or None (no owner file, unreadable, or its pid is not running)."""
+    try:
+        with open(path or gpu_owner_path(), encoding="utf-8") as f:
+            d = json.loads(f.read(4096) or "null")
+    except (OSError, ValueError):
+        return None
+    if not isinstance(d, dict) or not alive(d.get("pid")):
+        return None
+    since = iso_seconds(d.get("since")) if d.get("since") is not None else None
+    return {"label": gpu_owner_label(d.get("label")) or "GPU job",
+            "since": since if since is not None and 0 <= since <= 1e11 else None}
 
 
 def comfy_port(url):
@@ -596,6 +704,12 @@ def clamp_event(ev):
         labels = set(HEAVY.values()) | {COMFY_PY}
         out["procs"] = [{"name": p["name"], "count": clamp(p.get("count"), 1, 9999, True) or 1}
                         for p in (ev.get("procs") or [])[:20] if p.get("name") in labels]
+        owner = ev.get("gpu_owner")
+        if isinstance(owner, dict) and gpu_owner_label(owner.get("label")):
+            out["gpu_owner"] = {"label": gpu_owner_label(owner.get("label")),
+                                "since": clamp(owner.get("since"), 0, 1e11)}
+        else:
+            out.pop("gpu_owner", None)
         return out
     if kind == "comfy":
         out = dict(ev, running=clamp(ev.get("running"), 0, 100000, True),
@@ -682,9 +796,9 @@ class Monitor:
 
     def metrics(self):
         ev = {"type": "metrics", "t": round(self.clock(), 2), "cpu": None, "ram_used": None, "ram_total": None,
-              "gpus": [], "disks": [], "procs": []}
+              "gpus": [], "disks": [], "procs": [], "gpu_owner": None}
         for key, fn in (("cpu", self.cpu), ("ram", win_memory if IS_WIN else proc_meminfo), ("gpus", self.gpus),
-                        ("disks", disks), ("procs", self.procs)):
+                        ("disks", disks), ("procs", self.procs), ("gpu_owner", read_gpu_owner)):
             try:
                 v = fn()
             except Exception:              # one broken reader never stops the others

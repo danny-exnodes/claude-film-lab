@@ -263,6 +263,21 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | `comfy.py run` cảnh báo `below the model's trained range (124..362 frames)` | Clip H3 ngắn hơn ~5,2 s | Dùng `--seconds 5` trở lên (124 khung); khung cuối Blender vẫn dùng được, chuyển động chỉ chậm lại |
 | Clip H3 có tiếng (soundscape) lẫn dưới lời bình | H3 sinh âm thanh cùng hình | Compositor tắt tiếng clip (mặc định) và ghi vào `review/sound-audit.md` |
 
+## Xem trực tiếp (`tools/review/`, web app review)
+
+Chỉ máy chủ lab. Chi tiết: `tools/review/README.md`.
+
+| Triệu chứng | Nguyên nhân | Xử lý |
+|---|---|---|
+| Ảnh/GLB/mp4 mới trên trang review đều 404; `review.py status` in `WARNING media: the container mounts …` | Container dựng từ một worktree (bản cũ mount `<worktree>/out/_review/media`) trong khi client ở repo chính ghi vào `<repo>/out/_review/media` | `python tools/review/review.py up --no-ngrok` từ checkout nào cũng được: bản mới mount `out/_review/media` của checkout chính (`git rev-parse --git-common-dir`) hoặc `FILM_REVIEW_MEDIA`; client ghi cùng chỗ. File đã ghi vào thư mục cũ: chép sang thư mục đúng |
+| Trang build lỗi `Failed to fetch dynamically imported module … blueprint.js`; `docker compose build` dừng ở `missing web/vendor/three/…` | Image dựng từ checkout chưa có `web/vendor/three/` trong `tools/review/` (git bỏ qua, mỗi checkout phải chép riêng) | `python tools/review/vendor_three.py --from <thư mục gói three 0.186.1>` trong checkout đó rồi `review.py up`; không tải three.js khi chưa hỏi chủ lab |
+| ngrok: `Network bandwidth exceeded` (ERR_NGROK_725), trang trắng hoặc ảnh không tải | Gói ngrok free hết băng thông tháng (PNG 1–3 MB, GLB, mp4) | Ảnh đã gửi dạng JPEG 1280 px (cần Pillow cho Python của máy chủ lab); đổi tunnel: `review.py down` rồi `review.py up --tunnel tailscale` (Tailscale đã đăng nhập + bật Funnel cho máy) hoặc `--tunnel cloudflared` (quick tunnel, URL đổi mỗi lần) |
+| `review.py up --tunnel …` thoát 2: `not found on PATH` / `tailscale is not logged in` | Chương trình tunnel chưa cài hoặc chưa đăng nhập; `review.py` không tự cài, không đăng nhập | Chủ lab tự cài/đăng nhập; `tailscale funnel` báo quá 45 s = Funnel chưa bật cho máy trong admin console |
+| Thẻ ComfyUI: `Không thấy file log ComfyUI` dù `comfy.py start` đang chạy | Monitor bản cũ chỉ tìm `out/_comfy/server.log` của worktree nó chạy, log thật ở repo chính | `review.py monitor --restart` (bản mới thử log của checkout chính và của checkout đang chạy); Comfy Desktop: `--comfy-log …\logs\comfyui.log` |
+| Thẻ Máy "Giữ GPU" vẫn hiện tên job đã xong | File `gpu.owner` còn và pid của nó đã bị tiến trình khác dùng lại | Xem pid trong `out/_gpu/gpu.owner`; chắc chắn không còn job GPU nào thì xoá file đó (không xoá khi hàng đợi đang chạy) |
+| `review.py watch` không đăng gì | Lần chạy đầu: file cũ hơn `--since` giờ chỉ được đánh dấu đã thấy; ảnh trong `beauty/`, `frames/`, thư mục pass, hoặc chuỗi khung ≥ 8 bị bỏ qua có chủ ý | Ghi file mới; muốn đăng lại từ đầu: `review.py watch <project> --stop`, xoá `out/_review/watch-<project>.json`, chạy lại với `--since` lớn hơn |
+| Watcher không ra GLB: log `no Blender found` hoặc `Blender export failed` | Không thấy Blender (`FILM_BLENDER`), `.blend` lỗi | Đặt `FILM_BLENDER` hoặc `--blender`; xem `out/_review/watch-<project>.log`; mở `.blend` bằng tay; GLB quá nặng: `--max-glb-mb`/`--decimate` |
+
 ## Mẫu báo cáo giới hạn 30 s cho Anthropic
 > Claude Code on the web: requests to a host using proxy-injected credentials (`ark.ap-southeast.bytepluses.com`)
 > are cut at ~30 s with `HTTP 502 upstream request failed`. Requests under ~26 s succeed; every request over 30 s

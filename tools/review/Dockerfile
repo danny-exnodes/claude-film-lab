@@ -13,8 +13,15 @@ RUN addgroup -S -g 10001 review \
  && chown review:review /data
 
 WORKDIR /app
-COPY --chown=root:root server.py /app/server.py
+COPY --chown=root:root server.py tags.json /app/
 COPY --chown=root:root web /app/web
+# Fail the build early when three.js is not vendored (the build, model and timeline pages would not load):
+# the files of vendor_three.py FILES (a test keeps this list equal).
+RUN for f in build/three.module.js build/three.core.js examples/jsm/loaders/GLTFLoader.js \
+             examples/jsm/controls/OrbitControls.js examples/jsm/utils/BufferGeometryUtils.js \
+             examples/jsm/utils/SkeletonUtils.js; do \
+      test -s "/app/web/vendor/three/$f" || { echo "missing web/vendor/three/$f: run python tools/review/vendor_three.py --from <three package dir>" >&2; exit 1; }; \
+    done
 
 USER review
 EXPOSE 8790 8791

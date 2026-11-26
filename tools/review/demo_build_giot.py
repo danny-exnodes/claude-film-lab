@@ -211,7 +211,7 @@ def main():
     a = parse(sys.argv)
     scene, coll = setup_scene()
     rv = Review(a.build, a.title, "demo", project=a.project, expected_steps=len(STEPS), url=a.url, media=a.media,
-                status="building", restart=True)
+                status="building", restart=True, tags={"engine": "blender", "subject": "giot", "stage": "lookdev"})
     giot = Giot(coll)
     t_start = time.monotonic()
     try:

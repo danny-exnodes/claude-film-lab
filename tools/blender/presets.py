@@ -10,7 +10,8 @@ Geometry is a pure function of (params, seed): the same spec builds the same mes
 
 Presets: mountains (a range of steep shan-shui peaks whose feet sink into the ground), rocks (a scatter of
 weathered boulders), pines (ink-painting pines: a bent trunk with flat needle pads), water (a still plane), ground
-(a wide plane with soft relief), giot (the lab mascot Giọt, a water drop on short legs; tools/toon/demo/giot.json).
+(a wide plane with soft relief), cyc (a seamless studio backdrop: floor curving up into a wall), giot (the lab mascot
+Giọt, a water drop on short legs; tools/toon/demo/giot.json).
 """
 import math
 
@@ -394,6 +395,24 @@ def ground(aid, p, seed, coll):
     return [_mesh(f"{aid}.ground", verts, faces, coll, "ground", "#C8BBA2")]
 
 
+def cyc(aid, p, seed, coll):
+    """Seamless studio backdrop (a photo cyc): a floor at z = 0 from y = -depth that curves up (radius) into a wall
+    at y = back, `height` tall, `width` wide. No horizon, no corner: turntables and asset review."""
+    W, D, back = p.get("width", 24.0), p.get("depth", 16.0), p.get("back", 4.0)
+    H = p.get("height", 10.0)
+    r = min(p.get("radius", 2.5), back + D)
+    prof = [(-D, 0.0)]
+    y0 = back - r
+    for i in range(25):                                 # quarter circle from the floor to the wall
+        a = 0.5 * math.pi * i / 24
+        prof.append((y0 + r * math.sin(a), r - r * math.cos(a)))
+    prof.append((back, max(H, r + 0.01)))
+    xs = (-W / 2.0, W / 2.0)
+    verts = [(x, y, z) for (y, z) in prof for x in xs]
+    faces = [(2 * i, 2 * i + 1, 2 * i + 3, 2 * i + 2) for i in range(len(prof) - 1)]
+    return [_mesh(f"{aid}.cyc", verts, faces, coll, "ground", "#B4AEA6")]
+
+
 def _drop_profile(h, rw, rd, z0, rings=28):
     """Water-drop body: pointed top, round belly below the middle (teardrop x = sin t * sin(t/2))."""
     prof = []
@@ -493,7 +512,7 @@ def giot(aid, p, seed, coll):
     return out + [body_pivot] + [rig["parts"][k] for k in ("hipL", "hipR")], rig
 
 
-BUILDERS = {"mountains": mountains, "rocks": rocks, "pines": pines, "water": water, "ground": ground}
+BUILDERS = {"mountains": mountains, "rocks": rocks, "pines": pines, "water": water, "ground": ground, "cyc": cyc}
 
 
 def build(preset, aid, params, seed, coll):

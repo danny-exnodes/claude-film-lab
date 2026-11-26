@@ -1,0 +1,33 @@
+{
+  "id": "qwen-t2i",
+  "title": "Qwen-Image 2512 text-to-image: concept art (creatures, props, places) to choose from before 3D",
+  "source": "the lab's own graph of ComfyUI core nodes (UNETLoader, CLIPLoader type qwen_image, VAELoader, ModelSamplingAuraFlow, CLIPTextEncode, EmptySD3LatentImage, KSampler, VAEDecode, SaveImage; optional LoraLoaderModelOnly), as tried on the owner's PC (issue #54); no template file copied",
+  "verified": false,
+  "kind": "image",
+  "model_set": "qwen-image",
+  "ledger_model": "comfy:qwen-image",
+  "size_multiple": 16,
+  "size": {"default": [1664, 928], "min": 256, "max": 2048,
+           "trained": [[1328, 1328], [1664, 928], [928, 1664], [1472, 1104], [1104, 1472], [1584, 1056], [1056, 1584]]},
+  "defaults": {"steps": 30, "cfg": 2.5, "negative": ""},
+  "turbo": {"steps": 2, "cfg": 1.0, "note": "Wuli Turbo LoRA: drafts only, never the image the user approves"},
+  "estimate": {"seconds_per_step": 4.0, "setup_seconds": 15.0, "pixels": 1544192,
+               "note": "owner's RTX 5070 Ti 16 GB: ~135 s for 30 steps at 1664x928 (models already loaded)"},
+  "progress_node": "9",
+  "negative": true,
+  "prompt_format": "plain",
+  "params": {
+    "prompt": [["6", "text"]],
+    "negative": [["7", "text"]],
+    "width": [["8", "width"]],
+    "height": [["8", "height"]],
+    "seed": [["9", "seed"]],
+    "steps": [["9", "steps"]],
+    "cfg": [["9", "cfg"]],
+    "prefix": [["11", "filename_prefix"]]
+  },
+  "optional": {
+    "turbo": {"remove": ["2"], "rewire": [["5", "model", "1", 0]]}
+  },
+  "output": {"node": "11", "type": "image", "ext": ".png"}
+}

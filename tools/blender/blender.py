@@ -6,7 +6,13 @@
   python tools/blender/blender.py render <shot3d.json> --out <dir> [--frames A:B] [--preview] [--engine eevee|cycles]
                                          [--passes depth normal line mask | none] [--look L] [--samples N] [--no-mp4]
   python tools/blender/blender.py still <shot3d.json> --frame N --out <png> [--size WxH] [--preview] [--look L]
-  python tools/blender/blender.py turntable <asset.glb|preset:id> --out <dir> [--look L] [--seconds 4] [--preview]
+  python tools/blender/blender.py turntable <asset.glb|file.blend[#Collection]|preset:id> --out <dir> [--look L]
+                                         [--frames 72 | --seconds 4] [--samples N] [--fill 0.7] [--front DEG]
+                                         [--stills front,34,side,head|none] [--backdrop cyc|none] [--head-bone head]
+                                         [--lens 50] [--fit M] [--hdri F.hdr] [--size WxH] [--preview]
+        the asset turns once in place (own size, or --fit metres) in front of a fixed camera framed on its bounding
+        box (--fill of the frame height), seamless cyc behind; -> beauty/ + beauty.mp4 + still_<view>.png + render.json
+        (look realistic: Cycles, three studio lamps on a grey sky, or --hdri)
   python tools/blender/blender.py keyframes <shot3d.json> --out <dir> [--size 1344x768] [--look L]
   python tools/blender/blender.py lookbook --out <dir> [--spec S] [--frame N] [--size 960x540]
 
@@ -25,10 +31,15 @@ EEVEE needs a GPU session (a logged-in desktop); when an EEVEE render fails afte
 the render runs again with Cycles (OptiX, CUDA, else CPU) and render.json says so. beauty.mp4: ffmpeg when it is on PATH,
 else Blender's own FFmpeg encoder (--no-mp4 skips it).
 
-Exit codes: 0 ok · 1 Blender not found or the render failed · 2 refused before rendering (bad spec, arguments, --out)
-· 3 (find only) a Blender was found but `blender --version` failed or printed no version (broken install).
+GPU queue: render, still, turntable, keyframes and lookbook hold the lab's GPU lock (tools/gpu_run.py) while Blender
+runs, waiting while another job holds it (never for --dry-run, check, find). FILM_GPU_WAIT=S gives up after S seconds
+(exit 2, nothing rendered); FILM_GPU_QUEUE=0 turns the queue off.
+
+Exit codes: 0 ok · 1 Blender not found or the render failed · 2 refused before rendering (bad spec, arguments, --out,
+the GPU stayed busy) · 3 (find only) a Blender was found but `blender --version` failed or printed no version.
 """
 import argparse
+import contextlib
 import glob
 import hashlib
 import importlib.util
@@ -60,6 +71,17 @@ def _load_spec():
 
 
 spec = _load_spec()
+
+
+def _load_gpu():
+    """tools/gpu_run.py: the lab-wide GPU lock (one GPU job at a time)."""
+    sp = importlib.util.spec_from_file_location("film_gpu_run", os.path.join(os.path.dirname(HERE), "gpu_run.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod
+
+
+gpu = _load_gpu()
 
 
 class Refused(Exception):
@@ -212,14 +234,46 @@ def _clear(path):
         shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
 
 
+def gpu_label(a):
+    """Short job name for the GPU lock and the review page: never a path or a command line."""
+    what = {"render": lambda: os.path.splitext(os.path.basename(a.spec))[0],
+            "still": lambda: os.path.splitext(os.path.basename(a.spec))[0],
+            "keyframes": lambda: os.path.splitext(os.path.basename(a.spec))[0],
+            "turntable": lambda: asset_label(a.asset),
+            "lookbook": lambda: ""}.get(a.cmd, lambda: "")()
+    agent = (os.environ.get("FILM_AGENT") or "").strip()
+    return gpu.clean_label(f"{agent + ': ' if agent else ''}blender {a.cmd} {what}")
+
+
+@contextlib.contextmanager
+def gpu_turn(a, hook=None):
+    """Hold the lab's GPU lock (tools/gpu_run.py) for a Blender run; Refused (exit 2, nothing rendered) when it stays
+    busy for FILM_GPU_WAIT seconds. Re-entrant: lookbook holds it across its looks, a gpu_run.py parent is honoured."""
+    def waiting(owner):
+        who = gpu.clean_label((owner or {}).get("label") or "another job")
+        print(f"blender: waiting for the GPU (held by {who})", flush=True)
+        if hook:
+            hook.update(0.0, f"waiting for the GPU ({who})", force=True)
+    try:
+        with gpu.gpu_lock(gpu_label(a), gpu.default_wait(), on_wait=waiting, quiet=True):
+            yield
+    except gpu.GpuBusy as e:
+        raise Refused(f"{e} (FILM_GPU_WAIT); nothing rendered")
+
+
 def render_into(spec_path, out, extra, engine, a, keep=(), hook=None):
-    """Render into an (empty) folder with the EEVEE -> Cycles fallback. -> render.json dict."""
+    """Render into an (empty) folder with the EEVEE -> Cycles fallback, holding the GPU lock. -> render.json dict."""
     blender = blender_or_fail(a.dry_run)
     cmd = command(blender, spec_path, out, extra + ["--engine", engine])
     if a.dry_run:
         print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
         return None
     os.makedirs(out, exist_ok=True)
+    with gpu_turn(a, hook):
+        return _render_locked(blender, spec_path, out, extra, engine, a, keep, hook, cmd)
+
+
+def _render_locked(blender, spec_path, out, extra, engine, a, keep, hook, cmd):
     rc, built, tail = run_blender(cmd, a.timeout, hook)
     fallback = None
     if rc != 0 and engine == "eevee" and built and not glob.glob(os.path.join(out, "beauty", "*.png")):
@@ -492,28 +546,62 @@ def cmd_keyframes(a):
     return 0
 
 
-def turntable_spec(src, look, seconds, base):
-    """A shot3d.json that turns the camera once around an asset fitted to 2 m on a floor."""
+TURNTABLE_STILLS = "front,34,side,head"
+TURNTABLE_FPS = 24
+
+
+def stills_arg(text):
+    """--stills front,34,side,head | none -> list of views."""
+    names = [s.strip() for s in str(text).split(",") if s.strip()]
+    if names == ["none"]:
+        return []
+    bad = [s for s in names if s not in spec.TURNTABLE_VIEWS]
+    if bad:
+        raise Refused(f"--stills: {bad[0]!r} is not one of {', '.join(spec.TURNTABLE_VIEWS)} (or none)")
+    return list(dict.fromkeys(names))
+
+
+def turntable_spec(src, look, seconds, *, fill=0.7, stills=(), front=0.0, backdrop="cyc", head_bone="head",
+                   lens=50.0, fit=None, hdri=None, engine=None):
+    """A shot3d.json for one turn of an asset in place (`turntable`): it stands centred on the turn axis at its own
+    size (or `fit` metres), a fixed camera frames its bounding box (`fill` of the frame height), a seamless cyc behind
+    it; look realistic (Cycles) gets three studio lamps on a grey sky or a dim HDRI."""
     if not src.startswith(("preset:", "prim:")):
-        src = os.path.abspath(src)
+        src = os.path.abspath(src)                     # keeps a .blend's #Collection
+    realistic = look == "realistic"
+    world = {"mist": 0.0, "sun": [40, 225]}
+    if realistic:
+        world["sun_strength"] = 0                      # the studio lamps light it
+        if hdri:
+            world["hdri"], world["hdri_strength"] = os.path.abspath(hdri), 0.5
+    asset = {"id": "asset", "src": src}
+    if fit:
+        asset["fit"] = float(fit)
     return {
-        "version": 1, "title": f"turntable {os.path.basename(src)}", "size": [1920, 1080], "fps": 24,
-        "seconds": seconds, "seed": 0, "look": look, "engine": "eevee",
-        "world": {"mist": 0.0, "sun": [40, 225]},
-        "assets": [
-            {"id": "floor", "src": "preset:ground", "params": {"width": 40, "depth": 40, "relief": 0}, "mask": False},
-            {"id": "asset", "src": src, "fit": 2.0}],
-        "camera": {"move": "orbit", "from": [0, -6.2, 1.7], "target": "asset", "degrees": 360, "ease": "linear",
-                   "lens": 50},
-        "passes": [], "depth_range": [0.5, 40]}
+        "version": 1, "title": f"turntable {asset_label(src)}", "size": [1920, 1080], "fps": TURNTABLE_FPS,
+        "seconds": seconds, "seed": 0, "look": look, "engine": engine or ("cycles" if realistic else "eevee"),
+        "world": world, "assets": [asset],
+        "camera": {"move": "static", "from": [0, -6, 1], "target": "asset", "lens": float(lens)},
+        "passes": [], "depth_range": [0.1, 400],
+        "turntable": {"asset": "asset", "fill": float(fill), "stills": list(stills), "front": float(front),
+                      "backdrop": backdrop, "head_bone": head_bone, "lens": float(lens), "studio": realistic}}
 
 
 def cmd_turntable(a):
     look = a.look or "clay"
     if look not in spec.look_ids():
         raise Refused(f"--look {look!r} is not one of {', '.join(spec.look_ids())}")
+    if a.frames is not None and a.frames < 2:
+        raise Refused("--frames must be at least 2")
+    seconds = a.frames / TURNTABLE_FPS if a.frames is not None else (a.seconds or 4.0)
+    if a.hdri and look != "realistic":
+        raise Refused("--hdri is for --look realistic")
+    if a.hdri and not os.path.isfile(a.hdri):
+        raise Refused(f"--hdri {a.hdri}: no such file")
+    stills = stills_arg(a.stills)
     check_out_dir(a.out)
-    data = turntable_spec(a.asset, look, a.seconds, a.out)
+    data = turntable_spec(a.asset, look, seconds, fill=a.fill, stills=stills, front=a.front, backdrop=a.backdrop,
+                          head_bone=a.head_bone, lens=a.lens, fit=a.fit, hdri=a.hdri, engine=a.engine)
     errors = spec.validate(data, os.getcwd())
     if errors:
         raise Refused("turntable: " + "; ".join(errors))
@@ -526,27 +614,40 @@ def cmd_turntable(a):
     extra = ["--preview"] if a.preview else []
     if a.size:
         extra += ["--size", "%dx%d" % size_of(a.size)]
+    if a.samples:
+        extra += ["--samples", str(a.samples)]
     ff = ffmpeg_path()
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
     if not ff:
         extra += ["--mp4", mp4]
     hook = review_hook(a)
+    stem = os.path.splitext(asset_label(a.asset).replace("preset:", "").split("#")[0])[0]
 
     def work():
-        info = render_into(path, a.out, extra, a.engine or "eevee", a, keep=("turntable.json",), hook=hook)
+        info = render_into(path, a.out, extra, data["engine"], a, keep=("turntable.json",), hook=hook)
         if info is None:
             return None, []
+        missing = [v for v in stills if not os.path.isfile(os.path.join(a.out, f"still_{v}.png"))]
+        if missing:
+            raise Failed(f"Blender finished without still_{missing[0]}.png")
         if ff:
             encode_ffmpeg(ff, os.path.join(a.out, "beauty"), 1, info["fps"], mp4)
             info["mp4"] = {"file": "beauty.mp4", "encoder": "ffmpeg"}
             write_json(os.path.join(a.out, "render.json"), info)
-        stem = os.path.splitext(os.path.basename(a.asset.replace("preset:", "")))[0]
-        return info, [render_entry(a.out, info, f"turntable {stem} ({look})")]
+        eng = f"blender {info.get('engine', '')}".strip()
+        renders = [render_entry(a.out, info, f"turntable {stem} ({look})")]
+        renders += [{"label": f"{stem} {v}", "image": os.path.join(a.out, f"still_{v}.png"), "engine": eng}
+                    for v in stills]
+        return info, renders
 
     info = with_review(hook, f"turntable {asset_label(a.asset)} ({look})", work)
     if info is None:
         return 0
-    print(f"turntable {a.asset} ({look}) {info['frame_count']} frames · {info['mean_seconds_per_frame']} s/frame -> {a.out}")
+    tt = info.get("turntable") or {}
+    print(f"turntable {asset_label(a.asset)} ({look}) {info['frame_count']} frames · "
+          f"{info['mean_seconds_per_frame']} s/frame"
+          + (f" · camera {tt['camera_distance_m']} m, {tt.get('height_m')} m tall" if tt.get("camera_distance_m") else "")
+          + (f" · stills {', '.join(stills)}" if stills else "") + f" -> {a.out}")
     return 0
 
 
@@ -563,6 +664,14 @@ def cmd_lookbook(a):
         os.makedirs(a.out, exist_ok=True)
     book = {"tool": "tools/blender/blender.py lookbook", "spec": os.path.abspath(spec_path),
             "spec_sha256": sha256(spec_path), "frame": frame, "size": list(size), "looks": {}}
+    with contextlib.nullcontext() if a.dry_run else gpu_turn(a):         # one GPU turn for every look
+        _lookbook_looks(a, spec_path, shot, frame, size, book)
+    if not a.dry_run:
+        write_json(os.path.join(a.out, "lookbook.json"), book)
+    return 0
+
+
+def _lookbook_looks(a, spec_path, shot, frame, size, book):
     for look in spec.look_ids():
         work = os.path.join(a.out, f".work-{look}")
         extra = ["--look", look, "--frames", str(frame), "--passes", "none", "--size", "%dx%d" % size]
@@ -576,9 +685,6 @@ def cmd_lookbook(a):
         book["looks"][look] = {"file": f"{look}.png", "engine": info["engine"], "device": info["device"],
                                "seconds": info["seconds_per_frame"][0], "fallback": info.get("fallback")}
         print(f"lookbook {look} -> {os.path.join(a.out, look + '.png')} ({info['seconds_per_frame'][0]} s)")
-    if not a.dry_run:
-        write_json(os.path.join(a.out, "lookbook.json"), book)
-    return 0
 
 
 def main(argv=None):
@@ -618,11 +724,24 @@ def main(argv=None):
     q.add_argument("--size", default=None, help="WxH, same vertical field of view")
     q.add_argument("--samples", type=int, default=None)
     common(q)
-    q = sp.add_parser("turntable", help="one camera turn around an asset (.glb/.gltf or preset:<id>)")
+    q = sp.add_parser("turntable", help="one turn of an asset (.glb/.gltf, <file>.blend[#Collection], preset:<id>) "
+                                        "in front of a fixed camera, + review stills")
     q.add_argument("asset")
     q.add_argument("--out", required=True)
-    q.add_argument("--seconds", type=float, default=4.0)
-    q.add_argument("--size", default=None)
+    q.add_argument("--seconds", type=float, default=None, help="length of the turn (default 4; --frames wins)")
+    q.add_argument("--frames", type=int, default=None, help=f"frames of the turn at {TURNTABLE_FPS} fps (e.g. 72)")
+    q.add_argument("--size", default=None, help="WxH (default 1920x1080), same vertical field of view")
+    q.add_argument("--samples", type=int, default=None, help="render samples (default: the look's)")
+    q.add_argument("--fill", type=float, default=0.7, help="share of the frame height the asset fills (default 0.7)")
+    q.add_argument("--stills", default=TURNTABLE_STILLS,
+                   help=f"review stills, of {','.join(spec.TURNTABLE_VIEWS)} or none (default {TURNTABLE_STILLS})")
+    q.add_argument("--front", type=float, default=0.0,
+                   help="degrees that turn the asset's front to the camera (a model facing +Y: 180)")
+    q.add_argument("--backdrop", choices=spec.BACKDROPS, default="cyc", help="seamless studio cyc (default) or none")
+    q.add_argument("--head-bone", default="head", help="bone of the head close-up (default head; else bbox top)")
+    q.add_argument("--lens", type=float, default=50.0, help="focal length mm (default 50)")
+    q.add_argument("--fit", type=float, default=None, help="scale the asset to this many metres (default: own size)")
+    q.add_argument("--hdri", default=None, help="look realistic: .hdr/.exr for soft fill (default: grey studio sky)")
     common(q)
     review_arg(q)
     q = sp.add_parser("keyframes", help="first.png + last.png + keyframes.json (for the local video model)")

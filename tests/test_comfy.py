@@ -1,6 +1,6 @@
-"""tools/comfy/comfy.py: the local ComfyUI video engine (MiniMax H3). A fake ComfyUI HTTP server runs in a thread;
-nothing reaches a real server, a GPU or the network."""
-import csv, hashlib, io, json, os, re, socket, subprocess, sys, threading, time, unittest
+"""tools/comfy/comfy.py: the local ComfyUI engine (MiniMax H3 video, Qwen-Image stills). A fake ComfyUI HTTP server
+(with a websocket for the sampler progress) runs in a thread; nothing reaches a real server, a GPU or the network."""
+import base64, csv, hashlib, io, json, os, re, socket, struct, subprocess, sys, threading, time, unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -12,8 +12,19 @@ from helpers import REPO, TmpDirCase, load, run_main
 
 comfy = load("comfy/comfy.py", "film_comfy")
 ark = comfy.ark
-I2V, R2V = "h3-i2v", "h3-r2v"
+I2V, R2V, QWEN = "h3-i2v", "h3-r2v", "qwen-t2i"
 MP4 = b"\x00\x00\x00\x18ftypmp42fake-clip-with-audio"
+_png = io.BytesIO()
+Image.new("RGB", (1664, 928), (90, 40, 20)).save(_png, "PNG")
+PNG = _png.getvalue()
+
+
+def ws_frame(data, op=1):
+    """A server -> client websocket frame (unmasked)."""
+    data = json.dumps(data).encode() if op == 1 else data
+    n = len(data)
+    head = bytes([0x80 | op]) + (bytes([n]) if n < 126 else bytes([126]) + struct.pack(">H", n))
+    return head + data
 LOCK = json.loads((REPO / "tools" / "comfy" / "comfy.lock.json").read_text(encoding="utf-8"))
 PAID = ("MinimaxTextToVideoNode", "MinimaxImageToVideoNode", "MinimaxSubjectToVideoNode", "MinimaxHailuoVideoNode",
         "MinimaxHailuo03TextToVideoNode", "MinimaxHailuo03FirstLastFrameNode", "MinimaxHailuo03ReferenceNode")
@@ -30,6 +41,7 @@ class FakeComfy:
         self.pending, self.drop_posts = [], set()      # /queue pending ids; POST paths answered by a dropped connection
         self.calls, self.uploads, self.prompts, self.interrupts, self.deletes = [], {}, [], [], []
         self.polls = {}
+        self.ws, self.ws_clients, self.ws_done = True, [], threading.Event()   # /ws: sampler progress of image jobs
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -48,9 +60,49 @@ class FakeComfy:
                 n = int(self.headers.get("Content-Length") or 0)
                 return self.rfile.read(n) if n else b""
 
+            def websocket(self, u):
+                """ComfyUI's /ws: a status message, then for our prompt a binary preview, the KSampler's progress
+                (value 1..steps), one progress of another node; stays open until the client goes."""
+                key = self.headers.get("Sec-WebSocket-Key", "")
+                accept = base64.b64encode(hashlib.sha1((key + comfy.WS_GUID).encode()).digest()).decode()
+                self.send_response(101)
+                self.send_header("Upgrade", "websocket")
+                self.send_header("Connection", "Upgrade")
+                self.send_header("Sec-WebSocket-Accept", accept)
+                self.end_headers()
+                cid = parse_qs(u.query).get("clientId", [""])[0]
+                fake.ws_clients.append(cid)
+                self.wfile.write(ws_frame({"type": "status", "data": {"sid": cid}}))
+                self.wfile.flush()
+                t0, p = time.time(), None
+                while time.time() - t0 < 10 and p is None:
+                    p = next((x for x in fake.prompts if x.get("client_id") == cid), None)
+                    time.sleep(0.005)
+                if p is not None:
+                    pid, steps = p["prompt_id"], p["prompt"]["9"]["inputs"]["steps"]
+                    out = ws_frame(b"\x00\x00\x00\x01\x00\x00\x00\x02preview-jpeg", op=2)
+                    out += ws_frame({"type": "progress", "data": {"value": 1, "max": 1, "prompt_id": "other",
+                                                                  "node": "9"}})
+                    for v in range(1, steps + 1):
+                        out += ws_frame({"type": "progress", "data": {"value": v, "max": steps, "prompt_id": pid,
+                                                                      "node": "9"}})
+                    out += ws_frame({"type": "progress", "data": {"value": 1, "max": 1, "prompt_id": pid,
+                                                                  "node": "10"}})
+                    self.wfile.write(out)
+                    self.wfile.flush()
+                    fake.ws_done.set()
+                try:
+                    self.connection.settimeout(10)
+                    self.rfile.read(1)
+                except OSError:
+                    pass
+                self.close_connection = True
+
             def do_GET(self):
                 fake.calls.append(("GET", self.path))
                 u = urlparse(self.path)
+                if u.path == "/ws" and fake.ws:
+                    return self.websocket(u)
                 if u.path == "/system_stats":
                     argv = ["main.py", "--listen", "127.0.0.1"] + (["--offline"] if fake.offline else [])
                     return self.send_json({"system": {"comfyui_version": "0.43.1", "python_version": "3.13.12 (x)",
@@ -81,10 +133,11 @@ class FakeComfy:
                 if u.path == "/view":
                     q = parse_qs(u.query)
                     fake.view = q
+                    data = PNG if q["filename"][0].endswith(".png") else MP4
                     self.send_response(200)
-                    self.send_header("Content-Length", str(len(MP4)))
+                    self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
-                    return self.wfile.write(MP4)
+                    return self.wfile.write(data)
                 self.send_json({"error": "not found"}, 404)
 
             def do_POST(self):
@@ -120,6 +173,14 @@ class FakeComfy:
 
     def history(self, pid):
         start = ["execution_start", {"prompt_id": pid, "timestamp": 1000}]
+        prompt = next((p["prompt"] for p in self.prompts if p.get("prompt_id") == pid), {})
+        if self.mode == "success" and any(n.get("class_type") == "SaveImage" for n in prompt.values()):
+            if self.ws_clients:
+                self.ws_done.wait(5)            # the sampler's progress went out before the job ends
+            return {"outputs": {"11": {"images": [{"filename": "qwen-t2i_00001_.png", "subfolder": "film-lab",
+                                                   "type": "output"}]}},
+                    "status": {"status_str": "success", "completed": True,
+                               "messages": [start, ["execution_success", {"prompt_id": pid, "timestamp": 136000}]]}}
         if self.mode == "success":
             return {"outputs": {"17": {"images": [{"filename": "h3_00001_.mp4", "subfolder": "film-lab",
                                                    "type": "output"}], "animated": [True]}},
@@ -145,6 +206,7 @@ class ComfyCase(TmpDirCase, unittest.TestCase):
         env["FILM_COMFY_URL"] = "http://127.0.0.1:9"          # closed port unless a test starts the fake server
         env["FILM_COMFY_MODELS"] = str(self.tmp / "models")
         env["FILM_COMFY_WORK"] = str(self.tmp / "comfy-work")   # `start` never writes into the lab's out/
+        env["FILM_GPU_LOCK"] = str(self.tmp / "gpu" / "gpu.lock")   # never the lab's own GPU lock
         self._env = mock.patch.dict(os.environ, env, clear=True)
         self._env.start()
         for name, val in (("POLL_SECONDS", 0.01), ("PROGRESS_SECONDS", 0), ("START_POLL", 0.1)):
@@ -183,6 +245,11 @@ class ComfyCase(TmpDirCase, unittest.TestCase):
         if ledger:
             args += ["--ledger", self.ledger]
         return self.run_comfy(*args)
+
+    def run_still(self, *extra, out=None):
+        self.png = out or str(self.tmp / "concepts" / "phuong-hoang_v01.png")
+        return self.run_comfy("run", QWEN, "--prompt", "a mythic phoenix of ink and fire, concept sheet", "--seed",
+                              "11", "--out", self.png, "--ledger", self.ledger, *extra)
 
     def rows(self):
         if not os.path.exists(self.ledger):
@@ -234,14 +301,17 @@ class TestPure(ComfyCase):
         classes = set()
         for wid in comfy.workflow_ids():
             classes |= comfy.graph_classes(comfy.load_workflow(wid)[0])
-        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V])
+        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V, QWEN])
         self.assertEqual(comfy.ALLOWED_NODES, classes | {"LoadImage", "MiniMaxH3AddGuide"})
         for cls in PAID:
             self.assertNotIn(cls, comfy.ALLOWED_NODES)
         self.assertFalse([c for c in comfy.ALLOWED_NODES if c.startswith("Minimax")])
+        self.assertEqual(comfy.graph_classes(comfy.load_workflow(QWEN)[0]),
+                         {"UNETLoader", "LoraLoaderModelOnly", "CLIPLoader", "VAELoader", "ModelSamplingAuraFlow",
+                          "CLIPTextEncode", "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage"})
 
     def test_every_variant_is_a_closed_graph(self):
-        for wid in comfy.workflow_ids():
+        for wid in (I2V, R2V):
             graph, meta, _ = comfy.load_workflow(wid)
             for node, inp in (x for v in meta["params"].values() for x in v):
                 self.assertIn(inp, graph[node]["inputs"], f"{wid} {node}.{inp}")
@@ -279,12 +349,14 @@ class TestPure(ComfyCase):
         # A workflow JSON cannot hold a comment: its .meta.json names the template it was adapted from, and
         # THIRD_PARTY.md has a row for it (CLAUDE.md: adapted code names its source).
         third = (REPO / "THIRD_PARTY.md").read_text(encoding="utf-8")
-        for wid in comfy.workflow_ids():
+        for wid in (I2V, R2V):
             meta = comfy.load_workflow(wid)[1]
             self.assertIn("https://github.com/Comfy-Org/workflow_templates", meta.get("source", ""), wid)
             self.assertRegex(meta["source"], r"video_minimax_h3_\w+\.json", wid)
             self.assertIn(f"| `tools/comfy/workflows/{wid}.json` |", third)
         self.assertIn("### MIT: Comfy-Org/workflow_templates", third)
+        # qwen-t2i is the lab's own graph of core nodes (nothing copied): its meta says so
+        self.assertIn("no template file copied", comfy.load_workflow(QWEN)[1]["source"])
 
     def test_budget_rule_states_the_local_engine_exception(self):
         # CLAUDE.md asks --budget + --ledger on every generation command; comfy.py run takes --ledger only (no
@@ -301,7 +373,7 @@ class TestPure(ComfyCase):
     def test_lock_and_graph_models(self):
         lock = comfy.load_lock()
         self.assertEqual(lock["custom_nodes"], [])
-        self.assertEqual({m["set"] for m in lock["models"]}, {"minimax-h3"})
+        self.assertEqual({m["set"] for m in lock["models"]}, {"minimax-h3", "qwen-image"})
         self.assertFalse(any("wan" in m["file"].lower() for m in lock["models"]))
         for wid in comfy.workflow_ids():
             graph = comfy.load_workflow(wid)[0]
@@ -312,9 +384,16 @@ class TestPure(ComfyCase):
         self.assertEqual(unet, {I2V: "minimax_h3_fl2va_pruned_int8_convrot.safetensors",
                                 R2V: "minimax_h3_ref2va_pruned_int8_convrot.safetensors"})
         self.assertEqual(comfy.load_workflow(I2V)[0]["3"]["inputs"]["type"], "minimax")
+        q = comfy.load_workflow(QWEN)[0]
+        self.assertEqual((q["1"]["inputs"]["unet_name"], q["3"]["inputs"]["type"]),
+                         ("qwen_image_2512_fp8_e4m3fn.safetensors", "qwen_image"))
+        sizes = {m["file"]: m["size"] for m in lock["models"] if m["set"] == "qwen-image"}
+        self.assertEqual(sizes["qwen_image_vae.safetensors"], 253806246)       # as on the owner's disk
+        self.assertEqual([m["optional"] for m in lock["models"] if m["set"] == "qwen-image" and m.get("optional")],
+                         ["--turbo"])
 
     def test_canvas_sizes_fit_the_nodes(self):
-        for wid in comfy.workflow_ids():
+        for wid in (I2V, R2V):
             meta = comfy.load_workflow(wid)[1]
             self.assertEqual(meta["res"], {"480p": [864, 480], "768p": [1344, 768]})
             for w, h in meta["res"].values():
@@ -759,7 +838,7 @@ class TestOtherCommands(ComfyCase):
         self.desktop()
         code, out, _ = self.run_comfy("models")
         self.assertEqual(code, 0, out)
-        self.assertIn("7/7 ok", out)
+        self.assertIn("11/11 ok", out)                                  # minimax-h3 7 + qwen-image 4
         os.remove(self.tmp / "models" / "diffusion_models" / "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
         code, out, _ = self.run_comfy("models", "--set", "minimax-h3")
         self.assertEqual(code, 1)
@@ -910,6 +989,242 @@ class TestOtherCommands(ComfyCase):
         work = self.tmp / "comfy-work"
         self.assertTrue((work / "server.log").exists())
         self.assertTrue(all((work / k).is_dir() for k in ("input", "output", "temp", "user")))
+
+
+class TestQwenImage(ComfyCase):
+    """Issue #54: qwen-t2i (Qwen-Image 2512 text-to-image) for concept art, local and free."""
+
+    def test_graph_variants(self):
+        graph, meta, _ = comfy.load_workflow(QWEN)
+        self.assertEqual((meta["kind"], meta["ledger_model"], meta["output"]["type"]), ("image", "comfy:qwen-image", "image"))
+        for node, inp in (x for v in meta["params"].values() for x in v):
+            self.assertIn(inp, graph[node]["inputs"], f"{node}.{inp}")
+        v = {"prompt": "p", "negative": "n", "width": 1328, "height": 1328, "seed": 5, "steps": 30, "cfg": 2.5,
+             "prefix": "film-lab/qwen-t2i", "turbo": False}
+        g = comfy.build_graph(graph, meta, v)
+        self.assertEqual((comfy.dangling(g), comfy.disallowed(g)), ([], []))
+        self.assertNotIn("2", g)                                             # no LoRA without --turbo
+        self.assertEqual(g["5"]["inputs"], {"model": ["1", 0], "shift": 3.1})   # ModelSamplingAuraFlow shift 3.1
+        k = g["9"]["inputs"]
+        self.assertEqual((k["seed"], k["steps"], k["cfg"], k["sampler_name"], k["scheduler"]), (5, 30, 2.5, "euler", "simple"))
+        self.assertEqual((g["6"]["inputs"]["text"], g["7"]["inputs"]["text"]), ("p", "n"))
+        self.assertEqual((g["8"]["class_type"], g["8"]["inputs"]["width"], g["8"]["inputs"]["height"]),
+                         ("EmptySD3LatentImage", 1328, 1328))
+        self.assertEqual(g["3"]["inputs"]["type"], "qwen_image")
+        gt = comfy.build_graph(graph, meta, dict(v, turbo=True, steps=2, cfg=1.0))
+        self.assertEqual(gt["5"]["inputs"]["model"], ["2", 0])
+        self.assertEqual(gt["2"]["inputs"]["lora_name"], "Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16.safetensors")
+        self.assertEqual(comfy.dangling(gt), [])
+
+    def test_dry_run_is_clean_and_sends_nothing(self):
+        f = self.server()
+        code, out, err = self.run_still("--dry-run")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(f.calls, [])
+        self.assertFalse(os.path.exists(self.ledger))
+        self.assertIn("workflow qwen-t2i (comfy:qwen-image) · 10 nodes · 1664x928 · steps 30 · cfg 2.5 · seed 11", out)
+        self.assertIn("estimate ~135 s of GPU", out)                       # the owner's measure: 30 steps, 1664x928
+        self.assertIn("dry-run: nothing uploaded or queued, no ledger row", out)
+        self.assertEqual(err, "")
+        code, out, err = self.run_still("--dry-run", "--turbo", "--size", "1328x1328", "--negative", "blurry")
+        self.assertEqual(code, 0, err)
+        self.assertIn("11 nodes · 1328x1328 · steps 2 · cfg 1 (turbo LoRA)", out)
+        self.assertIn("Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16.safetensors", out)
+        self.assertIn("negative:\n  blurry", out)
+        self.assertIn("drafts only", err)
+        code, out, err = self.run_still("--dry-run", "--size", "1024x768")
+        self.assertEqual(code, 0, err)
+        self.assertIn("not one of qwen-t2i's trained sizes", err)
+
+    def test_local_refusals(self):
+        (self.tmp / "concepts").mkdir()
+        (self.tmp / "concepts" / "old_v01.png").write_bytes(PNG)
+        start = self.start
+        for extra, want in ((["--size", "1000x1000"], "needs multiples of 16 (e.g. 992x992)"),
+                            (["--size", "4096x2048"], "each side must be 256..2048"),
+                            (["--size", "big"], "use WxH"),
+                            (["--image", start], "--image belong to the video workflows"),
+                            (["--seconds", "5", "--res", "480p"], "--seconds, --res belong to the video workflows"),
+                            (["--cfg", "0"], "--cfg must be > 0"),
+                            (["--steps", "0"], "--steps must be >= 1")):
+            with self.subTest(extra=extra):
+                code, _, err = self.run_still(*extra)
+                self.assertEqual(code, 2, err)
+                self.assertIn(want, err)
+        code, _, err = self.run_still(out=str(self.tmp / "concepts" / "old_v01.png"))
+        self.assertEqual(code, 2)
+        self.assertIn("next free: ", err)
+        code, _, err = self.run_still(out=str(self.tmp / "concepts" / "x_v01.jpg"))
+        self.assertEqual(code, 2)
+        self.assertIn("saves PNG", err)
+        code, _, err = self.run_comfy("run", QWEN, "--prompt", "x", "--out", str(self.tmp / "a_v01.png"))
+        self.assertEqual(code, 2)
+        self.assertIn("run needs --ledger", err)
+        code, _, err = self.run_clip(I2V, "--cfg", "3")
+        self.assertEqual(code, 2)
+        self.assertIn("--size/--cfg are for the image workflows", err)
+        self.assertFalse(os.path.exists(self.ledger))
+
+    def test_happy_path_png_sidecar_ledger_and_steps(self):
+        f = self.server()
+        pf = self.tmp / "prompt.txt"
+        pf.write_text("  phượng hoàng mực tàu, khung concept\n", encoding="utf-8")
+        code, out, err = self.run_comfy("run", QWEN, "--prompt-file", str(pf), "--seed", "11", "--steps", "6",
+                                        "--out", str(self.tmp / "concepts" / "ph_v01.png"), "--ledger", self.ledger)
+        self.assertEqual(code, 0, err)
+        png = self.tmp / "concepts" / "ph_v01.png"
+        self.assertEqual(png.read_bytes(), PNG)
+        (prompt,) = f.prompts
+        g = prompt["prompt"]
+        self.assertEqual(g["6"]["inputs"]["text"], "phượng hoàng mực tàu, khung concept")
+        self.assertEqual((g["9"]["inputs"]["steps"], g["9"]["inputs"]["seed"]), (6, 11))
+        self.assertEqual(comfy.disallowed(g), [])
+        self.assertEqual(f.uploads, {}, "text-to-image uploads nothing")
+        self.assertEqual(f.ws_clients, [prompt["client_id"]], "progress came over the websocket of our client id")
+        self.assertEqual(f.view["filename"], ["qwen-t2i_00001_.png"])
+        for v in range(1, 7):
+            self.assertIn(f"step {v}/6 elapsed", out)
+        self.assertNotIn("step 1/1", out, "another node's or another prompt's progress is not a sampler step")
+        side = json.loads((self.tmp / "concepts" / "ph_v01.png.json").read_text(encoding="utf-8"))
+        self.assertEqual((side["workflow"], side["model"], side["width"], side["height"], side["steps"], side["cfg"]),
+                         (QWEN, "comfy:qwen-image", 1664, 928, 6, 2.5))
+        self.assertEqual((side["seed"], side["turbo"], side["size"], side["gpu_seconds"]), (11, False, [1664, 928], 135.0))
+        rows = self.rows()
+        self.assertEqual([r["status"] for r in rows], ["pending", "ok"])
+        last = rows[-1]
+        self.assertEqual((last["kind"], last["model"], last["size"], last["count"], last["seconds"]),
+                         ("image", "comfy:qwen-image", "1664x928", "1", ""))
+        self.assertEqual((last["task_id"], last["usage"], last["agent"]), (prompt["prompt_id"], "gpu_s=135", "film-animator"))
+        self.assertIn("seed=11", last["note"])
+        self.assertEqual(ark.cost_units(last), 0.0)                     # local: free against every cap
+        self.assertFalse((self.tmp / "gpu" / "gpu.owner").exists(), "the GPU lock is given back")
+
+    def test_without_websocket_progress_is_by_time(self):
+        f = self.server()
+        f.ws = False
+        code, out, err = self.run_still()
+        self.assertEqual(code, 0, err)
+        self.assertIn("no websocket: progress by time", out)
+        self.assertEqual(Path(self.png).read_bytes(), PNG)
+
+    def test_errors_are_ledger_rows(self):
+        f = self.server()
+        f.mode = "error"
+        code, _, err = self.run_still()
+        self.assertEqual(code, 1)
+        self.assertIn("CUDA out of memory", err)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending", "failed"])
+        self.assertFalse(os.path.exists(self.png))
+        f.mode = "never"
+        code, _, err = self.run_still("--timeout", "0.2", out=str(self.tmp / "concepts" / "b_v01.png"))
+        self.assertEqual(code, 1)
+        self.assertEqual(self.rows()[-1]["status"], "interrupted")
+        self.assertTrue(f.interrupts)
+
+    def test_review_hook_kind_image_steps_and_the_png(self):
+        self.server()
+        hook = mock.MagicMock()
+        with mock.patch.object(comfy, "review_hook", return_value=hook) as rh:
+            code, out, err = self.run_still("--steps", "4", "--review", "concept-a")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(rh.call_args.args[1], "image")
+        hook.start.assert_called_once()
+        steps = [c.args for c in hook.update.call_args_list if c.args[1].startswith("step ")]
+        self.assertEqual([s[1].split(" · ")[0] for s in steps], ["step 1/4", "step 2/4", "step 3/4", "step 4/4"])
+        self.assertEqual([round(s[0], 2) for s in steps], [0.25, 0.5, 0.75, 0.99])
+        self.assertTrue(all(c.kwargs.get("force") for c in hook.update.call_args_list if c.args[1].startswith("step ")))
+        (st,) = hook.rv.step.call_args_list
+        self.assertEqual(st.args[0], "phuong-hoang_v01")
+        self.assertEqual(st.kwargs["image"], self.png)
+        self.assertEqual(st.kwargs["stats"]["engine"], "comfy:qwen-image")
+        self.assertNotIn("prompt", json.dumps(st.kwargs["stats"]), "the public page never gets the prompt")
+        hook.finish.assert_called_once()
+        self.assertEqual(hook.finish.call_args.args[0], [])
+
+    def test_review_events_with_the_real_client(self):
+        events = []
+
+        class Ingest(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                events.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"{}")
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), Ingest)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(lambda: (srv.shutdown(), srv.server_close()))
+        os.environ["FILM_REVIEW_URL"] = f"http://127.0.0.1:{srv.server_address[1]}"
+        os.environ["FILM_REVIEW_MEDIA"] = str(self.tmp / "media")
+        self.server()
+        code, out, err = self.run_still("--steps", "3", "--review", "concept-a")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((events[0]["type"], events[0]["kind"], events[0]["build"]), ("build", "image", "concept-a"))
+        types = [e["type"] for e in events]
+        self.assertEqual(types[-3:], ["step", "job", "done"])
+        step = events[-3]
+        self.assertEqual((step["label"], step["image"]), ("phuong-hoang_v01", "concept-a/phuong-hoang_v01.png"))
+        self.assertEqual((self.tmp / "media" / "concept-a" / "phuong-hoang_v01.png").read_bytes(), PNG)
+        msgs = [e.get("message", "") for e in events if e["type"] == "job"]
+        self.assertTrue(any(m.startswith("step 3/3") for m in msgs), msgs)
+        self.assertRegex(events[1]["job"], r"^comfy-[0-9a-f-]{36}$")
+        self.assertNotIn("phượng", json.dumps(events, ensure_ascii=False))
+        self.assertNotIn(str(self.tmp), json.dumps(events), "no local path reaches the public page")
+
+    def test_review_client_gets_build_kind_image(self):
+        calls = []
+        client = self.tmp / "client.py"
+        client.write_text("import json, os\n"
+                          "def job_hook(build, tool, kind='render', **kw):\n"
+                          "    with open(os.environ['HOOK_LOG'], 'a') as f:\n"
+                          "        f.write(json.dumps([build, tool, kind]) + '\\n')\n"
+                          "    return None\n", encoding="utf-8")
+        log = self.tmp / "hook.log"
+        import argparse
+        with mock.patch.object(comfy, "REVIEW_CLIENT", str(client)), mock.patch.dict(os.environ, {"HOOK_LOG": str(log)}):
+            comfy.review_hook(argparse.Namespace(review="concept-a", dry_run=False), "image")
+            comfy.review_hook(argparse.Namespace(review="clip-a", dry_run=False))
+        calls = [json.loads(l) for l in log.read_text().splitlines()]
+        self.assertEqual(calls, [["concept-a", "comfy", "image"], ["clip-a", "comfy", "clip"]])
+
+    def test_gpu_lock_is_taken_and_a_busy_gpu_refuses(self):
+        f = self.server()
+        hold = ("import sys, time; sys.path.insert(0, sys.argv[1]); import gpu_run\n"
+                "with gpu_run.gpu_lock('blender render s21'):\n"
+                "    print('held', flush=True); time.sleep(20)\n")
+        env = {k: v for k, v in os.environ.items() if k != "FILM_GPU_HELD"}
+        p = subprocess.Popen([sys.executable, "-c", hold, str(REPO / "tools")], stdout=subprocess.PIPE, text=True,
+                             env=env)
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        self.assertEqual(p.stdout.readline().strip(), "held")
+        os.environ["FILM_GPU_WAIT"] = "0.3"
+        code, _, err = self.run_still()
+        self.assertEqual(code, 2, err)
+        self.assertIn("the GPU is still busy", err)
+        self.assertIn("blender render s21", err)
+        self.assertFalse(os.path.exists(self.ledger), "nothing sent, no ledger row")
+        self.assertEqual(f.prompts, [])
+        code, _, err = self.run_clip(I2V)
+        self.assertEqual(code, 2, err)                                   # the video path waits for the GPU too
+        self.assertEqual(f.prompts, [])
+        code, out, err = self.run_still("--dry-run")
+        self.assertEqual(code, 0, err)                                   # --dry-run never waits
+        p.kill()
+        p.wait()
+        os.environ.pop("FILM_GPU_WAIT")
+        code, _, err = self.run_still(out=str(self.tmp / "concepts" / "c_v01.png"))
+        self.assertEqual(code, 0, err)
+
+    def test_workflows_lists_the_image_workflow(self):
+        code, out, _ = self.run_comfy("workflows")
+        self.assertEqual(code, 0)
+        self.assertIn("qwen-t2i  Qwen-Image 2512", out)
+        self.assertIn("model comfy:qwen-image · set qwen-image", out)
+        self.assertIn("--size WxH (default 1664x928)", out)
+        self.assertIn("~135 s for 30 steps at 1664x928", out)
 
 
 if __name__ == "__main__":

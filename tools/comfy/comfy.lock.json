@@ -80,6 +80,47 @@
       "sha256": null,
       "url": null,
       "license": null
+    },
+    {
+      "set": "qwen-image",
+      "folder": "diffusion_models",
+      "file": "qwen_image_2512_fp8_e4m3fn.safetensors",
+      "workflows": ["qwen-t2i"],
+      "size": 20430679144,
+      "sha256": null,
+      "url": null,
+      "license": null
+    },
+    {
+      "set": "qwen-image",
+      "folder": "text_encoders",
+      "file": "qwen_2.5_vl_7b_fp8_scaled.safetensors",
+      "workflows": ["qwen-t2i"],
+      "size": 9384670680,
+      "sha256": null,
+      "url": null,
+      "license": null
+    },
+    {
+      "set": "qwen-image",
+      "folder": "vae",
+      "file": "qwen_image_vae.safetensors",
+      "workflows": ["qwen-t2i"],
+      "size": 253806246,
+      "sha256": null,
+      "url": null,
+      "license": null
+    },
+    {
+      "set": "qwen-image",
+      "folder": "loras",
+      "file": "Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16.safetensors",
+      "workflows": ["qwen-t2i"],
+      "optional": "--turbo",
+      "size": 2359534464,
+      "sha256": null,
+      "url": null,
+      "license": null
     }
   ]
 }

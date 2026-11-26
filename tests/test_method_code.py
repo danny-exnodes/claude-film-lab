@@ -92,6 +92,12 @@ class CodeEpisode(TmpDirCase, unittest.TestCase):
         code, out, _ = run_main(st.main, [str(self.ep), "--media", str(self.media), "--gate", "G2"])
         self.assertIn("[ok] a character.json (characters/<slug>/) (characters/giot/character.json)", out)
         self.assertIn("[ok] turntable of the characters", out)
+        self.assertIn("[MISSING] creature table ## Sinh vật của tập", out)
+        md = self.ep / "EPISODE.md"            # no creature in this episode: an empty table passes the gate
+        md.write_text(md.read_text(encoding="utf-8") + "\n## Sinh vật của tập\n\n| slug | Tên | Chính | Ảnh sách | "
+                      "Concept |\n|---|---|---|---|---|\n", encoding="utf-8")
+        code, out, _ = run_main(st.main, [str(self.ep), "--media", str(self.media), "--gate", "G2"])
+        self.assertIn("(no creature listed)", out)
         self.assertIn("Gate G2: READY", out)
 
 

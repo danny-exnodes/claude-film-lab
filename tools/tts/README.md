@@ -46,6 +46,10 @@ thiếu watermark phải đọc lại cả tập và trộn lại âm thanh. `st
 `<media>/vo/tts-log.json` (tập không có log lời bình: không áp dụng).
 Lỗi `External data path escapes model directory` → `docs/RUNBOOK.md`.
 
+**Máy chủ lab Windows** (WSL không có `pip`, ổ C: đầy): VieNeu cài trong venv trên D:, cache pip/Hugging Face cũng trên D:
+(`docs/setup-local-windows.md`). `FILM_TTS_PYTHON=<python của venv>` làm `python3 tools/tts/vieneu_tts.py …` tự chạy lại
+bằng python đó (cùng tham số; giá trị sai → mã 2); `tools/doctor.sh` dòng `tts`/`tts-watermark` kiểm venv đó khi biến có mặt.
+
 ## Dùng
 
 ```bash

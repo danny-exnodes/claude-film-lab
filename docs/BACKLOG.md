@@ -289,6 +289,21 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - **#36** Done: `drive_sync.py save` writes downloads from the session transcript; confirm the transcript shape on the first real pull (drive-4).
 - **#37** Done: the setup script installs vieneu + CPU torch + perth; doctor `tts`/`tts-watermark`; `--require-watermark` and G4 check.
 
+## Quy trình sau SHK Q1·T3 (#52, #53, #58, #61, #62, #63): việc còn nợ
+
+- **#61** `save` đọc dòng `Binary content (…) saved to <file>` và `--from-file`: kiểm lại trên lần kéo thật kế tiếp ở
+  phiên local (định dạng dòng lấy từ bản ghi 2026-11-26; connector đổi chữ thì `RE_SAVED` của `tools/drive_sync.py`).
+- **#62** Lời bình đẩy từng file (một tập 101 `VO<n>.wav` = 101 lần `create_file` + `record`): chưa có gói `vo/` một zip
+  như gói shot. `status.py` chỉ báo `UNSAVED media`, không chặn cổng; chưa có hook nhắc trước khi dừng phiên cloud.
+- **#52** Concept sinh vật dùng `comfy.py run qwen-t2i` làm ở nhánh song song (cờ cụ thể theo `comfy.py workflows`); chưa có
+  tập thật qua cổng 3a. `status.py` chỉ đối chiếu bảng `## Sinh vật của tập` với `CHARACTER.md`, chưa so với mã `A-<id>`
+  trong `shots.csv` (id model khác slug sẽ không bị bắt).
+- **#53** Ảnh sách nằm ngoài Drive (bản quyền): phiên cloud chỉ thấy cột `Ảnh sách`, không thấy ảnh (`status.py` ghi chú).
+- **#58** Chưa đo đội 3D song song với `maxTurns: 120` và hàng đợi GPU; `TEAM-3d.md` chưa có kiểm tự động (agent sửa nhầm
+  `ASSETS.md` chỉ lộ ở `git diff`/Drive).
+- **#63** Venv TTS trên D: và wrapper `.tts.sh` là của máy chủ lab, ngoài repo; `tools/doctor.sh` chạy trong WSL mới thấy
+  venv (từ Git Bash: qua `wsl.exe`).
+
 ## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
 
 - Cần người xem: duyệt linh vật "Giọt" (turntable) và lookbook 11 style; chọn style nào lên `status: stable` (mỗi pack

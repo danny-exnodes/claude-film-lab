@@ -189,10 +189,19 @@ style: thuy-mac
 audience: ...
 language: vi
 format: {width: 1920, height: 1080, fps: 24}
+owner_refs: {source: "Sách tranh SHK (Lương Siêu / Sam Trạch / An Lạc)", required: true}   # tuỳ chọn
 ---
 ```
 `series:` = slug dự án = tên thư mục `projects/<project>/`. `characters/<slug>/CHARACTER.md`: nguồn nguyên văn + link,
-cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa.
+cách đọc tên, bảng giải phẫu (mỗi đặc điểm một dòng, ghi nguồn hay diễn giải), prompt khóa, link Drive ảnh khóa; sinh
+vật chính của tập `blender`/`code` thêm mục `## Concept đã duyệt` (file concept chủ dự án chọn, ngày, nguồn/diễn giải –
+khâu 3a, `film-pipeline`).
+`owner_refs` (tuỳ chọn): tư liệu riêng của chủ dự án (sách tranh…). `required: true` → ở khâu 1 mỗi tập, đạo diễn liệt kê
+mọi sinh vật/thần vào bảng `## Sinh vật của tập` (§5) và xin ảnh chụp trang tương ứng **trước** vòng nghiên cứu bổ sung;
+ảnh nằm ở `out/<project>/assets/refs/<slug>/book/`, nguồn ghi trong `out/<project>/assets/refs/<slug>/REFS.md` (không
+lên git, không lên Drive). Sách không có con nào thì chủ dự án xác nhận "không". Ảnh sách có bản quyền: chỉ là chuẩn
+tinh thần và chất lượng, không chép, không đưa vào phim; thiết kế của lab là bản riêng. `status.py` in dòng `OWNER_REFS`;
+G1/G2 cần ảnh (hoặc "không") cho mọi sinh vật của bảng.
 `locations/<slug>/LOCATION.md`: như CHARACTER.md cho bối cảnh. `style/`: ghi chú phong cách riêng của dự án và prompt
 mẫu đã duyệt (style pack dùng chung vẫn ở `styles/<id>/` trong repo).
 
@@ -260,6 +269,16 @@ Một khóa ghi hai lần trong khối YAML (vd. `method: layers` rồi `method:
 (cũng vậy với `budget.yaml`).
 Các mục chữ bắt buộc: `## Ghi chú người dùng (nguyên văn)`, `## Đã khóa (không làm lại)`, `## Việc tiếp theo`, `## Nhật ký`
 (mỗi khâu một dòng: ngày, khâu, kết quả, giờ đẩy Drive – `chưa` nếu chưa đẩy).
+
+Mục `## Sinh vật của tập` (mẫu có sẵn; bảng trống khi tập không có sinh vật): mỗi sinh vật/thần một dòng
+`| slug | Tên | Chính | Ảnh sách | Concept |`. `slug` = `characters/<slug>/` = mã model `A-<slug>` (blender) / `C-<slug>`
+(code); `Chính` = `có` | `không`; `Ảnh sách` = `có` (ảnh trang sách trong `out/<project>/assets/refs/<slug>/book/`) |
+`không` (chủ dự án xác nhận sách không có) | `chờ`; `Concept` = `chờ` | `duyệt <ngày> <file>` (chỉ chữ đầu được đọc).
+Concept được tính là duyệt khi bảng ghi `duyệt` **và** `characters/<slug>/CHARACTER.md` (thư mục tập hoặc dự án) có mục
+`## Concept đã duyệt` không trống. `tools/check_episode.py`: giá trị lạ, thiếu cột → WARN; `owner_refs.required` mà còn
+`chờ` từ khâu 2 → WARN; tập `blender`/`code` có sinh vật chính chưa duyệt concept → WARN ở khâu 3–4, ERROR từ khâu 5
+(sau G2). `tools/status.py` in mục `CREATURES` (và `OWNER_REFS` khi bắt buộc); `--gate G2` của tập `blender`/`code` cần
+bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thiếu).
 
 ## 6. CSV (RFC 4180, UTF-8, có header, trường có dấu phẩy/xuống dòng phải đặt trong ngoặc kép)
 
@@ -404,9 +423,10 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
   của shot, chỉ file ở cấp đầu (`beauty.mp4` – bản compositor dùng –, `render.json`; `_keys`: `first.png`, `last.png`,
   `keyframes.json`); thư mục khung PNG (`beauty/`, `depth/`, `normal/`, `line/`, `mask/`; ~3 MB mỗi khung 1080p) không
   vào gói, trừ `beauty/` của render không có `beauty.mp4` (`--no-mp4`), hoặc khi thêm `--with-frames`. Turntable G2
-  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2. Bản nháp duyệt
-  (`renders/*_draft_*.mp4`) cũng vào `04_SanXuat/…/<YYYY-MM-DD>/`; bản cuối (`renders/*_final_*.mp4`) vào
-  `05_ThanhPham/<thư mục tập>/`, tải riêng từng file.
+  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2.
+- Render (`renders/*`: bản nháp, bản cuối), lời bình (`vo/`) và âm thanh (`audio/`) không chờ duyệt: tải riêng từng file
+  lên `04_SanXuat/<thư mục tập>/_ChuaDuyet/` **ngay khi tạo xong** (§11.6, mục "Media chưa duyệt"); duyệt xong bản nháp
+  chuyển sang `04_SanXuat/…/<YYYY-MM-DD>/`, bản cuối sang `05_ThanhPham/<thư mục tập>/`.
 - cinecode lưu định dạng ở `~/.cinecode/formats`; hook đặt `CINECODE_FORMATS=<repo>/formats` để định dạng sống qua các phiên.
 
 ## 10. Quyết định thiết kế
@@ -442,7 +462,7 @@ ClaudeFilmLab/<ProjectName>/            PascalCase không dấu, vd. SonHaiKinh
 ├── 01_TaiLieuGoc/  _ChoPhanLoai/ (hộp thư đến) · SachThamKhao/<MaSach>_<NoiDung>/ · NguyenVan/ · HinhAnhThamKhao/ · DanhMuc.csv
 ├── 02_KinhThu/     SERIES.md · pronunciation.csv · NhanVat/<slug>/CHARACTER.md (+ ảnh khóa) · BoiCanh/<slug>/LOCATION.md (+ ảnh khóa) · PhongCach/
 ├── 03_KichBan/<thư mục tập>/            EPISODE.md, budget.yaml, research.md, script.md, shots.csv, prompts.csv, anchors.json, prompts/, review/, publish.md
-├── 04_SanXuat/<thư mục tập>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt
+├── 04_SanXuat/<thư mục tập>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt · _ChuaDuyet/ render, vo/, audio/ chưa duyệt (§11.6)
 ├── 05_ThanhPham/<thư mục tập>/          bản cuối, thumbnail, tài liệu xuất bản
 └── 99_LuuTru/      bản cũ và thứ bỏ đi (chuyển vào đây, không xoá)
 ```
@@ -500,8 +520,9 @@ drive:
 | `02_KinhThu/PhongCach/` | `projects/<project>/style/` | kéo đầu phiên; đẩy khi đổi |
 | `03_KichBan/<thư mục tập>/` (cả `prompts/`, `review/`) | `projects/<project>/<thư mục tập>/` | kéo tập đang làm; đẩy sau mỗi khâu |
 | `04_SanXuat/<thư mục tập>/ledger.csv` | `out/<project>/<id>/ledger.csv` | **kéo đầu phiên** (ngân sách cộng dồn từ ledger); đẩy sau mỗi khâu có tạo ảnh/video |
-| `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` | `out/<project>/<id>/bundles/*.zip`, `renders/*_draft_*.mp4` | chỉ đẩy, sau khi duyệt |
-| `05_ThanhPham/<thư mục tập>/` | `out/<project>/<id>/renders/*_final_*.mp4`, thumbnail | chỉ đẩy, sau G4 |
+| `04_SanXuat/<thư mục tập>/_ChuaDuyet/` | `out/<project>/<id>/renders/*` (bản nháp, bản cuối, thumbnail), `vo/**` (trừ `_stale/`), `audio/**` | chỉ đẩy, **ngay khi tạo xong**, chưa duyệt (§11.6) |
+| `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` | `out/<project>/<id>/bundles/*.zip`; bản nháp đã duyệt | gói: chỉ đẩy, sau khi duyệt; bản nháp: chuyển từ `_ChuaDuyet/` (`update_file`) khi G3 qua |
+| `05_ThanhPham/<thư mục tập>/` | bản cuối đã duyệt | chuyển từ `_ChuaDuyet/` (`update_file`) khi G4 qua |
 | `99_LuuTru/` | – | không kéo |
 
 Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<project>/<thư mục tập>`,
@@ -538,7 +559,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    (nhiều nhóm `--id … --to … --size …` trong một lệnh được). Connector trả base64 vào hội thoại, không ghi ra đĩa;
    `save` đọc kết quả mới nhất của ID đó trong bản ghi phiên (`~/.claude/projects/<thư mục repo>/*.jsonl`, cả
    `subagents/`; không thấy thì mọi dự án; bản ghi khác: `--transcript <glob>`), giải base64 (chuẩn hoặc url-safe), so
-   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). **Không bao giờ chép lại
+   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). Phiên local: connector
+   có thể tự lưu file và chỉ trả `Binary content (<mime>, <n>KB) saved to <file>` (`…/tool-results/mcp-…-blob-*.<đuôi>`,
+   nội dung thô); `save` dò dòng đó như trên và chép file được nêu (chỉ nhận file nằm trong kho bản ghi Claude). Cần chỉ
+   thẳng file: `--from-file <file> --size <fileSize>` sau `--id` (không dò bản ghi; bắt buộc `--size`). **Không bao giờ chép lại
    chuỗi base64 bằng tay** (tốn gấp đôi ngữ cảnh, sai một ký tự là hỏng file). Mỗi file vẫn đi qua ngữ cảnh một lần
    (≈ 1,33 × kích thước file), nên vẫn kéo theo khâu, không kéo cả cây. `--to` tương đối với `projects/<project>/`,
    hoặc bắt đầu bằng `projects/<project>/` / `out/<project>/`; đường dẫn ra ngoài dự án (kể cả qua symlink) bị từ chối.
@@ -568,6 +592,19 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    và `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`. Mọi lần tải lên trong phiên ghi một dòng
    `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log` (`drive_sync.py record`).
 
+**Media chưa duyệt (ngay khi tạo xong, trước mọi cổng):** container cloud bị thu hồi khi rảnh và mọi thứ chỉ có trong
+`out/<project>/` mất theo (SHK Q1·T3, 11/2026: bản 600 s gồm 101 file lời bình và `final_v02.mp4` chờ G4 bị mất vì quy
+tắc cũ chỉ đẩy media sau khi duyệt). Vì vậy `renders/*`, `vo/**` (trừ `_stale/` và file tạm `*.raw.wav`, `*.tempo.wav`)
+và `audio/**` của mỗi tập được đẩy ngay sau khi agent tạo xong, vào `04_SanXuat/<thư mục tập>/_ChuaDuyet/` (render ở
+gốc thư mục đó, `vo/`, `audio/` giữ thư mục con), theo các bước đẩy dưới đây (`plan` ánh xạ sẵn, `record` sau mỗi lần
+tải). Người dùng duyệt → không tải lại: `update_file` file đã tải (ID trong `.pushed.log`) đổi `parentId` sang thư mục
+ngày `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (bản nháp, G3) hoặc `05_ThanhPham/<thư mục tập>/` (bản cuối, G4); dòng
+`note` của `plan` in sẵn đích. `vo/`, `audio/` ở lại `_ChuaDuyet/`. Bản không được duyệt cũng ở lại (không xoá).
+Mọi lần `plan` (có hay không `--include-out`) quét `out/<project>/<id>/` và in `!!! UNSAVED MEDIA: N file(s) not on
+Drive (renders …, vo …, audio …)` ở đầu và cuối khi còn file như vậy không có dòng cùng mã băm trong `.pulled.sha256`
+(kèm số plate/clip chưa vào gói nào); `status.py` in dòng `UNSAVED media` trong mục `MEDIA`. Còn dòng đó thì chưa dừng
+phiên cloud. Phiên local trên máy chủ lab không mất file khi dừng, nhưng vẫn đẩy như vậy để Drive là nguồn gốc.
+
 **Đẩy (sau mỗi khâu, sau mỗi lần sửa theo ghi chú, và trước khi dừng phiên – container bị thu hồi khi rảnh):**
 1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (`--json` để đọc
    bằng máy). Mỗi file mới/đã đổi có: thư mục đích (đường dẫn logic + ID từ `PROJECT.md`, hoặc
@@ -578,7 +615,7 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    push), archive it`: Drive có thể đã có file cùng tên (lần đẩy đầu sau khi người dùng tải tay lên, hoặc mất dấu) –
    vẫn chạy `search_files` sau khi tải lên, có kết quả nào khác ID vừa tạo thì chuyển vào `99_LuuTru/`, không có thì bỏ
    qua; nhờ vậy không sinh bản trùng. Cùng ánh xạ §11.3 cho media (`ledger.csv`, gói shot theo ngày
-   trong tên zip, bản nháp, bản cuối, ảnh khóa); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
+   trong tên zip, ảnh khóa; render, `vo/`, `audio/` vào `_ChuaDuyet/`); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
    `TienDo_SanXuat.csv` được tách riêng (`[sheet]`, bước 5), không tải lên như file chữ. File không có ánh xạ (UNMAPPED)
    hay thư mục thiếu ID → mã thoát 1: tạo thư mục (`create_file` folder, `parentId` = ID cha), ghi ID vào
    `drive.folders`, chạy lại `plan`. File gốc trong `sources/` đã sửa thì không lập (chỉ `DanhMuc.csv` được sửa).

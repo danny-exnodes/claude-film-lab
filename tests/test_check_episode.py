@@ -670,6 +670,83 @@ class TestEpisodeMethod(EpisodeCase):
         self.assertNotIn("budget.yaml", out)
 
 
+class TestEpisodeCreatures(EpisodeCase):
+    """`## Sinh vật của tập` (#52, #53): table shape, owner's book photos, the concept gate of blender/code episodes.
+    Run through check_creatures alone: the other method rules are tested in test_method_blender/code."""
+    TABLE = ("\n## Sinh vật của tập\n\n| slug | Tên | Chính | Ảnh sách | Concept |\n|---|---|---|---|---|\n")
+
+    def creatures(self, method, stage, rows, refs=None):
+        if refs is not None:
+            (self.ep.parent / "SERIES.md").write_text(f"---\nseries: test-series\n{refs}\n---\n", encoding="utf-8")
+        md = self.ep / "EPISODE.md"
+        s = md.read_text(encoding="utf-8").split("\n## Sinh vật của tập", 1)[0]
+        md.write_text(s + (self.TABLE + "".join(r + "\n" for r in rows) if rows is not None else ""),
+                      encoding="utf-8")
+        rep = ce.Report()
+        ce.check_creatures(str(self.ep), {"method": method, "stage": stage}, rep)
+        return rep
+
+    def test_read_creatures(self):
+        body = ("## Việc tiếp theo\n- x\n## Sinh vật của tập\n<!-- | not | a | row | -->\n"
+                "| Slug | Tên | Chính | Ảnh sách | Concept |\n|:---|---|---|---|---:|\n"
+                "| phuong-hoang | Phượng hoàng | Có | có | Duyệt 2026-11-26 (b) |\n| `A-huy` | Huỷ | | không | |\n"
+                "|  |  |  |  |  |\n## Nhật ký\n| a | b |\n")
+        tab = ce.read_creatures(body)
+        self.assertEqual(tab["problems"], [])
+        self.assertEqual([(r["slug"], r["main"], r["book"], r["concept"]) for r in tab["rows"]],
+                         [("phuong-hoang", True, "yes", "approved"), ("huy", False, "none", "pending")])
+        self.assertIsNone(ce.read_creatures("## Việc tiếp theo\n"))
+        self.assertEqual(ce.read_creatures("## Sinh vật của tập\n\n")["rows"], [])
+        bad = ce.read_creatures("## Sinh vật của tập\n| slug | Tên |\n|---|---|\n| a | b |\n")
+        self.assertIn("column(s) chính, ảnh sách, concept missing", bad["problems"][0])
+
+    def test_template_table_parses_empty(self):
+        _, body = ce.split_front_matter(Path(ce.LAB, "templates/episode/EPISODE.md").read_text(encoding="utf-8"))
+        self.assertEqual(ce.read_creatures(body), {"rows": [], "problems": []})
+
+    def test_concept_gate_warn_then_error(self):
+        rows = ["| phuong-hoang | Phượng hoàng | có | có | chờ |", "| rong | Rồng | không | có | chờ |"]
+        self.assertEqual(self.creatures("blender", 2, rows).warns, 0)               # before stage 3: nothing yet
+        rep = self.creatures("blender", 3, rows)
+        self.assertEqual((rep.errors, rep.warns), (0, 1), rep.lines)
+        self.assertIn("phuong-hoang (concept not 'duyệt' in the table)", rep.lines[0])
+        self.assertNotIn("rong", rep.lines[0])
+        rep = self.creatures("code", 5, rows)
+        self.assertEqual(rep.errors, 1, rep.lines)
+        self.assertEqual(self.creatures("seedance", 7, rows).lines, [])           # no 3D/code models: no gate
+        rows[0] = "| phuong-hoang | Phượng hoàng | có | có | duyệt |"
+        rep = self.creatures("blender", 5, rows)
+        self.assertIn("no '## Concept đã duyệt' in characters/phuong-hoang/CHARACTER.md", rep.lines[0])
+        d = self.ep / "characters" / "phuong-hoang"
+        d.mkdir(parents=True)
+        (d / "CHARACTER.md").write_text("# P\n## Concept đã duyệt\n- concept-b.png 2026-11-26\n", encoding="utf-8")
+        self.assertEqual(self.creatures("blender", 5, rows).lines, [])
+
+    def test_missing_table_is_info(self):
+        rep = self.creatures("blender", 5, None)
+        self.assertEqual((rep.errors, rep.warns), (0, 0))
+        self.assertIn("no '## Sinh vật của tập' table", rep.lines[0])
+        self.assertEqual(self.creatures("seedance", 5, None).lines, [])
+
+    def test_owner_refs(self):
+        refs = 'owner_refs: {source: "Sách tranh", required: true}'
+        rows = ["| huy | Huỷ | có | chờ | chờ |", "| rong | Rồng | không | không | chờ |"]
+        self.assertEqual(self.creatures("seedance", 1, rows, refs).lines, [])     # stage 1: still asking
+        rep = self.creatures("seedance", 2, rows, refs)
+        self.assertEqual(rep.warns, 1)
+        self.assertIn("no book photo yet for huy", rep.lines[0])
+        self.assertEqual(self.creatures("seedance", 2, rows, 'owner_refs: {source: "x", required: false}').lines, [])
+        rep = self.creatures("seedance", 2, rows, "owner_refs: [1, 2]")
+        self.assertTrue(any(l.startswith("WARN  SERIES.md: owner_refs must be") for l in rep.lines),
+                        rep.lines)
+
+    def test_bad_cells_warn_and_whole_check_runs(self):
+        self.creatures("seedance", 5, ["| Huy | Huỷ | maybe | ? | ok |"])
+        code, out, _ = self.check()
+        self.assertEqual(code, 0, out)
+        self.assertIn("WARN  EPISODE.md: ## Sinh vật của tập row 1 (Huy): chính 'maybe' is not có | không", out)
+
+
 class TestEpisodeStageGates(EpisodeCase):
     def gates(self, stage, g1="null", g2="null", g3="null", g4="null"):
         self.edit("EPISODE.md", "stage: 5", f"stage: {stage}")

@@ -9,6 +9,11 @@ language: vi
 # method: layers                # (tuỳ chọn, chỉ để ghi nhớ) cách dựng mặc định của dự án: layers | seedance | code. Công cụ chỉ đọc
                                  # method: trong EPISODE.md của từng tập (docs/CONVENTIONS.md §5)
 format: {width: 1920, height: 1080, fps: 24}
+owner_refs: {source: "", required: false}   # tư liệu của chủ dự án (vd. "Sách tranh SHK (Lương Siêu / Sam Trạch / An Lạc)").
+                                 # required: true → khâu 1 của mỗi tập: liệt kê mọi sinh vật/thần (bảng `## Sinh vật của
+                                 # tập` của EPISODE.md), xin ảnh chụp trang sách TRƯỚC vòng nghiên cứu bổ sung; status.py in
+                                 # OWNER_REFS, G1/G2 cần ảnh (hoặc "không") cho mọi sinh vật. Ảnh sách có bản quyền: chỉ là
+                                 # chuẩn tinh thần/chất lượng, thiết kế của lab là bản riêng (docs/CONVENTIONS.md §4).
 ---
 
 # <Tên dự án> (<tên gốc nếu có>)
@@ -34,6 +39,12 @@ format: {width: 1920, height: 1080, fps: 24}
 
 - Mỗi nhân vật: `characters/<slug>/CHARACTER.md`; mỗi bối cảnh: `locations/<slug>/LOCATION.md`
   (trên Drive: `02_KinhThu/NhanVat/<slug>/`, `02_KinhThu/BoiCanh/<slug>/`).
+
+## Tư liệu của chủ dự án
+
+<!-- owner_refs ở khối YAML: tên tư liệu (sách tranh, bản nào), chủ dự án đặt chuẩn gì ("ít nhất phải như này hoặc hơn").
+     Ảnh chụp trang nằm ở out/<project>/assets/refs/<slug>/book/ (không lên git, không lên Drive), nguồn từng ảnh ghi trong
+     out/<project>/assets/refs/<slug>/REFS.md. Chỉ để tham khảo tinh thần và chất lượng: không chép, không đưa vào phim. -->
 
 ## Nhân vật và bối cảnh
 

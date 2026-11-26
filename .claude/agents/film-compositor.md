@@ -20,7 +20,8 @@ Chỉ có một compositor cho mỗi tập: không để hai agent sửa cùng f
 `out/<project>/ep<NN>/plates/`, clip trong `clips/` (chỉ `method: seedance`), `styles/<style>/` (motion, sound), mục "Đã khóa" và ghi chú đã đổi
 thành tham số trong `EPISODE.md`.
 Đầu ra: film.html theo shot, `out/<project>/ep<NN>/renders/ep<NN>_draft_v<NN>.mp4` (960×540) hoặc
-`ep<NN>_final_v<NN>.mp4` (1920×1080, -14 LUFS), `review/sound-audit.md`.
+`ep<NN>_final_v<NN>.mp4` (1920×1080, -14 LUFS), `review/sound-audit.md`. Xong một bản dựng là báo đạo diễn ngay (đường
+dẫn file) để đẩy lên Drive `_ChuaDuyet/` trước khi làm tiếp (container cloud bị thu hồi là mất, CONVENTIONS §11.6).
 
 Phương pháp dựng: đọc `method` trong `EPISODE.md` trước khi dựng shot đầu tiên và làm theo đúng một nhánh.
 - **`method: layers`**: mọi chuyển động là code. Dùng `smoke`, `fire`, `foliage`, `cloth`, `pose-cycle` cùng các id sẵn

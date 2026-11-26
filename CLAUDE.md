@@ -87,7 +87,7 @@ python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<proj
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron ... --out <media>/vo --voice "<giọng>" --strict --require-watermark [--check]
 python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio [--stems] [--seed N]   # nhạc dây gảy + tiếng động theo sự kiện, local, miễn phí
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
-python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
+python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--from-file <blob>] [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc]   # method: code, miễn phí: xem style vẽ bằng code, linh vật giot, dị thú 3D
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)
@@ -117,7 +117,8 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   (hoặc `FILM_REVIEW_BUILD`), tắt mặc định, không có server vẫn chạy bình thường. Review chỉ publish file nằm trong
   `out/_review/media/`; URL công khai không đăng nhập = ai có link cũng thấy mọi thứ đã publish (lựa chọn của chủ lab):
   không publish dữ liệu không muốn lộ, `review.py down` khi không dùng. Không đọc/in cấu hình hay authtoken của ngrok.
-- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`;
+- Lời bình: chỉ `tools/tts/vieneu_tts.py` (agent `film-narrator`; cài sẵn bởi setup script theo `requirements-tts.txt`,
+  máy chủ lab: venv trên D: qua `FILM_TTS_PYTHON`, `docs/setup-local-windows.md`;
   bản cuối luôn `--require-watermark`); không dùng `tts.py`/`keys.py` của cinecode (chúng tìm khóa).
 - Chọn model và giới hạn: `docs/MODELS.md`.
 - Ảnh **pro** hoặc **4K** vượt giới hạn 30 s của proxy → dùng Lambda (`lambda/README.md`), không dùng `--force`.
@@ -133,10 +134,11 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
 - Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` (tập trên 99 shot: `s<NNN>`) rồi tải zip lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với
-  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải
-  lên riêng (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
+  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng đã nằm trong
+  `_ChuaDuyet/`: duyệt xong chuyển (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
 - Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình (lõi) phải commit + push; dữ liệu dự án phải đẩy lên Drive
-  trước khi kết thúc.
+  trước khi kết thúc. Render, lời bình (`vo/`), âm thanh (`audio/`) đẩy **ngay khi tạo xong**, chưa duyệt, vào
+  `04_SanXuat/<tập>/_ChuaDuyet/`; còn `!!! UNSAVED MEDIA` (`drive_sync.py plan`) / `UNSAVED media` (`status.py`) thì chưa dừng phiên.
 
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.

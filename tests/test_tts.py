@@ -1095,5 +1095,49 @@ class TestNarratorAgent(unittest.TestCase):
         self.assertIn("| 4 |", readme)
 
 
+class TestTtsPython(TmpDirCase, unittest.TestCase):
+    """FILM_TTS_PYTHON (#63): the tool runs itself again under the venv interpreter that holds vieneu (lab host: a venv
+    on D:), once, with the same arguments; a bad value is an input error."""
+
+    def shim(self, name="python"):
+        """A stand-in venv interpreter: logs that it ran and FILM_TTS_REEXEC, then runs the real interpreter."""
+        p = self.tmp / "venv" / "bin" / name
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(f'#!/bin/sh\necho "ran reexec=$FILM_TTS_REEXEC" >> "{self.tmp}/shim.log"\n'
+                     f'exec "{sys.executable}" "$@"\n')
+        p.chmod(0o755)
+        return p
+
+    def test_reexec_command(self):
+        py = self.shim()
+        self.assertIsNone(tts.reexec_command(["-h"], env={}))
+        self.assertIsNone(tts.reexec_command(["-h"], env={"FILM_TTS_PYTHON": " "}))
+        self.assertEqual(tts.reexec_command(["--dry-run"], env={"FILM_TTS_PYTHON": str(py)}, current=sys.executable),
+                         [str(py), tts.__file__ if os.path.isabs(tts.__file__) else os.path.abspath(tts.__file__),
+                          "--dry-run"])
+        self.assertIsNone(tts.reexec_command([], env={"FILM_TTS_PYTHON": str(py), "FILM_TTS_REEXEC": "1"}))
+        self.assertIsNone(tts.reexec_command([], env={"FILM_TTS_PYTHON": str(py)}, current=str(py)))
+        for bad in (str(self.tmp / "nope" / "python"), str(self.tmp)):
+            with self.assertRaises(ValueError, msg=bad) as cm:
+                tts.reexec_command([], env={"FILM_TTS_PYTHON": bad})
+            self.assertIn("FILM_TTS_PYTHON", str(cm.exception))
+
+    @unittest.skipUnless(os.name == "posix", "the stand-in interpreter is a shell script")
+    def test_runs_once_under_the_venv_interpreter(self):
+        import subprocess
+        py = self.shim()
+        argv = [sys.executable, str(REPO / "tools" / "tts" / "vieneu_tts.py"), "--script", str(SCRIPT), "--dry-run"]
+        here = subprocess.run(argv, capture_output=True, text=True, env=dict(os.environ, FILM_TTS_PYTHON=""))
+        there = subprocess.run(argv, capture_output=True, text=True,
+                               env=dict(os.environ, FILM_TTS_PYTHON=str(py), FILM_TTS_REEXEC=""))
+        self.assertEqual((there.returncode, there.stdout), (here.returncode, here.stdout), there.stderr)
+        self.assertEqual((self.tmp / "shim.log").read_text(), "ran reexec=1\n")       # once, marked as the re-run
+        bad = subprocess.run(argv, capture_output=True, text=True,
+                             env=dict(os.environ, FILM_TTS_PYTHON=str(self.tmp / "none"), FILM_TTS_REEXEC=""))
+        self.assertEqual(bad.returncode, tts.EXIT_INPUT)
+        self.assertIn("FILM_TTS_PYTHON", bad.stderr)
+        self.assertEqual(bad.stdout, "")
+
+
 if __name__ == "__main__":
     unittest.main()

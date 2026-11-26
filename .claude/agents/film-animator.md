@@ -53,6 +53,8 @@ Sau khi tải clip về (miễn phí, một lệnh cho cả clip):
 (`.claude/skills/film-compose-shot/references/local-video.md`):
 - Trước tiên `python tools/comfy/comfy.py ping`; không trả lời → dừng, báo đạo diễn (`comfy.py start` do đạo diễn chạy
   hoặc cho phép). Phiên cloud: không chạy lệnh nào, trả về `video_engine comfy: cần phiên local`.
+- Một việc GPU một lúc: `comfy.py run` tự xếp hàng sau khoá GPU của lab (Blender đang render thì chờ); xem ai giữ:
+  `python tools/gpu_run.py status`. Không tắt hàng đợi (`FILM_GPU_QUEUE=0`) để chạy chen.
 - Mỗi clip: `--dry-run` trước, rồi
   `FILM_AGENT=film-animator python tools/comfy/comfy.py run h3-i2v --image <khung đầu> [--last <khung cuối>] --prompt "<prompt>" --seed <n> --out out/<project>/ep<NN>/clips/ep<NN>_s<NN>_h3_v<NN>.mp4 --ledger out/<project>/ep<NN>/ledger.csv`
   (`h3-r2v` khi hợp đồng giao ảnh tham chiếu). Tập `blender`: khung đầu/cuối là hai khung của `blender.py keyframes`

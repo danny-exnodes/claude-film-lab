@@ -285,6 +285,11 @@ Comfy Desktop của chủ lab: bản cài `%LOCALAPPDATA%\Comfy-Desktop\ComfyUI-
 | Ảnh `qwen-t2i` đầu tiên của phiên lâu hơn ~135 s nhiều | Nạp model 20 GB từ đĩa vào RAM/VRAM | Bình thường cho lần đầu; các ảnh sau ~135 s (30 bước, 1664x928) |
 | `run ... --review` ảnh: `review: not published (HTTP 400: build: kind must be one of …)` | Server review chưa biết kiểu build `image` | Không ảnh hưởng ảnh và ledger; cập nhật server review lên bản có kiểu `image` |
 | `queued prompt … · no websocket: progress by time` | Không mở được `/ws` (server cũ, proxy, URL https) | Ảnh vẫn ra bình thường; tiến độ chỉ theo thời gian ước lượng |
+| `hybrid.py` in `WAITING for the eye check`, không chạy H3 | Đúng thiết kế: khung khoá đã edit chưa được người dùng duyệt | Gửi `renders3d/s<NN>_keys/check_v<NN>.png` cho người dùng; `hybrid.py approve <spec> k1,k2 --media …` rồi chạy lại `run` |
+| `hybrid.py` thoát 2: `changed since it was approved` | Khung đó được edit lại (`--redo`) sau khi duyệt | Người dùng xem lại bảng ghép mới, `approve` lại |
+| `hybrid.py` thoát 2: `<spec> changed since the key frames … were made` | `shots3d/s<NN>.json` đã sửa sau khi render khung khoá | Vòng mới: `--root out/<project>/<id>/renders3d/s<NN>_keys_v02`; khung cũ giữ nguyên |
+| `hybrid.py` thoát 2: `render/ is not empty but has no first.png` | Lần render khung khoá trước chết giữa chừng | Dời thư mục `render/` đi (hoặc `--root` mới) rồi chạy lại |
+| `concept.py approve` báo `does not read '<slug>' as approved` | Bảng `## Sinh vật của tập` hay `CHARACTER.md` bị sửa tay lệch mẫu | So với `templates/episode/EPISODE.md`; chạy `python3 tools/check_episode.py episode <tập>` xem WARN của bảng |
 
 ## Xem trực tiếp (`tools/review/`, web app review)
 

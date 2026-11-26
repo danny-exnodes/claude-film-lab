@@ -36,7 +36,7 @@ flowchart TD
 | 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, **phương pháp dựng**, trần chi phí |
 | 1 | Nghiên cứu nguồn | đạo diễn → `film-researcher` | bảng `## Sinh vật của tập` (khi `SERIES.md` có `owner_refs.required`: xin ảnh sách của chủ dự án **trước**), `research.md` (nguyên văn, link, cách đọc tên) | – |
 | 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
-| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept Qwen-Image local, `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
+| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept Qwen-Image local (`tools/concept.py`), `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
 | 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |

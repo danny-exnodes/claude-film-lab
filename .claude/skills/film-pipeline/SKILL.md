@@ -231,6 +231,8 @@ kiểm tra, rồi báo người dùng mở phiên local. `tools/doctor.sh --quic
   `video_engine: comfy`; `video_seconds` để 0 được. Tập `blender` có `ai_motion` bắt buộc chọn `comfy` hoặc `seedance`.
 - **Khâu 6:** chỉ ở phiên local, sau `comfy.py ping` thành công: `film-animator` chạy `comfy.py run h3-i2v` (tập `blender`:
   hai khung của `blender.py keyframes`), vẫn với `--ledger`. ComfyUI luôn offline; không bao giờ node API trả tiền.
+  Sinh vật trong render còn "3D" mà shot có `ai_motion`: shot lai `tools/comfy/hybrid.py` (khung khoá → Qwen-Edit → người
+  dùng kiểm bằng mắt rồi `approve` → H3 → ghép; `local-video.md` §8). Bước kiểm bằng mắt chỉ người dùng qua.
 
 ### 2.2 Sinh vật: tư liệu của chủ dự án (khâu 1) và cổng thiết kế (khâu 3a)
 
@@ -254,13 +256,18 @@ Q1·T3: dựng thẳng từ chữ kinh ("其狀如雞") + ảnh thú thật ra g
 1. (a) Tư liệu của chủ dự án (khâu 1). (b) `film-researcher` viết `characters/<slug>/ICONOGRAPHY.md` mỗi sinh vật chính
    theo `templates/project/ICONOGRAPHY.md`: văn bản cổ, hình tượng qua các thời (Hán, Đường, Minh, Thanh…), Việt Nam
    (vd. phượng thời Lý), phân tích silhouette; nguồn bảo tàng CC0/phạm vi công cộng kèm giấy phép.
-2. (c) Đạo diễn (phiên local trên máy chủ lab, miễn phí) tạo **2–3 concept** mỗi sinh vật chính bằng Qwen-Image local:
-   `python tools/comfy/comfy.py run qwen-t2i --prompt "<prompt từ ICONOGRAPHY.md>" --out out/<project>/characters/<slug>/concept/<slug>_concept-a_v01.png --ledger out/<project>/ep<NN>/ledger.csv`
-   (`--dry-run` trước; một việc GPU một lúc, xem `python tools/gpu_run.py status`). Phiên cloud: dừng ở (b), báo người
-   dùng mở phiên local. Không dùng ảnh sách làm đầu vào.
-3. (d) Gửi người dùng các concept (ảnh trong hội thoại), **người dùng chọn**. Ghi `Concept: duyệt <ngày> <file>` vào
-   bảng và mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md` (file concept, ngày, lời người dùng nguyên
-   văn, điểm nào theo nguồn, điểm nào diễn giải). Concept bị chê: làm lại (c), không dựng.
+2. (c) Đạo diễn (phiên local trên máy chủ lab, miễn phí) tạo **2–3 hướng × 2 seed** concept mỗi sinh vật chính bằng
+   Qwen-Image local, từ các hướng (`### <hướng>` + `Prompt EN:`) của ICONOGRAPHY.md/DESIGN-OPTIONS.md:
+   `python tools/concept.py gen <file hướng> --slug <slug> --out-dir out/<project>/characters/<slug>/concept --ledger out/<project>/ep<NN>/ledger.csv --n 2`
+   (`--dry-run` trước; một việc GPU một lúc, xem `python tools/gpu_run.py status`) → ảnh `<slug>_<hướng>_s<seed>_v01.png`,
+   rồi `python tools/concept.py sheet out/<project>/characters/<slug>/concept` (bảng ghép có nhãn). Lỗi đếm được, mặt,
+   đầu: `python tools/concept.py edit <ảnh> --instruction "<lệnh tiếng Anh>" --ledger ...` (hoặc `--options` đọc
+   `Edit EN:`) → `..._e01.png`, bảng ghép trước/sau. Phiên cloud: dừng ở (b), báo người dùng mở phiên local. Không dùng
+   ảnh sách làm đầu vào. Qwen-Image chỉ chữ hay bỏ chi tiết lạ; bỏ cụm từ gây nhiễu ("water buffalo" → hai sừng).
+3. (d) Gửi người dùng bảng ghép (ảnh trong hội thoại), **người dùng chọn** (thường theo vòng: chọn → sửa → ghép phương
+   án). Ghi bằng `python3 tools/concept.py approve <slug> <file> --episode projects/<project>/<thư mục tập> --quote "<lời người dùng>"`
+   (ô `Concept: duyệt <ngày> <file>` của bảng và mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md`), rồi
+   bổ sung tay vào mục đó điểm nào theo nguồn, điểm nào diễn giải. Concept bị chê: làm lại (c), không dựng.
 4. Chỉ sau (d) mới giao `film-3d-artist` (blender) hoặc `film-art-director` (code: spec `creature.js`) dựng model; hợp
    đồng ghi đường dẫn concept đã duyệt và `ICONOGRAPHY.md`. `status.py --gate G2` báo `[MISSING] approved concept for
    every main creature` khi còn sinh vật chính chưa duyệt; `check_episode.py` báo ERROR từ khâu 5.

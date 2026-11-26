@@ -45,6 +45,12 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   PATH (mp4 do encoder của Blender làm; nhánh ffmpeg và nhánh EEVEE→Cycles mới thử bằng fake); look phẳng trong Cycles
   không đổ bóng.
 - `check_episode.py`: kiểm nội dung `ASSETS.md` (mỗi `A-<asset>` trong `shots.csv` có một dòng nguồn + giấy phép).
+- Chuỗi concept/shot lai (#74, #76) mới thử bằng bản giả (không GPU): chạy thật `tools/concept.py` và
+  `tools/comfy/hybrid.py` trên một sinh vật và một shot mẫu khi workflow `qwen-edit` đã có trong `comfy.py`; đo giây mỗi
+  bước, xem cờ `--lightning/--denoise` khớp workflow thật.
+- `hybrid.py`: chỉ `h3-i2v` first/last; biến thể `h3-r2v` + `--guide` (nhiều khung khoá trong một clip) chưa nối. Hai đoạn
+  liền nhau lặp khung khoá ở chỗ nối (ghép không mã hoá lại): chưa tự cắt.
+- Review site: tag chọn/loại cho build `concept` (#74) chưa làm; `concept.py approve` chưa đẩy kết quả duyệt lên review.
 
 ## Lỗi reviewer xác nhận nhưng chưa sửa
 

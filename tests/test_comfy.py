@@ -12,7 +12,7 @@ from helpers import REPO, TmpDirCase, load, run_main
 
 comfy = load("comfy/comfy.py", "film_comfy")
 ark = comfy.ark
-I2V, R2V, QWEN = "h3-i2v", "h3-r2v", "qwen-t2i"
+I2V, R2V, QWEN, EDIT = "h3-i2v", "h3-r2v", "qwen-t2i", "qwen-edit"
 MP4 = b"\x00\x00\x00\x18ftypmp42fake-clip-with-audio"
 _png = io.BytesIO()
 Image.new("RGB", (1664, 928), (90, 40, 20)).save(_png, "PNG")
@@ -44,6 +44,7 @@ class FakeComfy:
         self.ws, self.ws_clients, self.ws_done = True, [], threading.Event()   # /ws: sampler progress of image jobs
         self.frees, self.history_status, self.queue_gone_after, self.queue_calls = [], None, None, 0
         self.on_view, self.owner = None, None      # on_view(): runs before /view answers; owner: a gpu.owner path
+        self.modules = {}                          # class -> python_module reported by /object_info
         self.held = []                             # (method, path, the GPU lock's owner file existed?)
         fake = self
 
@@ -82,13 +83,14 @@ class FakeComfy:
                     p = next((x for x in fake.prompts if x.get("client_id") == cid), None)
                     time.sleep(0.005)
                 if p is not None:
-                    pid, steps = p["prompt_id"], p["prompt"]["9"]["inputs"]["steps"]
+                    kid = next(k for k, n in p["prompt"].items() if n.get("class_type") == "KSampler")
+                    pid, steps = p["prompt_id"], p["prompt"][kid]["inputs"]["steps"]
                     out = ws_frame(b"\x00\x00\x00\x01\x00\x00\x00\x02preview-jpeg", op=2)
                     out += ws_frame({"type": "progress", "data": {"value": 1, "max": 1, "prompt_id": "other",
-                                                                  "node": "9"}})
+                                                                  "node": kid}})
                     for v in range(1, steps + 1):
                         out += ws_frame({"type": "progress", "data": {"value": v, "max": steps, "prompt_id": pid,
-                                                                      "node": "9"}})
+                                                                      "node": kid}})
                     out += ws_frame({"type": "progress", "data": {"value": 1, "max": 1, "prompt_id": pid,
                                                                   "node": "10"}})
                     self.wfile.write(out)
@@ -123,7 +125,10 @@ class FakeComfy:
                         spec[comfy.MODEL_INPUTS[cls]] = [sorted(fake.models), {}]
                     if cls == "VAELoader":        # V3-style combo on one loader, to cover both shapes
                         spec["vae_name"] = ["COMBO", {"options": sorted(fake.models)}]
-                    return self.send_json({cls: {"input": {"required": spec}}})
+                    info = {"input": {"required": spec}}
+                    if cls in fake.modules:       # python_module, as a real server reports it
+                        info["python_module"] = fake.modules[cls]
+                    return self.send_json({cls: info})
                 if u.path.startswith("/history/") and fake.history_status:
                     return self.send_json({"error": "boom"}, fake.history_status)
                 if u.path.startswith("/history/"):
@@ -318,7 +323,7 @@ class TestPure(ComfyCase):
         classes = set()
         for wid in comfy.workflow_ids():
             classes |= comfy.graph_classes(comfy.load_workflow(wid)[0])
-        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V, QWEN])
+        self.assertEqual(sorted(comfy.workflow_ids()), [I2V, R2V, EDIT, QWEN])
         self.assertEqual(comfy.ALLOWED_NODES, classes | {"LoadImage", "MiniMaxH3AddGuide"})
         for cls in PAID:
             self.assertNotIn(cls, comfy.ALLOWED_NODES)
@@ -390,7 +395,8 @@ class TestPure(ComfyCase):
     def test_lock_and_graph_models(self):
         lock = comfy.load_lock()
         self.assertEqual(lock["custom_nodes"], [])
-        self.assertEqual({m["set"] for m in lock["models"]}, {"minimax-h3", "qwen-image"})
+        self.assertEqual({m["set"] for m in lock["models"]},
+                         {"minimax-h3", "qwen-image", "qwen-image-edit-2511", "hunyuan3d-2.1"})
         self.assertFalse(any("wan" in m["file"].lower() for m in lock["models"]))
         for wid in comfy.workflow_ids():
             graph = comfy.load_workflow(wid)[0]
@@ -855,7 +861,7 @@ class TestOtherCommands(ComfyCase):
         self.desktop()
         code, out, _ = self.run_comfy("models")
         self.assertEqual(code, 0, out)
-        self.assertIn("11/11 ok", out)                                  # minimax-h3 7 + qwen-image 4
+        self.assertIn("15/15 ok", out)          # minimax-h3 7 + qwen-image 4 + qwen-image-edit-2511 3 + hunyuan3d-2.1 1
         os.remove(self.tmp / "models" / "diffusion_models" / "minimax_h3_ref2va_pruned_int8_convrot.safetensors")
         code, out, _ = self.run_comfy("models", "--set", "minimax-h3")
         self.assertEqual(code, 1)

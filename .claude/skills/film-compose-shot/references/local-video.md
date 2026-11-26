@@ -84,3 +84,33 @@ API + file meta, node trong danh sách cho phép). Không đưa JSON chưa chạ
 - Tập `blender`: clip là cả khung hình (không tách nền); compositor đặt nó vào shot thay cho đoạn render tương ứng,
   phóng 1344×768 theo chiều rộng khung dựng (1920 → cao 1097) và cắt ~8 px trên/dưới về 16:9.
 - G3: mỗi shot có `ai_motion` phải có clip trong `clips/` (`check_episode.py` ERROR từ khâu 8).
+
+## 8. Khung khoá: sửa bề mặt bằng Qwen-Image-Edit (`qwen-edit`)
+
+Khung đầu/cuối của clip H3 (thường là render Blender) có thể được "nâng chất" bằng Qwen-Image-Edit 2511 trước khi đưa
+vào `h3-i2v`: Blender giữ dáng, tư thế, máy quay, ánh sáng; Qwen-Edit vẽ lại bề mặt (lông, vảy, mặt, chất liệu). Miễn
+phí, local, ledger `comfy:qwen-edit`.
+
+```
+python tools/comfy/comfy.py run qwen-edit --image <khung>.png --prompt "<mô tả thiết kế>, keep everything else exactly" \
+    --lightning 4 --seed N --denoise 0.8 --out out/<project>/<id>/edit/<id>_s<NN>_last_edit_v<NN>.png \
+    --ledger out/<project>/<id>/ledger.csv [--dry-run]
+```
+
+- **Làm tốt:** thay/sửa đầu, sửa mặt (mặt người), đổi chất liệu, xoá bộ phận thừa ("remove the two extra horns").
+- **Không làm được:** đổi **số lượng** (thêm chân thứ ba, dời sừng – có khi lại mọc thêm sừng). Số chân, số sừng, số
+  nhánh gạc phải đúng từ model 3D; Edit chỉ lo bề mặt. Model có thiên kiến mạnh (vd. "phượng hoàng" → đuôi công có mắt)
+  và có thể vẽ lại cả điều thiết kế cấm: soát bằng mắt mọi khung đã sửa.
+- **Chỉ cho ảnh đơn và khung khoá, không cho mọi khung.** Denoise 1.0 vẽ lại hẳn nhưng mỗi khung một con khác (nhấp
+  nháy, có khi dàn lại khung ở cận cảnh); denoise 0.75 giữ dáng nhưng ở cận cảnh gần như chỉ đổi màu. Một shot: edit
+  tối đa 2–3 khung khoá rồi để H3 nối giữa. Hai khung khoá cùng shot: denoise 0.75–0.85, cùng seed, cùng prompt, cùng
+  `--lightning` để hai đầu là cùng một con; ảnh tĩnh đứng một mình: denoise 1.0 (bản cuối có thể chạy 40 bước không LoRA,
+  chậm ~12 lần).
+- **Ảnh tham chiếu:** đưa concept làm `--ref` (mặc định `--ref-mode full`) thì model chép nguyên concept (dáng, nền) và
+  bỏ ảnh 1: không làm. Mô tả thiết kế bằng chữ trong prompt. `--ref-mode vl` (ảnh tham chiếu chỉ cho bộ mã hoá đọc) giữ
+  bố cục ảnh 1, chỉ kéo màu về concept: để dành khi cần ép bảng màu.
+- **Prompt âm vô tác dụng ở cfg 1** (`--lightning`): `comfy.py` từ chối `--negative` khi cfg 1. Điều cần tránh viết vào
+  prompt; muốn prompt âm thật thì bỏ `--lightning` (40 bước, cfg 4).
+- Cỡ ra = cỡ khung vào (khung Blender cho H3 nên đúng 1344×768): chồng ảnh đã sửa lên render để soát lệch khung trước
+  khi đưa vào H3 (khung khoá lệch làm clip giật); xem cặp đầu/cuối cạnh nhau.
+- Chỉ đưa ảnh của lab (render, concept lab tạo) vào `--image`/`--ref`; không đưa ảnh có bản quyền (sách tranh…).

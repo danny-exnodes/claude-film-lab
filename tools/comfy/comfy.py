@@ -10,6 +10,13 @@
                      --portable downloads + extracts the pinned portable ComfyUI when none is installed
   python tools/comfy/comfy.py models [--set S] [--verify] [--lock L]
                      each model file of the lock: present / size ok / (--verify) sha256 ok when the lock pins one
+  python tools/comfy/comfy.py models --inventory [--suggest-clean]
+                     read-only: every model file in ComfyUI's model folders (size, family, which lab workflow uses it),
+                     free space of each drive; --suggest-clean lists candidates to delete by hand (never deletes)
+  python tools/comfy/comfy.py models --fetch SET [--yes]
+                     download a lock set from Hugging Face: without --yes only the plan (files, sizes, total, free
+                     space); --yes (main session, after the owner said yes) downloads via <file>.part (resumed with
+                     Range), checks size + sha256 (lock or the HF LFS oid), renames only then, never overwrites
   python tools/comfy/comfy.py workflows                    id, title, model files, inputs, constraints
   python tools/comfy/comfy.py run <workflow> (--prompt TEXT | --prompt-file F.json|.yaml) --out <clips>/<name>_v<NN>.mp4
                      [--image START.png [--last END.png]] [--ref IMG ...] [--guide SECONDS=IMG ...] [--ref-size match|max]
@@ -17,6 +24,10 @@
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py run qwen-t2i (--prompt TEXT | --prompt-file F.txt) --out <concepts>/<id>_v<NN>.png
                      [--negative TEXT] [--size 1664x928] [--seed N] [--steps 30] [--cfg 2.5] [--turbo]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
+  python tools/comfy/comfy.py run qwen-edit --image IN.png [--ref R.png ...] (--prompt TEXT | --prompt-file F.txt)
+                     --out <dir>/<id>_v<NN>.png [--lightning 4|8] [--steps N] [--cfg C] [--denoise D] [--seed N]
+                     [--size WxH] [--ref-mode full|vl] [--negative TEXT (cfg > 1 only)]
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
 
@@ -30,6 +41,11 @@ Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.jso
            30 steps, cfg 2.5, euler/simple, shift 3.1, --negative allowed; --turbo = Wuli Turbo LoRA, 2 steps, cfg 1,
            drafts only. Ledger kind image, model comfy:qwen-image. --review: the sampler steps as progress and the
            image as a step of an "image" build.
+  qwen-edit Qwen-Image-Edit 2511 image edit (one PNG): --image = image 1 (the one redrawn, scaled to ~1 MP, multiple
+           of 16), --ref = images 2-3 ("Picture 2/3" in the prompt); output size = the input's (--size WxH overrides,
+           center-cropped when the aspect differs). 40 steps, cfg 4; --lightning 4|8 = lightx2v LoRA (4/8 steps,
+           cfg 1). --negative only when cfg > 1 (refused at cfg 1: no effect). --denoise < 1 keeps more of image 1.
+           --ref-mode vl: refs only seen by the VL encoder. Ledger kind image, model comfy:qwen-edit.
 H3 rules: length = 17k+5 frames at 24 fps (`--seconds` is snapped up); the start frame is center-cropped to the canvas
 aspect and resized with Lanczos to exactly the canvas in a temp file before upload (the node would stretch it; the source file is
 never touched); CFG-distilled: no negative prompt (--negative is refused); 20 steps; --turbo (Lightning LoRA, few
@@ -104,7 +120,14 @@ ALLOWED_NODES = frozenset({
     "VAEDecode", "VAEDecodeAudio", "CreateVideo", "SaveVideo",
     # qwen-t2i (Qwen-Image text-to-image)
     "ModelSamplingAuraFlow", "CLIPTextEncode", "EmptySD3LatentImage", "KSampler", "SaveImage",
+    # qwen-edit (Qwen-Image-Edit 2511)
+    "CFGNorm", "ImageScaleToTotalPixels", "TextEncodeQwenImageEditPlus", "FluxKontextMultiReferenceLatentMethod",
+    "ReferenceLatent", "VAEEncode", "ImageScale",
 })
+# /object_info's python_module of a class: core nodes come from these modules. A paid API/partner node
+# (comfy_api_nodes) or a custom node that registered a class under a core name is refused before anything is sent.
+CORE_MODULES = ("nodes", "comfy_extras.")
+REFUSED_MODULES = ("comfy_api_nodes", "custom_nodes")
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"       # RFC 6455
 GPU_HOLD = contextlib.ExitStack()                     # the GPU lock of the running `run` (released by main())
 MODEL_INPUTS = {"UNETLoader": "unet_name", "LoraLoaderModelOnly": "lora_name", "CLIPLoader": "clip_name",
@@ -270,6 +293,35 @@ def offline_flag(st):
 
 
 # --- lock and workflows ----------------------------------------------------------------------------------------------
+_NAME_RE = {
+    "file": re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]*"),
+    "folder": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*"),
+    "set": re.compile(r"[a-z0-9][a-z0-9._-]*"),
+    "repo": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*"),
+    "repo path": re.compile(r"[A-Za-z0-9._+-]+(/[A-Za-z0-9._+-]+)*"),
+    "revision": re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*"),
+}
+
+
+def name_problem(text, kind):
+    """Why a model/set/repo name is unsafe (None when fine). Names are handled in Python only, never through a shell
+    pipe: a name read from `python -c print(...)` on Windows carried a trailing \\r, MSYS turned it into `_`, and the
+    download landed as `<name>_.part` (issue #75). So: no control character, no surrounding blank, no `..`, no path
+    separator in a file name; only the characters a model file, a folder or a Hugging Face repo id use."""
+    if not isinstance(text, str) or not text:
+        return "empty"
+    ctl = [c for c in text if ord(c) < 32 or ord(c) == 127]
+    if ctl:
+        return f"control character(s) {''.join(ctl)!r} in it (a name read through a shell pipe? \\r from Windows)"
+    if text != text.strip():
+        return "blank at the start or end"
+    if ".." in text.split("/") or ".." in text and kind in ("file", "folder"):
+        return "'..' is not allowed"
+    if not _NAME_RE[kind].fullmatch(text):
+        return f"not a plain {kind} name ({_NAME_RE[kind].pattern})"
+    return None
+
+
 def load_lock(path=None):
     path = path or LOCK_FILE
     try:
@@ -283,6 +335,19 @@ def load_lock(path=None):
         for k in ("set", "folder", "file"):
             if not isinstance(m.get(k), str) or not m[k]:
                 refuse(f"lock {path}: models[{n}].{k} must be a non-empty string")
+            bad = name_problem(m[k], "file" if k == "file" else "folder" if k == "folder" else "set")
+            if bad:
+                refuse(f"lock {path}: models[{n}].{k} {m[k]!r}: {bad}")
+        hf = m.get("hf")
+        if hf is not None:
+            if not isinstance(hf, dict) or not all(isinstance(hf.get(k), str) and hf[k] for k in ("repo", "path")):
+                refuse(f"lock {path}: models[{n}].hf must be {{repo, path[, revision]}} (strings)")
+            for k, kind in (("repo", "repo"), ("path", "repo path"), ("revision", "revision")):
+                bad = name_problem(hf.get(k, "main"), kind)
+                if bad:
+                    refuse(f"lock {path}: models[{n}].hf.{k} {hf.get(k)!r}: {bad}")
+            if hf["path"].rsplit("/", 1)[-1] != m["file"]:
+                refuse(f"lock {path}: models[{n}].hf.path {hf['path']!r} must end in the file name {m['file']!r}")
         if m.get("size") is not None and (not isinstance(m["size"], int) or m["size"] < 0):
             refuse(f"lock {path}: models[{n}].size must be bytes (int) or null")
         if m.get("sha256") is not None and not re.fullmatch(r"[0-9a-f]{64}", str(m["sha256"])):
@@ -291,6 +356,16 @@ def load_lock(path=None):
         for k in ("name", "repo", "commit"):
             if not isinstance(c.get(k), str) or not c[k]:
                 refuse(f"lock {path}: custom_nodes[{n}].{k} must be a non-empty string")
+    sets = lock.get("sets") or {}
+    if not isinstance(sets, dict) or not all(isinstance(v, dict) for v in sets.values()):
+        refuse(f"lock {path}: 'sets' must map a set name to {{license, requires, note}}")
+    known = {m["set"] for m in lock["models"]}
+    for name, info in sets.items():
+        if name not in known:
+            refuse(f"lock {path}: sets.{name}: no model of the lock is in that set")
+        for req in info.get("requires") or []:
+            if req not in known:
+                refuse(f"lock {path}: sets.{name}.requires: unknown set {req!r}")
     return lock
 
 
@@ -368,22 +443,26 @@ def dangling(graph):
 def build_graph(template, meta, v):
     """The API graph for one request: template + values `v` (dict), optional parts removed, refs and guides added."""
     g = json.loads(json.dumps(template))
-    for name in ("prompt", "negative", "width", "height", "frames", "seed", "steps", "cfg", "fps", "prefix", "ref_size"):
-        if name in v and name in meta["params"]:
+    images = meta.get("images", {})
+    for name in meta["params"]:
+        if name in v and name not in images:
             set_param(g, meta, name, v[name])
-    for name in meta.get("images", {}):
+    for name in images:
         if v.get(name):
             set_param(g, meta, name, v[name])
         else:
             drop_optional(g, meta, name)
     if not v.get("turbo"):
         drop_optional(g, meta, "turbo")
+    for feature in v.get("drop") or []:          # e.g. qwen-edit's ref_mode: the wiring that mode does not use
+        drop_optional(g, meta, feature)
     refs = meta.get("refs")
     if refs:
         nid = refs["ids_from"]
         for i, name in enumerate(v.get("refs") or []):
             g[str(nid + i)] = {"class_type": "LoadImage", "inputs": {"image": name}}
-            g[refs["node"]]["inputs"][f"{refs['prefix']}{refs['first'] + i}"] = [str(nid + i), 0]
+            for node in refs.get("nodes") or [refs["node"]]:
+                g[node]["inputs"][f"{refs['prefix']}{refs['first'] + i}"] = [str(nid + i), 0]
     gd = meta.get("guides")
     if gd and v.get("guides"):
         prev, nid = list(gd["positive"]), gd["ids_from"]
@@ -563,10 +642,19 @@ def parse_guide(text):
     return float(m.group(1)), m.group(2)
 
 
+def edit_flags(a):
+    """The qwen-edit-only flags given on the command line."""
+    return [f for f, v in (("--lightning", a.lightning), ("--denoise", a.denoise is not None),
+                           ("--ref-mode", a.ref_mode)) if v]
+
+
 def check_inputs(a, meta, wid):
     """Every local refusal of `run` that needs no server; returns the plan dict."""
     if a.size or a.cfg is not None:
         refuse(f"{wid}: --size/--cfg are for the image workflows (a clip's canvas is --res 480p|768p)")
+    edit = edit_flags(a)
+    if edit:
+        refuse(f"{wid}: {', '.join(edit)} belong to qwen-edit (the clip's speed LoRA is --turbo)")
     if a.negative is not None and meta.get("negative") is False:
         refuse(f"{wid}: --negative is refused: the model is CFG-distilled (BasicGuider, cfg 1) and ignores a "
                "negative prompt; describe what you want in the prompt instead")
@@ -679,6 +767,22 @@ def combo_choices(spec):
     return None
 
 
+def module_problem(cls, info):
+    """The refusal for a class the server serves from a paid-API or custom-node module (None when it is a core node,
+    or when the server does not report python_module). Another module: a warning, the class name is on the allow
+    list (core nodes may move between core modules)."""
+    mod = info.get("python_module") if isinstance(info, dict) else None
+    if not isinstance(mod, str) or not mod:
+        return None
+    parts = mod.replace("\\", ".").replace("/", ".").split(".")
+    if any(r in parts for r in REFUSED_MODULES):
+        return (f"node {cls} comes from {mod} on this server, not from ComfyUI's core: paid API/partner nodes and "
+                "custom nodes never run from here (allow list = core nodes)")
+    if not any(mod == c or (c.endswith(".") and mod.startswith(c)) for c in CORE_MODULES):
+        warn(f"node {cls} comes from module {mod} (not nodes / comfy_extras.*): check that it is a core node")
+    return None
+
+
 def server_problems(graph, models):
     """Node classes and model files the running server does not have (from /object_info/<class>)."""
     problems, info = [], {}
@@ -689,6 +793,9 @@ def server_problems(graph, models):
                             "from v0.43)")
         else:
             info[cls] = got[cls]
+            bad = module_problem(cls, got[cls])
+            if bad:
+                problems.append(bad)
     for nid, cls, inp, entry, f in models:
         if cls not in info:
             continue
@@ -1335,7 +1442,10 @@ def check_image_inputs(a, meta, wid):
                                   ("--keep-frames", a.keep_frames)) if v]
     if video:
         refuse(f"{wid} makes one image from text: {', '.join(video)} belong to the video workflows "
-               "(the image size is --size WxH)")
+               "(the image size is --size WxH; to edit an image: qwen-edit --image)")
+    edit = edit_flags(a)
+    if edit:
+        refuse(f"{wid}: {', '.join(edit)} belong to qwen-edit (qwen-t2i's speed LoRA is --turbo)")
     if (a.prompt is None) == (a.prompt_file is None):
         refuse("give exactly one of --prompt TEXT or --prompt-file F.txt")
     ext = meta["output"].get("ext", ".png")
@@ -1366,23 +1476,115 @@ def check_image_inputs(a, meta, wid):
             "negative": negative, "estimate": est}
 
 
+def working_size(w, h, megapixels, step=16):
+    """The size ImageScaleToTotalPixels gives image 1: aspect kept, ~megapixels MP, sides a multiple of `step`."""
+    s = (megapixels * 1024 * 1024 / float(w * h)) ** 0.5
+    return max(step, round(w * s / step) * step), max(step, round(h * s / step) * step)
+
+
+def check_edit_inputs(a, meta, wid):
+    """Every local refusal of `run` for an image-edit workflow (qwen-edit); returns the plan dict."""
+    other = [flag for flag, v in (("--last", a.last), ("--guide", a.guide), ("--ref-size", a.ref_size),
+                                  ("--seconds", a.seconds), ("--res", a.res), ("--keep-frames", a.keep_frames),
+                                  ("--turbo", a.turbo)) if v]
+    if other:
+        refuse(f"{wid} edits one image: {', '.join(other)} do not apply (speed LoRA: --lightning 4|8; output "
+               "size: --size WxH)")
+    if (a.prompt is None) == (a.prompt_file is None):
+        refuse("give exactly one of --prompt TEXT or --prompt-file F.txt")
+    if not a.image:
+        refuse(f"{wid} needs --image IN.png (image 1, the one edited); --ref adds references (Picture 2, 3)")
+    refs = a.ref or []
+    r = meta["refs"]
+    if not r["min"] <= len(refs) <= r["max"]:
+        refuse(f"{wid} takes {r['min']}..{r['max']} --ref images (Qwen-Image-Edit reads at most 3 images: --image + "
+               f"{r['max']} refs), got {len(refs)}")
+    for p in [a.image] + refs:
+        if not (os.path.isfile(p) and os.access(p, os.R_OK)):
+            refuse(f"no such file: {p}")
+        if image_size(p) is None:
+            refuse(f"not a PNG/JPEG/WEBP image (or unreadable): {p}")
+    ext = meta["output"].get("ext", ".png")
+    if not a.out.lower().endswith(ext):
+        refuse(f"--out {a.out}: {wid} saves {ext[1:].upper()}: name it <dir>/<id>_v<NN>{ext}")
+    ark.guard_output(a.out)
+    if os.path.exists(a.out + ".json"):
+        refuse(f"sidecar exists: {a.out}.json (versions only go up)")
+    in_w, in_h = image_size(a.image)
+    w, h = parse_size(a.size, meta, wid) if a.size else (in_w, in_h)
+    crop = "disabled"
+    if abs(w / h - in_w / in_h) > 0.01 * (in_w / in_h):
+        crop = "center"
+        warn(f"--size {w}x{h} has another aspect than the input ({in_w}x{in_h}): the edited image is center-cropped "
+             "to it, then scaled (Lanczos)")
+    d = meta["defaults"]
+    light = meta["lightning"].get(a.lightning) if a.lightning else None
+    if a.lightning and not light:
+        refuse(f"--lightning {a.lightning}: {wid} has {' | '.join(meta['lightning'])}")
+    steps = a.steps if a.steps is not None else (light["steps"] if light else d["steps"])
+    if steps < 1:
+        refuse("--steps must be >= 1")
+    cfg = float(a.cfg if a.cfg is not None else (light["cfg"] if light else d["cfg"]))
+    if not 0 < cfg <= 30:
+        refuse("--cfg must be > 0 and <= 30")
+    if a.negative is not None and cfg == 1.0:
+        refuse(f"--negative is refused at cfg 1{' (--lightning ' + a.lightning + ')' if light else ''}: with cfg 1 "
+               "the sampler never uses the negative prompt, it would change nothing. Say what to avoid in --prompt "
+               "(\"keep everything else exactly\"), or run without --lightning (cfg 4) to use a negative")
+    if light and cfg != 1.0:
+        warn(f"--lightning {a.lightning} is distilled for cfg 1 (cfg {cfg:g} given)")
+    denoise = d["denoise"] if a.denoise is None else a.denoise
+    if not 0 < denoise <= 1:
+        refuse("--denoise must be > 0 and <= 1 (1.0 redraws image 1; 0.6-0.85 keeps its shapes)")
+    seed = a.seed if a.seed is not None else secrets.randbelow(2**32)
+    if not 0 <= seed <= 0xFFFFFFFFFFFFFFFF:
+        refuse("--seed must be 0..2^64-1")
+    ref_mode = a.ref_mode or d["ref_mode"]
+    mp = float(d["megapixels"])
+    e = meta.get("estimate") or {}
+    est = (e.get("setup_seconds", 8.0) + steps * e.get("seconds_per_step", 3.0) * (2 if cfg != 1.0 else 1) * mp
+           + len(refs) * e.get("seconds_per_ref", 8.0))
+    return {"width": w, "height": h, "in_width": in_w, "in_height": in_h, "crop": crop, "steps": steps, "cfg": cfg,
+            "seed": seed, "turbo": bool(light), "lightning": a.lightning if light else None,
+            "lora": light["lora"] if light else None, "negative": a.negative if a.negative is not None
+            else d.get("negative", ""), "denoise": float(denoise), "refs": refs, "ref_mode": ref_mode,
+            "megapixels": mp, "work": working_size(in_w, in_h, mp), "estimate": est}
+
+
 def run_image(a, wid, template, meta, wf_sha):
-    """`run` for an image workflow: one PNG, a ledger row kind image (cost 0), progress per sampler step."""
-    plan = check_image_inputs(a, meta, wid)
+    """`run` for an image workflow: one PNG, a ledger row kind image (cost 0), progress per sampler step.
+    qwen-t2i makes it from text; qwen-edit (meta "edit") redraws --image with up to 2 --ref images."""
+    edit = bool(meta.get("edit"))
+    plan = check_edit_inputs(a, meta, wid) if edit else check_image_inputs(a, meta, wid)
     ledger_args(a)
     prompt = read_text_prompt(a)
     lock = load_lock()
     w, h, est = plan["width"], plan["height"], plan["estimate"]
     values = {"prompt": prompt, "negative": plan["negative"], "width": w, "height": h, "seed": plan["seed"],
               "steps": plan["steps"], "cfg": plan["cfg"], "prefix": f"film-lab/{wid}", "turbo": plan["turbo"]}
+    if edit:
+        values.update(out_width=w, out_height=h, crop=plan["crop"], denoise=plan["denoise"],
+                      megapixels=plan["megapixels"], image="<image1>",
+                      refs=[f"<image{i + 2}>" for i in range(len(plan["refs"]))],
+                      drop=meta["ref_modes"][plan["ref_mode"]]["drop"])
+        if plan["lora"]:
+            values["lora"] = plan["lora"]
     graph = build_graph(template, meta, values)
     bad = disallowed(graph) or dangling(graph)
     if bad:
         refuse(f"{wid}: filled graph is not runnable: {', '.join(bad)}")
     models = model_entries(graph, lock)
     model = meta.get("ledger_model") or MODEL_PREFIX + wid
+    speed = (f" (lightning {plan['lightning']} LoRA)" if edit else " (turbo LoRA)") if plan["turbo"] else ""
     print(f"workflow {wid} ({model}) · {len(graph)} nodes · {w}x{h} · steps {plan['steps']} · cfg {plan['cfg']:g}"
-          f"{' (turbo LoRA)' if plan['turbo'] else ''} · seed {plan['seed']}")
+          f"{speed}" + (f" · denoise {plan['denoise']:g}" if edit else "") + f" · seed {plan['seed']}")
+    if edit:
+        ww, wh = plan["work"]
+        print(f"image 1 {a.image}: {plan['in_width']}x{plan['in_height']} -> ~{ww}x{wh} working "
+              f"({plan['megapixels']:g} MP, multiple of 16) -> {w}x{h} output"
+              + (" (center crop)" if plan["crop"] == "center" else "") + " lanczos")
+        for i, p in enumerate(plan["refs"], 2):
+            print(f"Picture {i}: {p} (ref-mode {plan['ref_mode']})")
     print("models: " + ", ".join(f for *_, f in models))
     print(f"estimate ~{est:.0f} s of GPU (estimate; a session's first run also loads the models)")
     mdir = models_dir(layout(comfy_home()))
@@ -1412,6 +1614,19 @@ def run_image(a, wid, template, meta, wf_sha):
     hold_gpu(wid)
     recheck_outputs(a)
     rid = ark.new_req()
+    inputs = {}
+    if edit:                    # images go up as they are (the graph scales image 1; the encoder scales the refs)
+        try:
+            names = []
+            for key, path in [("image1", a.image)] + [(f"image{i + 2}", p) for i, p in enumerate(plan["refs"])]:
+                name = upload(path, f"film-lab_{rid[:12]}_{key}{os.path.splitext(path)[1].lower()}")
+                names.append(name)
+                inputs[key] = {"path": path, "sha256": sha256_file(path), "size": list(image_size(path)),
+                               "uploaded": name}
+        except (ComfyError, OSError) as e:
+            refuse(f"upload failed ({e}); nothing queued, no ledger row")
+        values.update(image=names[0], refs=names[1:])
+        graph = build_graph(template, meta, values)
     gsha = graph_sha(graph)
     pid = str(uuid.uuid4())
     client_id = "film-lab-" + rid[:12]
@@ -1542,14 +1757,18 @@ def run_image(a, wid, template, meta, wf_sha):
             "gpu_seconds": gpu, "wall_seconds": round(wall, 1), "output": item, "created": ark.utc_now(),
             "graph": graph,
         }
+        if edit:
+            sidecar.update(lightning=plan["lightning"], denoise=plan["denoise"], ref_mode=plan["ref_mode"],
+                           megapixels=plan["megapixels"], working_size=list(plan["work"]), crop=plan["crop"],
+                           input_size=[plan["in_width"], plan["in_height"]], inputs=inputs)
         write_json_atomic(a.out + ".json", sidecar)
         final("ok", "", usage)
         if hook:
             # The gallery of the review build (#64): the prompt is shown there on purpose (the owner picks concepts
             # by it); the client scrubs paths out of it. Nothing else of the run leaves the ledger/sidecar.
+            speed = (f" lightning{plan['lightning']}" if edit else " turbo") if plan["turbo"] else ""
             hook.image(a.out, os.path.splitext(os.path.basename(a.out))[0], prompt=prompt, seed=plan["seed"],
-                       model=model + (" turbo" if plan["turbo"] else ""), sampler_steps=plan["steps"], seconds=gpu,
-                       width=w, height=h)
+                       model=model + speed, sampler_steps=plan["steps"], seconds=gpu, width=w, height=h)
             hook.finish([], gpu_s=gpu, message=f"{gpu:g} GPU s")
         print(f"saved {a.out} ({w}x{h}, {gpu:g} GPU s) + {os.path.basename(a.out)}.json")
         return 0
@@ -1686,6 +1905,17 @@ def model_rows(lock, mdir, set_name=None, verify=False):
 
 
 def models_cmd(a):
+    inv = a.inventory or a.suggest_clean
+    if inv and a.fetch is not None:
+        refuse("--inventory/--suggest-clean and --fetch: one at a time")
+    if (inv or a.fetch is not None) and (a.set or a.verify):
+        refuse("--set/--verify check the lock; --inventory/--suggest-clean/--fetch SET do not take them")
+    if a.yes and a.fetch is None:
+        refuse("--yes goes with --fetch SET (after the owner said yes to its plan)")
+    if a.fetch is not None:
+        return fetch_cmd(a)
+    if inv:
+        return inventory_cmd(a)
     lock = load_lock(a.lock)
     lay = layout(comfy_home())
     mdir = models_dir(lay)
@@ -1698,10 +1928,433 @@ def models_cmd(a):
     rows = model_rows(lock, mdir, a.set, a.verify)
     for m, p, state, ok in rows:
         size = f"{m['size'] / 1e9:.2f} GB" if m.get("size") else "-"
-        print(f"{'ok ' if ok else 'BAD'} {m['set']:12} {m['folder'] + '/' + m['file']:70} {size:>9}  {state}")
+        print(f"{'ok ' if ok else 'BAD'} {m['set']:20} {m['folder'] + '/' + m['file']:70} {size:>9}  {state}")
     bad = sum(1 for *_, ok in rows if not ok)
     print(f"{len(rows) - bad}/{len(rows)} ok")
     return FAILED if bad else 0
+
+
+# --- models --inventory / --suggest-clean (read-only) -----------------------------------------------------------------
+MODEL_EXTS = (".safetensors", ".ckpt", ".pt", ".pth", ".bin", ".gguf", ".onnx", ".sft")
+LEFTOVER_EXTS = (".part", ".bad")          # an interrupted download (resumable) / a file whose sha256 did not match
+FAMILIES = (                               # first match wins (Qwen-Edit before Qwen-Image, H3's qwen3vl encoder first)
+    ("H3", r"minimax[_-]?h3"),
+    ("Qwen-Edit", r"qwen[_-]?image[_-]?edit"),
+    ("Qwen-Image", r"qwen[_-]?image|qwen_?2\.5_?vl"),
+    ("Hunyuan3D", r"hunyuan[_-]?3d"),
+    ("LTX", r"ltx|gemma"),                 # LTX-2 reads a gemma 3 text encoder
+    ("Wan", r"(^|[^a-z])wan(\d|[^a-z]|$)|umt5"),
+    ("SeedVR2", r"seedvr"),
+    ("Z-Image", r"z[_-]?image"),
+)
+FAMILY_ORDER = [f for f, _ in FAMILIES] + ["other"]
+GB = 1e9
+
+
+def model_family(name):
+    n = name.lower()
+    for fam, rx in FAMILIES:
+        if re.search(rx, n):
+            return fam
+    return "other"
+
+
+def extra_model_bases(path):
+    """The base_path values of an extra_model_paths yaml (ComfyUI's format), read with a regex (no PyYAML)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except (OSError, UnicodeDecodeError):
+        return []
+    out = []
+    for m in re.finditer(r"(?m)^\s*base_path:\s*(.+?)\s*$", text):
+        v = m.group(1)
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+            v = v[1:-1]
+        if v:
+            out.append(os.path.expandvars(os.path.expanduser(v)))
+    return out
+
+
+def model_roots():
+    """ComfyUI's model folders: FILM_COMFY_MODELS / the Desktop's shared models, the base_path of every
+    extra_model_paths yaml section (FILM_COMFY_MODEL_PATHS or the Desktop's), <ComfyUI>/models. Existing ones, once."""
+    lay = layout(comfy_home())
+    cands = [models_dir(lay)]
+    y = model_paths_yaml()
+    if y and os.path.isfile(y):
+        cands += extra_model_bases(y)
+    if lay:
+        cands.append(os.path.join(lay["root"], "models"))
+    roots, seen = [], set()
+    for c in cands:
+        if c and os.path.isdir(c):
+            k = os.path.normcase(os.path.realpath(c))
+            if k not in seen:
+                seen.add(k)
+                roots.append(c)
+    return roots
+
+
+def scan_models(roots):
+    """[{path, root, rel, name, size, family, leftover}] of every model file (and download leftover) under roots."""
+    rows, seen = [], set()
+    for root in roots:
+        for d, dirs, files in os.walk(root):
+            dirs.sort()
+            for f in sorted(files):
+                low = f.lower()
+                if not low.endswith(MODEL_EXTS + LEFTOVER_EXTS):
+                    continue
+                p = os.path.join(d, f)
+                k = os.path.normcase(os.path.realpath(p))
+                if k in seen:
+                    continue
+                seen.add(k)
+                try:
+                    size = os.path.getsize(p)
+                except OSError:
+                    continue
+                leftover = low.endswith(LEFTOVER_EXTS)
+                base = re.sub(r"(\.[0-9]+)?\.(part|bad)$", "", f, flags=re.I) if leftover else f
+                rows.append({"path": p, "root": root, "rel": os.path.relpath(p, root).replace(os.sep, "/"), "name": f,
+                             "size": size, "family": model_family(base), "leftover": leftover, "base": base})
+    rows.sort(key=lambda r: (FAMILY_ORDER.index(r["family"]), r["rel"].lower()))
+    return rows
+
+
+def lab_usage(lock):
+    """{model file: set of lab workflow ids}: the shipped graphs, their LoRA switches, the lock's `workflows`."""
+    use = {}
+    for wid in workflow_ids():
+        graph, meta, _ = load_workflow(wid)
+        for *_, f in model_entries(graph, lock):
+            use.setdefault(f, set()).add(wid)
+        for v in (meta.get("lightning") or {}).values():
+            use.setdefault(v["lora"], set()).add(wid)
+    for m in lock["models"]:
+        for wid in m.get("workflows") or []:
+            use.setdefault(m["file"], set()).add(wid)
+    return use
+
+
+def drive_of(path):
+    """The drive (Windows: 'C:\\') or mount point a path lives on."""
+    p = os.path.abspath(path)
+    if os.name == "nt":
+        d = os.path.splitdrive(p)[0]
+        return d + "\\" if d else p
+    while not os.path.ismount(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    return p
+
+
+def existing_dir(path):
+    p = os.path.abspath(path)
+    while not os.path.isdir(p):
+        parent = os.path.dirname(p)
+        if parent == p:
+            break
+        p = parent
+    return p
+
+
+def drive_free(paths):
+    """[(drive, free bytes, total bytes)] for the drives the paths are on (each once)."""
+    out, seen = [], set()
+    for p in paths:
+        d = drive_of(existing_dir(p))
+        if d in seen:
+            continue
+        seen.add(d)
+        try:
+            u = shutil.disk_usage(existing_dir(p))
+            out.append((d, u.free, u.total))
+        except OSError:
+            out.append((d, None, None))
+    return out
+
+
+def inventory_cmd(a):
+    lock = load_lock(a.lock)
+    roots = model_roots()
+    if not roots:
+        refuse("no model folder found: set FILM_COMFY_MODELS (or FILM_COMFY_HOME / FILM_COMFY_MODEL_PATHS)")
+    rows = scan_models(roots)
+    use = lab_usage(lock)
+    in_lock = {m["file"]: m["set"] for m in lock["models"]}
+    multi = len(roots) > 1
+    print("model folders: " + " · ".join(f"[{i}] {r}" if multi else r for i, r in enumerate(roots, 1)))
+    if a.inventory:
+        print(f"{'family':10} {'GB':>7}  {'folder/file':74} lab")
+        for r in rows:
+            if r["leftover"]:
+                lab = "leftover of a download (see --suggest-clean)"
+            else:
+                wids = sorted(use.get(r["name"], ()))
+                lab = ", ".join(wids) or "-"
+                if r["name"] in in_lock:
+                    lab += f" (lock set {in_lock[r['name']]})"
+            where = f"[{roots.index(r['root']) + 1}] {r['rel']}" if multi else r["rel"]
+            print(f"{r['family']:10} {r['size'] / GB:7.2f}  {where:74} {lab}")
+        fams = []
+        for fam in FAMILY_ORDER:
+            sel = [r for r in rows if r["family"] == fam]
+            if sel:
+                fams.append(f"{fam} {sum(r['size'] for r in sel) / GB:.1f} GB ({len(sel)})")
+        print("families: " + (" · ".join(fams) or "none")
+              + f" · total {sum(r['size'] for r in rows) / GB:.1f} GB in {len(rows)} files")
+    lab_dir = os.path.dirname(os.path.dirname(HERE))
+    drives = drive_free(roots + [lab_dir])
+    print("drives: " + " · ".join(f"{d} {'?' if free is None else f'{free / GB:.1f}'} GB free of "
+                                  f"{'?' if tot is None else f'{tot / GB:.1f}'} GB" for d, free, tot in drives))
+    if a.suggest_clean:
+        cands, first = [], {}
+        for r in rows:
+            if r["leftover"]:
+                why = ("a download that did not finish (resume: models --fetch SET) or failed its sha256 (.bad)")
+                if re.search(r"_(\.[0-9]+)?\.part$", r["name"]):
+                    why += "; the name ends in '_': a \\r from a shell pipe? (RUNBOOK)"
+                cands.append((r, why))
+                continue
+            key = (r["name"], r["size"])
+            if key in first:
+                cands.append((r, f"duplicate (same name and size) of {first[key]['path']}"))
+                continue
+            first[key] = r
+            if r["name"] not in use and r["name"] not in in_lock:
+                cands.append((r, "no lab workflow or lock set uses it"))
+        cands.sort(key=lambda c: -c[0]["size"])
+        print("clean-up candidates (comfy.py never deletes: delete by hand after the owner said yes; a file a lab "
+              "workflow or comfy.lock.json names is never listed, except a duplicate copy):")
+        for r, why in cands:
+            print(f"  {r['size'] / GB:7.2f} GB  {r['family']:10} {r['path']}  -- {why}")
+        total = sum(r["size"] for r, _ in cands)
+        print(f"total {total / GB:.1f} GB in {len(cands)} file(s)" if cands else "none: nothing to suggest")
+    return 0
+
+
+# --- models --fetch SET (Hugging Face, asks first) --------------------------------------------------------------------
+HF_DEFAULT = "https://huggingface.co"
+HF_OPENER = urllib.request.build_opener()       # follows the CDN redirect, keeps the Range header
+FETCH_MARGIN = 2 * 2**30                        # bytes kept free on the target drive after the download
+FETCH_PROGRESS = 10                             # seconds between progress lines
+
+
+def hf_base():
+    return (os.environ.get("FILM_HF_URL") or HF_DEFAULT).rstrip("/")
+
+
+def hf_open(req, timeout=60):
+    """Hugging Face through the system's proxy settings; a local mirror (127.0.0.1, tests) never through a proxy."""
+    host = urllib.parse.urlparse(req.full_url).hostname or ""
+    return (OPENER if host in ("127.0.0.1", "localhost", "::1") else HF_OPENER).open(req, timeout=timeout)
+
+
+def hf_file_info(repo, rev, path):
+    """{size, sha256} of one file of a Hugging Face model repo from the tree API (sha256 = the LFS oid)."""
+    d = path.rsplit("/", 1)[0] if "/" in path else ""
+    q = urllib.parse.quote
+    url = f"{hf_base()}/api/models/{q(repo, safe='/')}/tree/{q(rev, safe='')}" + (f"/{q(d, safe='/')}" if d else "")
+    req = urllib.request.Request(url, headers={"User-Agent": "film-lab-comfy/1", "Accept": "application/json"})
+    with hf_open(req) as r:
+        listing = json.loads(r.read() or b"[]")
+    for e in listing if isinstance(listing, list) else []:
+        if isinstance(e, dict) and e.get("path") == path and e.get("type", "file") == "file":
+            lfs = e.get("lfs") if isinstance(e.get("lfs"), dict) else {}
+            sha = str(lfs.get("oid") or lfs.get("sha256") or "")
+            sha = sha[7:] if sha.startswith("sha256:") else sha
+            size = lfs.get("size", e.get("size"))
+            return {"size": size if isinstance(size, int) else None,
+                    "sha256": sha if re.fullmatch(r"[0-9a-f]{64}", sha) else None}
+    raise ComfyError(f"{path} is not in the listing of {repo}@{rev} (wrong path in the lock, or the repo changed)")
+
+
+def hf_url(repo, rev, path):
+    q = urllib.parse.quote
+    return f"{hf_base()}/{q(repo, safe='/')}/resolve/{q(rev, safe='')}/{q(path, safe='/')}"
+
+
+def download_verified(url, dest, size, sha, chunk=1 << 22):
+    """url -> dest through dest.part (resumed with a Range request), size and sha256 checked, then moved to dest
+    without ever replacing a file there (place_new). A wrong hash: the bytes go to dest.bad, dest is not made.
+    An interrupted download keeps dest.part for the next run."""
+    if os.path.isfile(dest) and os.path.getsize(dest) > 0:
+        raise FileExistsError(dest)
+    part = dest + ".part"
+    have = os.path.getsize(part) if os.path.isfile(part) else 0
+    if have > size:
+        have = 0
+    h = hashlib.sha256()
+    if have:
+        with open(part, "rb") as f:
+            for b in iter(lambda: f.read(chunk), b""):
+                h.update(b)
+    if have < size:
+        req = urllib.request.Request(url, headers={"User-Agent": "film-lab-comfy/1"})
+        if have:
+            req.add_header("Range", f"bytes={have}-")
+        with hf_open(req) as r:
+            status = getattr(r, "status", None) or r.getcode()
+            if have and status != 206:
+                print(f"  the server ignored the Range request (HTTP {status}): starting {os.path.basename(dest)} "
+                      "again", flush=True)
+                have, h = 0, hashlib.sha256()
+            elif have:
+                m = re.match(r"bytes (\d+)-", r.headers.get("Content-Range") or "")
+                if not m or int(m.group(1)) != have:
+                    raise OSError(f"unexpected Content-Range {r.headers.get('Content-Range')!r} for a resume at {have}")
+                print(f"  resuming {os.path.basename(dest)} at {have / GB:.2f} GB", flush=True)
+            got, last = have, time.monotonic()
+            with open(part, "ab" if have else "wb") as f:
+                while True:
+                    b = r.read(chunk)
+                    if not b:
+                        break
+                    if got + len(b) > size:
+                        raise OSError(f"the server sends more than the lock's {size} bytes")
+                    f.write(b)
+                    h.update(b)
+                    got += len(b)
+                    if time.monotonic() - last >= FETCH_PROGRESS:
+                        print(f"  {got / GB:.2f} / {size / GB:.2f} GB", flush=True)
+                        last = time.monotonic()
+    n = os.path.getsize(part)
+    if n != size:
+        raise OSError(f"got {n} of {size} bytes ({part} stays: run the same command again to resume)")
+    got_sha = h.hexdigest()
+    if got_sha != sha:
+        os.replace(part, dest + ".bad")
+        raise OSError(f"sha256 {got_sha[:16]}... != {sha[:16]}...: kept as {dest}.bad, not used")
+    place_new(part, dest)
+
+
+def fetch_cmd(a):
+    raw = a.fetch
+    name = raw.strip()            # a set name pasted from a Windows pipe may end in \r
+    bad = name_problem(name, "set")
+    if bad:
+        refuse(f"--fetch {raw!r}: {bad}")
+    if name != raw:
+        warn(f"--fetch {raw!r}: blanks/line ends around the name dropped -> {name!r}")
+    lock = load_lock(a.lock)
+    sets = sorted({m["set"] for m in lock["models"]})
+    if name not in sets:
+        refuse(f"--fetch {name}: the lock has {', '.join(sets)}")
+    mdir = models_dir(layout(comfy_home()))
+    if not mdir:
+        refuse("no models folder: set FILM_COMFY_MODELS (or FILM_COMFY_HOME)")
+    info = (lock.get("sets") or {}).get(name) or {}
+    print(f"set {name} -> {mdir}")
+    if info.get("license"):
+        print(f"licence: {info['license']}")
+    if info.get("note"):
+        print(f"note: {info['note']}")
+    for req in info.get("requires") or []:
+        rr = model_rows(lock, mdir, req, False)
+        print(f"also uses set {req}: {sum(1 for _, p, *_ in rr if p)}/{len(rr)} present"
+              + ("" if all(ok for *_, ok in rr) else f"; needed and not ok: python tools/comfy/comfy.py models --set {req}"))
+    todo, problems = [], []
+    for m in (m for m in lock["models"] if m["set"] == name):
+        dest = os.path.join(mdir, m["folder"], m["file"])
+        label = f"{m['folder']}/{m['file']}"
+        hf = m.get("hf")
+        size = m.get("size")
+        p = find_model(mdir, m["folder"], m["file"])
+        src = f"hf {hf['repo']}@{hf.get('revision', 'main')}:{hf['path']}" if hf else "no source in the lock"
+        if p:
+            have = os.path.getsize(p)
+            if size is not None and have != size:
+                state = f"CONFLICT: {p} is {have} bytes, the lock says {size}: never overwritten (move it away by hand)"
+                problems.append(label)
+            else:
+                state = "present"
+            print(f"  {'present' if state == 'present' else 'BAD':8} {label:74} {(size or have) / GB:7.2f} GB  "
+                  + ("" if state == "present" else state))
+            continue
+        if not hf:
+            problems.append(label)
+            print(f"  {'MISSING':8} {label:74} {(size or 0) / GB:7.2f} GB  {src}: put it in {mdir}/{m['folder']}/ by hand")
+            continue
+        if size is None:
+            problems.append(label)
+            print(f"  {'MISSING':8} {label:74} {'?':>7} GB  the lock has no size for it: add it first")
+            continue
+        part = dest + ".part"
+        have = os.path.getsize(part) if os.path.isfile(part) else 0
+        have = have if have <= size else 0
+        todo.append((m, dest, have))
+        print(f"  {'fetch':8} {label:74} {size / GB:7.2f} GB  {src} · sha256 "
+              + ("pinned in the lock" if m.get("sha256") else "= the HF LFS oid (read with --yes)")
+              + (f" · resume at {have / GB:.2f} GB ({os.path.basename(part)})" if have else ""))
+    need = sum(m["size"] - have for m, _, have in todo)
+    target = existing_dir(mdir)
+    try:
+        free = shutil.disk_usage(target).free
+    except OSError:
+        free = None
+    print(f"to download: {len(todo)} file(s), {need / GB:.2f} GB · {drive_of(target)} free "
+          + ("?" if free is None else f"{free / GB:.1f} GB (after: {(free - need) / GB:.1f} GB)"))
+    if problems:
+        refuse(f"set {name}: {len(problems)} file(s) cannot be fetched safely ({', '.join(problems)}); nothing "
+               "downloaded")
+    if not todo:
+        print("nothing to download: every file of the set is present")
+        return 0
+    if free is not None and free - need < FETCH_MARGIN:
+        refuse(f"not enough space on {drive_of(target)}: {need / GB:.1f} GB to download, {free / GB:.1f} GB free "
+               f"(keeps {FETCH_MARGIN / GB:.0f} GB free); see models --inventory --suggest-clean")
+    if not a.yes:
+        print(f"plan only: nothing downloaded. Ask the owner first (CLAUDE.md: no model download without a yes); "
+              f"after the yes: python tools/comfy/comfy.py models --fetch {name} --yes")
+        return 0
+    agent = (os.environ.get("FILM_AGENT") or "").strip()
+    if agent:
+        refuse(f"--fetch --yes downloads models: main session only, after the owner said yes (FILM_AGENT={agent} is "
+               "set); nothing downloaded")
+    plans = []
+    for m, dest, have in todo:                # every file checked against the HF listing before the first byte
+        hf = m["hf"]
+        rev = hf.get("revision", "main")
+        try:
+            got = hf_file_info(hf["repo"], rev, hf["path"])
+        except (ComfyError, urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
+            print(f"error: Hugging Face listing for {m['file']} failed ({getattr(e, 'reason', None) or e}); nothing "
+                  "downloaded", file=sys.stderr)
+            return FAILED
+        if got["size"] is not None and got["size"] != m["size"]:
+            refuse(f"{m['file']}: Hugging Face has {got['size']} bytes, the lock {m['size']}: the repo changed or "
+                   "the lock is wrong; nothing downloaded")
+        sha = m.get("sha256")
+        if sha and got["sha256"] and sha != got["sha256"]:
+            refuse(f"{m['file']}: the lock pins sha256 {sha[:16]}..., Hugging Face has {got['sha256'][:16]}...; "
+                   "nothing downloaded")
+        sha = sha or got["sha256"]
+        if not sha:
+            refuse(f"{m['file']}: no sha256 (not pinned in the lock, no LFS oid on Hugging Face): not downloaded "
+                   "unchecked; nothing downloaded")
+        plans.append((m, dest, sha, hf_url(hf["repo"], rev, hf["path"])))
+    failed = 0
+    for m, dest, sha, url in plans:
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        print(f"fetch {m['folder']}/{m['file']} ({m['size'] / GB:.2f} GB)", flush=True)
+        try:
+            download_verified(url, dest, m["size"], sha)
+        except FileExistsError:
+            failed += 1
+            print(f"error: {dest} appeared meanwhile: not replaced", file=sys.stderr)
+            continue
+        except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
+            failed += 1
+            print(f"error: {m['file']}: {getattr(e, 'reason', None) or e}", file=sys.stderr)
+            continue
+        print(f"  ok {dest} (sha256 {sha[:16]}...)", flush=True)
+    print(f"{len(plans) - failed}/{len(plans)} downloaded" + ("" if not failed else
+          " (a .part is resumed by running the same command again)"))
+    return FAILED if failed else 0
 
 
 def fetch(url, dest, size, sha):
@@ -1835,6 +2488,20 @@ def workflows_cmd(a):
         gb = sum((by_file.get(f) or {}).get("size") or 0 for f in files) / 1e9
         print(f"  model {meta.get('ledger_model') or MODEL_PREFIX + wid} · set {meta.get('model_set')} · "
               f"files: {', '.join(files)} ({gb:.1f} GB)")
+        if meta.get("edit"):
+            d, e, r = meta["defaults"], meta.get("estimate") or {}, meta["refs"]
+            light = " · ".join(f"--lightning {k}: {v['steps']} steps, cfg {v['cfg']:g}" for k, v in meta["lightning"].items())
+            print(f"  inputs: --image IN (image 1, edited) · --ref IMG x{r['min']}..{r['max']} (Picture 2..) · "
+                  "--prompt | --prompt-file (text) · --size WxH (default: the input's) · "
+                  f"--steps (default {d['steps']}) · --cfg (default {d['cfg']:g}) · {light} · "
+                  f"--denoise (default {d['denoise']:g}) · --ref-mode full|vl (default {d['ref_mode']}) · --seed · "
+                  "--negative (cfg > 1 only)")
+            print(f"  constraints: one {meta['output'].get('ext', '.png')} · image 1 worked at ~{d['megapixels']:g} MP "
+                  "(multiple of 16), output scaled back (Lanczos) · at most 3 images"
+                  + (f" · {e['note']}" if e.get("note") else ""))
+            print(f"  graph: {len(graph)} nodes · verified against a live /object_info: "
+                  f"{'yes' if meta.get('verified') else 'no (unverified)'}")
+            continue
         if meta.get("kind") == "image":
             sz, d, e = meta["size"], meta["defaults"], meta.get("estimate") or {}
             print(f"  inputs: --prompt | --prompt-file (text) · --negative · --size WxH (default "
@@ -1933,31 +2600,52 @@ i = sp.add_parser("install", help="check the install against comfy.lock.json; ne
 i.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
 i.add_argument("--portable", action="store_true", help="download + extract the pinned portable ComfyUI if none")
 i.add_argument("--lock", default=None, help=argparse.SUPPRESS)
-m = sp.add_parser("models", help="model files of the lock: present / size / (--verify) sha256")
+m = sp.add_parser("models", help="model files of the lock: present / size / (--verify) sha256; --inventory; --fetch")
 m.add_argument("--set", default=None, help="only this model set (e.g. minimax-h3)")
 m.add_argument("--verify", action="store_true", help="hash the files whose sha256 the lock pins (slow)")
+m.add_argument("--inventory", action="store_true",
+               help="read-only: every model file in ComfyUI's model folders, family, lab use, free disk space")
+m.add_argument("--suggest-clean", action="store_true",
+               help="read-only: files no lab workflow uses, leftovers, duplicates (comfy.py never deletes)")
+m.add_argument("--fetch", default=None, metavar="SET",
+               help="download a lock set from Hugging Face; without --yes only the plan is printed")
+m.add_argument("--yes", action="store_true",
+               help="with --fetch: the owner said yes to the printed plan, download it (main session only)")
 m.add_argument("--lock", default=None, help=argparse.SUPPRESS)
 sp.add_parser("workflows", help="the shipped workflows: inputs, constraints, model files")
 r = sp.add_parser("run", help="one clip from a workflow (see the module help)")
 r.add_argument("workflow")
-r.add_argument("--image", default=None, help="h3-i2v: start frame (center-cropped to the canvas aspect, Lanczos to its size)")
+r.add_argument("--image", default=None,
+               help="h3-i2v: start frame (center-cropped to the canvas aspect, Lanczos to its size); "
+                    "qwen-edit: image 1, the one edited")
 r.add_argument("--last", default=None, help="h3-i2v: end frame (first-last-frame; needs --image)")
-r.add_argument("--ref", action="append", default=None, metavar="IMG", help="h3-r2v: reference image (repeat, 1-9)")
+r.add_argument("--ref", action="append", default=None, metavar="IMG",
+               help="h3-r2v: reference image (repeat, 1-9); qwen-edit: Picture 2/3 (repeat, at most 2)")
 r.add_argument("--ref-size", choices=["match", "max"], default=None, help="h3-r2v: ref image sizing (default match)")
 r.add_argument("--guide", action="append", default=None, metavar="SECONDS=IMG",
                help="h3-r2v: anchor IMG at that time of the clip (repeat)")
 r.add_argument("--prompt", default=None)
 r.add_argument("--prompt-file", default=None,
                help="video: JSON/YAML with the workflow's prompt fields; image: a UTF-8 text file")
-r.add_argument("--negative", default=None, help="qwen-t2i: negative prompt; refused for H3 (CFG-distilled)")
+r.add_argument("--negative", default=None,
+               help="qwen-t2i, qwen-edit (cfg > 1 only): negative prompt; refused for H3 (CFG-distilled) and at cfg 1")
 r.add_argument("--seconds", type=positive_float, default=None, help="clip length, snapped up to 17k+5 frames (default 5)")
 r.add_argument("--res", default=None, help="480p (864x480 draft) | 768p (1344x768, default)")
 r.add_argument("--seed", type=int, default=None, help="default: random (printed and logged)")
 r.add_argument("--steps", type=int, default=None, help="default: the workflow's (H3 20, qwen-t2i 30; --turbo: the LoRA's)")
-r.add_argument("--size", default=None, metavar="WxH", help="image workflows: image size (qwen-t2i default 1664x928)")
-r.add_argument("--cfg", type=float, default=None, help="image workflows: CFG scale (qwen-t2i 2.5; --turbo 1)")
+r.add_argument("--size", default=None, metavar="WxH",
+               help="image workflows: image size (qwen-t2i default 1664x928; qwen-edit default: the input's)")
+r.add_argument("--cfg", type=float, default=None,
+               help="image workflows: CFG scale (qwen-t2i 2.5, --turbo 1; qwen-edit 4, --lightning 1)")
 r.add_argument("--turbo", action="store_true", help="the workflow's speed LoRA (few steps): drafts only")
-r.add_argument("--out", required=True, help="<clips>/<name>_v<NN>.mp4 | <concepts>/<id>_v<NN>.png (must not exist)")
+r.add_argument("--lightning", choices=["4", "8"], default=None,
+               help="qwen-edit: lightx2v Lightning LoRA, 4 or 8 steps, cfg 1 (default: no LoRA, 40 steps, cfg 4)")
+r.add_argument("--denoise", type=float, default=None,
+               help="qwen-edit: 1.0 (default) redraws image 1; 0.6-0.85 keeps its shapes")
+r.add_argument("--ref-mode", choices=["full", "vl"], default=None,
+               help="qwen-edit: full (default: refs are also reference latents) | vl (refs only seen by the VL encoder)")
+r.add_argument("--out", required=True,
+               help="<clips>/<name>_v<NN>.mp4 | <concepts>/<id>_v<NN>.png | <dir>/<id>_v<NN>.png (must not exist)")
 r.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")
 r.add_argument("--no-ledger", action="store_true", help="ad-hoc test without a ledger (main session only)")
 r.add_argument("--dry-run", action="store_true", help="validate and print the filled graph summary; send nothing")

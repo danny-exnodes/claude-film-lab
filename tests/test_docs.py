@@ -29,6 +29,8 @@ PREFIXES = (".claude", "tools", "docs", "lambda", "tests", "templates", "styles"
 
 # "<kind>:<item>" -> reason. Kinds: path, subcommand (<tool> <name>), option (<tool> <--flag>).
 ALLOW = {
+    "path:tools/gpu_run.py": "lab-wide GPU queue of issue #57, built on a parallel branch merged with this one; "
+                             "drop this entry once tools/gpu_run.py is in the tree",
 }
 
 KNOWN_AGENT_TOOLS = {"Bash", "Read", "Write", "Edit", "MultiEdit", "Glob", "Grep", "WebSearch", "WebFetch",

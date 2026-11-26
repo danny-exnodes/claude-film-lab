@@ -39,12 +39,14 @@ hợp đồng), làm nhanh, không dựng model cuối:
    python tools/blender/blender.py still <shot3d.json> --frame <n> --out <khung>.png
    ```
 4. **Nâng chất** (chỉ khi hợp đồng ghi; tập sẽ dùng cùng đường này cho shot thật ở khâu 5–6). Prompt chỉ nâng chất
-   liệu và ánh sáng, giữ bố cục và silhouette của proxy; cờ ảnh vào: `python tools/comfy/comfy.py workflows`;
-   `--dry-run` trước; đầu ra `<id>_sf<NN>_<chủ-đề>_edit_v<NN>.png` cạnh khung gốc:
+   liệu và ánh sáng, giữ bố cục và silhouette của proxy ("keep the composition and pose exactly"); không đổi số sừng,
+   chân (Qwen-Edit không làm được, `local-video.md` §8); `--dry-run` trước; đầu ra `<id>_sf<NN>_<chủ-đề>_edit_v<NN>.png`
+   cạnh khung gốc:
    ```
-   FILM_AGENT=<tên> python tools/comfy/comfy.py run qwen-edit ... --out <khung>_edit_v<NN>.png --ledger out/<project>/<id>/ledger.csv
+   FILM_AGENT=<tên> python tools/comfy/comfy.py run qwen-edit --image <khung>.png --prompt "..." --lightning 8 --out <khung>_edit_v<NN>.png --ledger out/<project>/<id>/ledger.csv
    ```
-5. **Grade** theo style bằng `grade.py` của `tools/compose` (cùng tham số cho mọi khung; ghi tham số vào cột "Cách làm").
+5. **Grade** theo style (cùng tham số cho mọi khung; ghi tham số vào cột "Cách làm"; `blender-method.md` §7):
+   `python3 tools/compose/grade.py <khung>.png <khung>_grade_v<NN>.png --style styles/<id> [--params <tập>/grade.json]`.
 6. Ghi bảng `## Khung` của `STYLE-FRAMES.md` (id, chương, shot, file, cách làm: đủ để làm lại), rồi contact sheet và
    bảng màu (chép dòng `palette:` vào `## Bảng màu`):
    ```

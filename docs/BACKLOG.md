@@ -51,7 +51,7 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   scipy); chạy song song nhiều khung (~0,6 s/khung 1080p, một lõi); mp4 đầu ra không cùng byte giữa hai lần (x264), chỉ
   chuỗi PNG được bảo đảm.
 - Chuỗi concept/shot lai (#74, #76) mới thử bằng bản giả (không GPU): chạy thật `tools/concept.py` và
-  `tools/comfy/hybrid.py` trên một sinh vật và một shot mẫu khi workflow `qwen-edit` đã có trong `comfy.py`; đo giây mỗi
+  `tools/comfy/hybrid.py` trên một sinh vật và một shot mẫu (workflow `qwen-edit` có từ đợt này, graph chưa kiểm với server thật); đo giây mỗi
   bước, xem cờ `--lightning/--denoise` khớp workflow thật.
 - `hybrid.py`: chỉ `h3-i2v` first/last; biến thể `h3-r2v` + `--guide` (nhiều khung khoá trong một clip) chưa nối. Hai đoạn
   liền nhau lặp khung khoá ở chỗ nối (ghép không mã hoá lại): chưa tự cắt.
@@ -340,8 +340,7 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - Chưa có: khớp màu chiếu từ concept (`uvfit.py` của bản thử: tối ưu độ trùng bóng, ảnh "bleed") và ảnh "thật nhanh" (màu
   chiếu + bump vảy) – chỉ để duyệt; điều kiện nhiều góc (`Hunyuan3Dv2ConditioningMultiView`, ảnh trước/sau từ Qwen-Edit);
   chọn seed tự động theo IoU; vòng cạnh rig (retopo tay).
-- Bộ `hunyuan3d-2.1` của `tools/comfy/comfy.lock.json` (tên, thư mục `checkpoints`, kích thước, sha256) do nhánh song song
-  thêm; `test_comfy.test_lock_and_graph_models` bỏ qua workflow có bộ model chưa có trong lock.
+- Bộ `hunyuan3d-2.1` của `tools/comfy/comfy.lock.json`: sha256 chưa ghim (`null`).
 
 ## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
 
@@ -372,8 +371,7 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   `renders/`/`vo/`/`audio/`, không có gói shot): chỉ contact sheet, bảng màu và bản sao khung chuẩn trong
   `<tập>/review/styleframes/` lên Drive cùng chữ của tập.
 - **#71** Ngưỡng `styleframes.py compare` (`LIMITS`: luma 8, contrast 8, saturation 10, palette 12 trên thang 0–100) là ước
-  lượng, chưa đo trên khung thật của chủ dự án; `--tol` chỉnh tạm. `grade.py` và `comfy.py run qwen-edit` chỉ được nhắc
-  tên (làm ở nhánh song song, #68 #70): cờ cụ thể theo công cụ đó.
+  lượng, chưa đo trên khung thật của chủ dự án; `--tol` chỉnh tạm.
 - **#72** Luật "mỗi sinh vật chính ≥ 1 cận chi tiết + ≥ 1 `extreme-wide`" chỉ kiểm được ở tập `blender`/`code` (mã lớp
   `A-`/`C-`/`M-<slug>` nêu tên sinh vật); tập `layers`/`seedance` (`L4`, `P<n>`) không biết lớp nào là sinh vật nào. Model
   có id khác slug (không phải `<slug>` hay `<slug>-<hậu tố>`) bị báo "in no shot".

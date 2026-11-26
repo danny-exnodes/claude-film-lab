@@ -49,10 +49,18 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - Trước mỗi cổng duyệt: `python3 tools/check_episode.py episode <thư mục tập> --out review/check-v<N>.txt` (thêm `--probe`
   từ G3) không còn ERROR, và `python3 tools/status.py <thư mục tập> --gate <G>` in `READY`. `budget.yaml` thiếu hoặc sai
   khóa, và `stage` vượt cổng chưa có ngày, đều là ERROR.
+- Khâu 2b: agent `film-dop` viết `CAMERA-BIBLE.md` và cột máy quay của `shots.csv` trước G1. Tập `blender`/`code`: khâu 3a `film-iconographer`
+  (`ICONOGRAPHY.md`, `DESIGN-OPTIONS.md`, `LOCATION-REFS.md`; mẫu `templates/research/`) rồi concept bằng
+  `tools/concept.py`; khâu 3b style frame (`STYLE-FRAMES.md`, khung chuẩn `không khí` + mỗi sinh vật chính) trước G2
+  (`film-pipeline` mục 2.2–2.4). Style có khối `grade:` (vd. `chan-thuc-blender`): grade mọi render bằng
+  `tools/compose/grade.py` (pass `depth` + `mask`), đầu ra `out/<project>/<id>/graded/` (`blender-method.md` §7).
+- Ảnh tham chiếu chỉ tải bằng `tools/refs_fetch.py` (giấy phép tự do, `_credits.jsonl`). Asset CC0: `tools/assets.py plan`
+  và hỏi người dùng dung lượng trước khi `fetch --yes`. Bước kiểm bằng mắt của shot lai (`hybrid.py approve`) chỉ do
+  người dùng qua, như cổng duyệt.
 
 ## Engine local (Blender, ComfyUI)
 - Chỉ chạy trong **phiên local trên máy của chủ lab** (Windows, RTX). Phiên cloud không có GPU: không render Blender
-  (`blender.py render|still|turntable|keyframes|lookbook`), không `comfy.py start|run`; tập `blender`/`comfy` ở cloud chỉ làm phần chữ và
+  (`blender.py render|still|turntable|keyframes|lookbook|mesh-prep`), không `comfy.py start|run`, `concept.py gen|edit`, `hybrid.py`; tập `blender`/`comfy` ở cloud chỉ làm phần chữ và
   kiểm tra. `tools/doctor.sh` dòng `blender`/`comfy` = `n/a` ở cloud.
 - ComfyUI chỉ chạy offline: `comfy.py start` (Python của Comfy Desktop, không giao diện, `127.0.0.1:8188`, `--offline`)
   hoặc server của ứng dụng Comfy Desktop qua `FILM_COMFY_URL` (localhost). **Không bao giờ dùng node API trả tiền** (bản
@@ -63,6 +71,11 @@ Dữ liệu từng dự án phim nằm trên Google Drive, không nằm trong re
 - **Không tải app hay model nào khi chưa hỏi.** Trước hết tìm cái đã cài trên máy (Blender ở `C:\Program Files\Blender
   Foundation\`, Comfy Desktop và model ở `%LOCALAPPDATA%\Comfy-Desktop\`), báo chủ lab, nêu dung lượng, chỉ tải khi được
   đồng ý. `comfy.py install` không bao giờ tải model, chỉ in cái còn thiếu.
+- Tải model chỉ bằng `comfy.py models --fetch <bộ> --yes` sau khi chủ lab đồng ý với kế hoạch in ra (không `--yes` = chỉ
+  in); không ghép tên file qua pipe shell (`\r` dính tên). Kiểm kê: `comfy.py models --inventory --suggest-clean` (chỉ đọc).
+- Phôi sinh vật Hunyuan3D 2.1 (`blender-method.md` §8) chỉ từ concept đã duyệt, nền trắng đủ thân; trọng số theo Tencent
+  Hunyuan 3D 2.1 Community License (không áp dụng EU/Anh/Hàn Quốc): ghi vào `ASSETS.md` mọi model dựng từ phôi.
+  TRELLIS.2 chưa tải (~16 GB): hỏi chủ lab trước.
 
 ## Khởi động phiên
 Hook `.claude/hooks/session-start.sh` tự chạy: cài font CJK + `rembg`, trỏ `/opt/byteplus/ark.py` vào
@@ -97,12 +110,25 @@ python tools/blender/blender.py turntable <model>.blend#<Collection> --out <dir>
 python tools/comfy/comfy.py ping | start | workflows | interrupt                              # ComfyUI local (MiniMax H3), chỉ máy chủ lab
 python tools/comfy/comfy.py run h3-i2v --image <start>.png [--last <end>.png] --prompt "..." --out <clips>/<id>_s<NN>_h3_v<NN>.mp4 --ledger L [--dry-run]
 python tools/comfy/comfy.py run qwen-t2i --prompt "..." [--size 1664x928] [--seed N] [--turbo] --out <concepts>/<id>_v<NN>.png --ledger L [--dry-run]   # ảnh concept Qwen-Image local, ~135 s/ảnh
+python tools/comfy/comfy.py run qwen-edit --image <in>.png [--ref <r>.png] --prompt "..." [--lightning 4|8] [--denoise 0.8] --out <dir>/<id>_v<NN>.png --ledger L [--dry-run]   # sửa ảnh/khung khoá, local, miễn phí
+python tools/comfy/comfy.py run hunyuan3d --image <concept nền trắng>.png --out <c>_raw_v<NN>.glb [--octree 256|512] [--steps 30] [--seed N] --ledger L   # phôi 3D sinh vật (Hunyuan3D 2.1)
+python tools/comfy/comfy.py models --inventory [--suggest-clean] | --fetch <bộ> [--yes]   # kiểm kê (chỉ đọc); tải model: không --yes chỉ in kế hoạch
+python tools/concept.py gen <DESIGN-OPTIONS.md|jobs.json> --slug S --out-dir out/<project>/characters/<slug>/concept --ledger L [--n 2] [--dry-run] | edit <ảnh> --instruction "..." --ledger L | sheet <thư mục>   # concept khâu 3a
+python3 tools/concept.py approve <slug> <ảnh> --episode projects/<project>/<thư mục tập> [--quote "..."]   # ghi CHARACTER.md + bảng Sinh vật của tập
+python tools/comfy/hybrid.py run|keyframes|edit|animate|assemble <shots3d/s<NN>.json> --media out/<project>/<id> --ledger L --edit-prompt-file F --motion-prompt-file F.json [--keys 3] [--dry-run]   # shot lai, dừng ở bước kiểm bằng mắt
+python tools/comfy/hybrid.py approve <shots3d/s<NN>.json> k1,k2 --media out/<project>/<id>   # chỉ sau khi người dùng duyệt khung đã edit
+python tools/blender/blender.py mesh-prep <c>_raw_v<NN>.glb --out <dir> [--concept <concept>.png] [--quad-faces 20000 | --decimate N]   # phôi → nền điêu khắc: báo cáo lưới, remesh, turntable đất sét, IoU bóng
+python tools/blender/blender.py mesh-check <mesh>.glb [--concept <concept>.png] [--sheet s.png]   # báo cáo lưới + IoU bóng, không Blender
 python tools/gpu_run.py [--label L] [--wait SEC] -- <lệnh ...> | status   # khoá GPU chung mọi worktree; render Blender, comfy.py run tự lấy khoá
 python tools/review/review.py up [--no-ngrok | --tunnel ngrok|tailscale|cloudflared] | down | url | status   # web app xem trực tiếp (Docker + tunnel), chỉ máy chủ lab
 python tools/review/review.py monitor [--stop|--restart] [--comfy-log PATH]  # monitor.py: số đo máy + tiến độ ComfyUI lên bảng theo dõi (chỉ nhãn job, không dòng lệnh)
 python tools/review/review.py watch <project> [--episode q01t03] [--stop|--restart|--once]  # watch.py: ảnh WIP, mp4, .blend→GLB của out/<project>/ lên bảng
 python tools/review/review.py publish-video <clip>.mp4 --build <id> --label L | publish-model <model>.glb --build <id>
 python3 tools/compose/inline.py <film>/film.html --preflight          # chạy thử mọi shot bằng node trước khi render: khoá sai, thiếu neo, L1 lộ mép, figure >25 %; thoát 1 khi có ERROR
+python3 tools/compose/grade.py <renders3d/s<NN>|ảnh|thư mục PNG|clip.mp4> <OUT> --style styles/<id> [--subject <asset>] [--params <tập>/grade.json]   # grade thuỷ mặc hai lớp; --preview P.png, --export-lut F.cube, --check
+python3 tools/styleframes.py sheet <khung|thư mục> --out <tập>/review/styleframes/<id>_contact_v01.png [--palette-out <...>_palette_v01.png] | compare <khung chuẩn>.png <khung shot>.png   # style frame khâu 3b
+python3 tools/refs_fetch.py search "<từ khoá>" [--limit 20] [--free-only] | fetch <File:…|link> --out out/<project>/assets/refs/<slug>/iconography --name <tên>   # ảnh Commons có giấy phép, ≤ 1600 px, _credits.jsonl
+python3 tools/assets.py search --type hdri|texture|model [--tag T] | plan <id> ... --asset-root out/<project>/assets | fetch <id> ... --asset-root ... --yes   # asset CC0 (Poly Haven, ambientCG); hỏi trước khi fetch
 bash tools/doctor.sh [--quick] [--episode projects/<project>/ep<NN>-<slug>]   # --episode: thiếu watermark lời bình sau G3 là FAIL
 bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python ≥ 3.10, bash -n, lint compose, unit test); --install cài requirements-ci.txt
 ```

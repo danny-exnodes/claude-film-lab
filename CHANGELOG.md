@@ -4,6 +4,46 @@
 
 ## [Unreleased]
 
+### Đợt issue #68–#77: Qwen-Edit, phôi 3D, grade thuỷ mặc, style frame, DoP, nghiên cứu hình tượng (2026-11-26)
+- ComfyUI `qwen-edit` (Qwen-Image-Edit 2511, chỉ node lõi, #68): `comfy.py run qwen-edit --image IN [--ref R …] --prompt …
+  [--lightning 4|8] [--denoise D] [--size WxH] [--ref-mode full|vl]`; cỡ ra = cỡ ảnh vào; ledger `comfy:qwen-edit` (0 đ),
+  không ghi đè, khoá GPU, `/free`, `--review`; `--negative` bị từ chối ở cfg 1. `local-video.md` §8: Qwen-Edit làm tốt
+  (đầu, mặt, chất liệu, xoá bộ phận) và không làm được (đổi số sừng/chân; không nhất quán qua khung).
+- `comfy.py run` đọc `python_module` của `/object_info` và từ chối node mà server phục vụ từ `comfy_api_nodes` hoặc
+  `custom_nodes` trước khi gửi gì (#68).
+- Quản lý model (#75): `comfy.py models --inventory [--suggest-clean]` (chỉ đọc: file theo họ, workflow nào dùng, ổ trống,
+  ứng viên dọn, không bao giờ xoá); `models --fetch <bộ> [--yes]` (không `--yes` chỉ in kế hoạch; kiểm danh sách Hugging
+  Face trước, tải `.part` + `Range`, kiểm sha256 rồi mới đổi tên, không ghi đè, chỉ phiên chính); bộ `qwen-image-edit-2511`
+  và `hunyuan3d-2.1` trong `comfy.lock.json`. Sửa: tên model có ký tự điều khiển (`\r` từ pipe shell Windows) bị từ chối.
+- Phôi 3D (#69): workflow `hunyuan3d` (Hunyuan3D 2.1, node lõi) `comfy.py run hunyuan3d --image <concept nền trắng> --out
+  <c>_raw_v<NN>.glb` (kiểm nền trắng, `--octree 256|512`, ledger `comfy:hunyuan3d` 0 đ); `blender.py mesh-prep` (báo cáo
+  lưới, voxel remesh, xoá mảnh vụn, QuadriFlow/decimate, `_prep.glb` + `.blend`, turntable đất sét, IoU bóng với concept)
+  và `blender.py mesh-check` (không cần Blender). Quy trình `blender-method.md` §8; giấy phép Tencent Hunyuan 3D 2.1
+  Community (không áp dụng EU/Anh/Hàn Quốc) trong `THIRD_PARTY.md`, `docs/MODELS.md`, mẫu `ASSETS.md`.
+- Grade thuỷ mặc hai lớp (#70): `tools/compose/grade.py` – cảnh nhạt, sương theo pass depth, vân giấy, tối viền; chủ thể
+  (pass `mask/<asset>`) đậm hơn, mép mềm, vành sương mỏng; vào là ảnh, thư mục PNG, video hoặc `renders3d/s<NN>/`;
+  `--preview`, `--check`, `--export-lut` (.cube); PNG ra cùng byte khi cùng đầu vào. Khối `grade:` trong style pack
+  (`chan-thuc-blender` có tham số khởi đầu), `check_episode.py style` kiểm khóa; đầu ra `graded/` (`blender-method.md` §7).
+- Style frame khâu 3b (#71, tập `blender`/`code`): mẫu `templates/episode/STYLE-FRAMES.md`, 5–8 khung, khung chuẩn
+  `không khí` + mỗi sinh vật chính; `status.py --gate G2` báo `[MISSING] approved style frames`, `check_episode.py` WARN;
+  `tools/styleframes.py sheet` (contact sheet, bảng màu, số đo) và `compare` (`DRIFT` thoát 1).
+- Đạo diễn hình ảnh (#72): agent `film-dop` (khâu 2b, trước G1) và mẫu `templates/episode/CAMERA-BIBLE.md`; chỉ sửa cột
+  `shot_size`/`camera`/`action` của `shots.csv`; skill `film-script` có luật nhịp máy quay; `check_episode.py` WARN khi
+  sinh vật chính của tập `blender`/`code` thiếu cận chi tiết hoặc cảnh `extreme-wide`.
+- Nghiên cứu hình tượng (#73): agent `film-iconographer` (khâu 3a); mẫu `templates/research/` (`RESEARCH-BRIEF`,
+  `ICONOGRAPHY`, `DESIGN-OPTIONS`, `LOCATION-REFS`); `tools/refs_fetch.py` tải ảnh Wikimedia Commons kèm giấy phép
+  (`_credits.jsonl`, ≤ 1600 px, chờ theo `Retry-After` khi 429, từ chối giấy phép không tự do); `film-researcher` chỉ còn khâu 1.
+- Asset CC0 (#77): `tools/assets.py search|plan|fetch` (Poly Haven, ambientCG): `plan` in dung lượng, `fetch` chỉ với
+  `--yes`, tải tiếp, kiểm md5, không ghi đè, `ASSETS_MANIFEST.csv` đúng bố cục `asset_root`; `tools/netfetch.py` dùng chung.
+- Chuỗi concept (#74): `tools/concept.py gen|edit|sheet|approve` – Qwen-Image theo hướng của `DESIGN-OPTIONS.md`, sửa bằng
+  Qwen-Edit, bảng ghép trước/sau, ghi duyệt vào `CHARACTER.md` và bảng `## Sinh vật của tập` (đọc lại bằng `check_episode`).
+- Shot lai (#76): `tools/comfy/hybrid.py` – khung khoá `blender.py keyframes` → Qwen-Edit → dừng chờ người dùng kiểm bằng
+  mắt (`approve`) → H3 nối khung → ghép `clips/<id>_s<NN>_h3_v<NN>.mp4`; chạy tiếp từ chỗ dừng, không ghi đè
+  (`local-video.md` §9).
+- Chưa kiểm chứng: chưa chạy thật trên GPU/ComfyUI/Blender (graph `qwen-edit`, `hunyuan3d` ghi `verified: false`;
+  `meshprep.py` chưa chạy trong Blender), chưa gọi API thật của Hugging Face, Commons, Poly Haven, ambientCG; tham số grade
+  và ngưỡng `styleframes.py compare` chưa được người xem duyệt.
+
 ## [1.5.0] - 2026-11-26
 
 ### Đợt issue #52–#65: thiết kế sinh vật, hàng đợi GPU, Qwen-Image, review có chip tag (2026-11-26)

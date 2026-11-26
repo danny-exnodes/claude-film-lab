@@ -538,7 +538,10 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    (nhiều nhóm `--id … --to … --size …` trong một lệnh được). Connector trả base64 vào hội thoại, không ghi ra đĩa;
    `save` đọc kết quả mới nhất của ID đó trong bản ghi phiên (`~/.claude/projects/<thư mục repo>/*.jsonl`, cả
    `subagents/`; không thấy thì mọi dự án; bản ghi khác: `--transcript <glob>`), giải base64 (chuẩn hoặc url-safe), so
-   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). **Không bao giờ chép lại
+   kích thước với `--size`, ghi file nguyên tử rồi đánh dấu như `pulled` (khi đã có snapshot). Phiên local: connector
+   có thể tự lưu file và chỉ trả `Binary content (<mime>, <n>KB) saved to <file>` (`…/tool-results/mcp-…-blob-*.<đuôi>`,
+   nội dung thô); `save` dò dòng đó như trên và chép file được nêu (chỉ nhận file nằm trong kho bản ghi Claude). Cần chỉ
+   thẳng file: `--from-file <file> --size <fileSize>` sau `--id` (không dò bản ghi; bắt buộc `--size`). **Không bao giờ chép lại
    chuỗi base64 bằng tay** (tốn gấp đôi ngữ cảnh, sai một ký tự là hỏng file). Mỗi file vẫn đi qua ngữ cảnh một lần
    (≈ 1,33 × kích thước file), nên vẫn kéo theo khâu, không kéo cả cây. `--to` tương đối với `projects/<project>/`,
    hoặc bắt đầu bằng `projects/<project>/` / `out/<project>/`; đường dẫn ra ngoài dự án (kể cả qua symlink) bị từ chối.

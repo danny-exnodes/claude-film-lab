@@ -5,7 +5,7 @@ The Drive connector has no CLI: Claude pulls and pushes one file at a time with 
 (download_file_content, create_file, update_file). This helper remembers what was pulled, maps every local
 path to its Drive folder ID from PROJECT.md and prints the exact connector calls for what changed.
 
-  python3 tools/drive_sync.py save     projects/<project> --id <fileId> --to <path> [--size <fileSize>] [--id ...] [--transcript GLOB] [--force]
+  python3 tools/drive_sync.py save     projects/<project> --id <fileId> --to <path> [--size <fileSize>] [--from-file <blob>] [--id ...] [--transcript GLOB] [--force]
   python3 tools/drive_sync.py snapshot projects/<project> [--include-out out/<project>] [--only <path>...] [--force]
   python3 tools/drive_sync.py pulled   projects/<project> <path>...
   python3 tools/drive_sync.py plan     projects/<project> [--include-out out/<project>] [--json] [--now YYYYMMDD-HHMM] [--date YYYY-MM-DD]
@@ -16,6 +16,10 @@ save      right after each download_file_content: write the file the connector r
           transcripts (JSONL under ~/.claude/projects/ or $CLAUDE_CONFIG_DIR/projects/: this repo's folder first, with
           its subagents/, then every project; --transcript GLOB to name them), decoded (standard or url-safe base64),
           checked against --size (Drive fileSize), written atomically, then marked pulled like `pulled` does.
+          Local sessions: the connector may instead save the file itself and answer `Binary content (<mime>, <n>KB)
+          saved to <file>` (tool-results/mcp-...-blob-*.<ext>, raw bytes); that line is found the same way and the
+          saved file is copied (it must lie in the Claude transcript store). --from-file <blob> after an --id copies
+          that file directly, without searching transcripts; it needs --size (nothing ties the file to the ID).
           Several --id/--to[/--size] groups per call; all are checked before anything is written. Refused (exit 1,
           nothing written): overwriting a file with local changes not pushed yet, unless --force. Paths must stay in
           projects/<project>/ or out/<project>/ (symlinks resolved). The file content is never printed.
@@ -878,20 +882,28 @@ RE_B64 = re.compile(r"^[A-Za-z0-9+/_-]*={0,2}$")
 RE_CONTENT = re.compile(r'"content"\s*:\s*"([A-Za-z0-9+/=_\-\s]*)"')
 SIZE_KEYS = ("fileSize", "size")
 RE_SIZE = re.compile(r'"(fileSize|size)"\s*:\s*"?(\d+)')
+# Local sessions: the connector writes the file itself (raw bytes) and the result only names it, e.g.
+# "[Resource from claude.ai Google Drive at googledrive://file/<id>] Binary content (text/markdown, 8.9KB) saved to
+# C:\\Users\\...\\tool-results\\mcp-claude_ai_Google_Drive-blob-<n>.md" (+ a JSON part, "content": "(file sent separately)").
+RE_SAVED = re.compile(r"Binary content \(([^,()]*)(?:,\s*([^()]*))?\) saved to (.+?)\s*$", re.M)
+RE_RESOURCE = re.compile(r"googledrive://file/([^\]\s]+)")
 
 
 class Hit:
     """One download result found in a transcript (b64 = the base64 text; never printed)."""
 
-    def __init__(self, source, line, ts, mtime, b64=None, error=None, meta=None, fallback=False):
+    def __init__(self, source, line, ts, mtime, b64=None, error=None, meta=None, fallback=False, blob=None):
         self.source, self.line, self.ts, self.mtime = source, line, ts, mtime
         self.b64, self.error, self.meta, self.fallback = b64, error, meta or {}, fallback
+        self.blob = blob             # file the connector saved the content to (raw bytes), instead of b64
 
     def order(self):
         return (self.ts if self.ts is not None else self.mtime, self.mtime, self.line)
 
     def where(self):
-        return f"{os.path.basename(self.source)}:{self.line}"
+        if self.line is None:
+            return f"--from-file {os.path.basename(self.source)}"
+        return f"{os.path.basename(self.source)}:{self.line}" + (", saved file" if self.blob else "")
 
 
 def claude_projects_dir():
@@ -987,11 +999,26 @@ def meta_of(d):
     return {k: d[k] for k in ("title", "mimeType", *SIZE_KEYS) if k in d and not isinstance(d[k], (dict, list))}
 
 
+def store_roots(transcript):
+    """Folders a file named by a tool result may be read from: the Claude transcript store, and the folder two
+    levels above the transcript (the store of a --transcript file kept elsewhere)."""
+    return {os.path.realpath(claude_projects_dir()), os.path.realpath(os.path.dirname(os.path.dirname(transcript)))}
+
+
+def native_path(p):
+    """A path as the connector printed it, openable by this Python: C:\\x\\y -> /mnt/c/x/y under WSL/Linux."""
+    p = p.strip().strip('"')
+    m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
+    if m and os.sep == "/":
+        return f"/mnt/{m.group(1).lower()}/" + m.group(2).replace("\\", "/")
+    return p
+
+
 def persisted_text(path, transcript):
     """Text of a tool result Claude Code saved to a file (`Full output saved to: <path>`), when that file is in the
     transcript store (beside the transcript); None otherwise."""
-    roots = {os.path.realpath(claude_projects_dir()), os.path.realpath(os.path.dirname(os.path.dirname(transcript)))}
-    if escapes(path, roots) or not os.path.isfile(path):
+    path = native_path(path)
+    if escapes(path, store_roots(transcript)) or not os.path.isfile(path):
         return None
     with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
@@ -1018,12 +1045,36 @@ def payload_of_text(text, fid, transcript, depth=0):
     return m.group(1), ({size.group(1): size.group(2)} if size else {})
 
 
+def saved_hit(text, fid, transcript, n, ts, mtime, fallback=False):
+    """Hit for a `Binary content (...) saved to <file>` result naming this file id (or no id), else None."""
+    m = RE_SAVED.search(text)
+    if not m:
+        return None
+    rid = RE_RESOURCE.search(text)
+    if rid and rid.group(1) != fid:
+        return None
+    path = native_path(m.group(3))
+    meta = {"mimeType": m.group(1).strip()}
+    if escapes(path, store_roots(transcript)):
+        return Hit(transcript, n, ts, mtime, meta=meta, fallback=fallback,
+                   error=f"the connector saved it to {path}, outside the Claude transcript store "
+                         "(copy it with --from-file <that file> --size <Drive fileSize> if you trust it)")
+    if not os.path.isfile(path):
+        return Hit(transcript, n, ts, mtime, meta=meta, fallback=fallback,
+                   error=f"the file the connector saved ({path}) is gone")
+    return Hit(transcript, n, ts, mtime, meta=meta, fallback=fallback, blob=path)
+
+
 def result_hit(block, fid, transcript, n, ts, mtime):
     if block.get("is_error"):
         return Hit(transcript, n, ts, mtime, error="the download failed (is_error in the transcript)")
     content = block.get("content")
     texts = [content] if isinstance(content, str) else \
         [b.get("text") for b in content or [] if isinstance(b, dict) and isinstance(b.get("text"), str)]
+    for text in texts:                               # local session: the connector saved the file itself
+        got = saved_hit(text, fid, transcript, n, ts, mtime)
+        if got:
+            return got
     for text in texts + (["".join(texts)] if len(texts) > 1 else []):
         got = payload_of_text(text, fid, transcript)
         if got:
@@ -1037,6 +1088,11 @@ def fallback_hit(rec, fid, transcript, n, ts, mtime):
             re.compile(r'\{[^{}]*?"id"\s*:\s*"' + re.escape(fid) + r'"[^{}]*?"content"\s*:\s*"([A-Za-z0-9+/=_\-\s]*)"'))
     for s in strings_in(rec):
         if fid not in s:
+            continue
+        if RE_RESOURCE.search(s) and RE_SAVED.search(s):
+            h = saved_hit(s, fid, transcript, n, ts, mtime, fallback=True)
+            if h and not h.error:
+                return h
             continue
         try:
             d = content_dict(json.loads(s), fid)
@@ -1210,24 +1266,46 @@ def cmd_save(a):
             raise SyncError(f"--id {j['id']!r}: give the Drive file ID passed to {DOWNLOAD_TOOL}")
         if "to" not in j:
             raise SyncError(f"--id {j['id']}: give --to <path> after it")
+        if j.get("from_file") is not None:
+            if j.get("size") is None:
+                raise SyncError(f"--id {j['id']}: --from-file needs --size <Drive fileSize> (nothing else ties the "
+                                "file to this ID)")
+            src = native_path(j["from_file"])
+            if not os.path.isfile(src):
+                raise SyncError(f"--from-file {j['from_file']}: file not found")
+            j["from_file"] = src
         if j.get("size") is not None and j["size"] < 0:
             raise SyncError(f"--size {j['size']}: expected Drive's fileSize in bytes")
         j["key"], j["full"] = save_target(pd, j["to"])
         if j["key"] in targets:
             raise SyncError(f"--to {j['to']}: given twice")
         targets.add(j["key"])
-    hits = find_downloads(pd, [j["id"] for j in jobs], a.transcript)
+    hits = {}
+    wanted = [j["id"] for j in jobs if j.get("from_file") is None]
+    if wanted:
+        hits = find_downloads(pd, wanted, a.transcript)
     for j in jobs:
-        h = hits[j["id"]]
+        if j.get("from_file") is not None:
+            h = Hit(j["from_file"], None, None, os.path.getmtime(j["from_file"]), blob=j["from_file"])
+        else:
+            h = hits[j["id"]]
         if h.error:
             raise SyncError(f"--id {j['id']}: newest result ({h.where()}): {h.error}; download it again")
         if h.fallback and j.get("size") is None:
             raise SyncError(f"--id {j['id']}: found only by text search ({h.where()}, no {DOWNLOAD_TOOL} call to pair "
                             "it with): pass --size <Drive fileSize> to accept it")
         try:
-            j["data"] = decode_b64(h.b64)
+            if h.blob:
+                with open(h.blob, "rb") as f:
+                    j["data"] = f.read()
+            else:
+                j["data"] = decode_b64(h.b64)
+        except OSError as e:
+            raise SyncError(f"--id {j['id']}: cannot read {h.blob}: {e.strerror}; download it again")
         except ValueError as e:
-            raise SyncError(f"--id {j['id']}: result at {h.where()}: {e}; download it again")
+            hint = (" (the connector saved the file separately: pass the file it named with --from-file <file> "
+                    "--size <Drive fileSize>)" if "sent separately" in (h.b64 or "") else "")
+            raise SyncError(f"--id {j['id']}: result at {h.where()}: {e}{hint}; download it again")
         if j.get("size") is not None and len(j["data"]) != j["size"]:
             raise SyncError(f"--id {j['id']}: decoded {len(j['data'])} bytes, --size says {j['size']} "
                             f"({h.where()}): the result is cut short or another version; download it again")
@@ -1293,6 +1371,9 @@ def main(argv=None):
     s.add_argument("--to", action=SaveGroup, metavar="PATH",
                    help="where to write it: relative to the project folder, or projects/<p>/... | out/<p>/...")
     s.add_argument("--size", action=SaveGroup, type=int, metavar="BYTES", help="Drive fileSize: the decoded size must match")
+    s.add_argument("--from-file", action=SaveGroup, metavar="BLOB",
+                   help="the file the connector saved (`Binary content ... saved to <file>`): copy it, no transcript "
+                        "search; needs --size")
     s.add_argument("--transcript", action="append", metavar="GLOB",
                    help="search only these session transcripts (*.jsonl; a subagent's or another session's)")
     s.add_argument("--force", action="store_true", help="overwrite files with local changes not pushed yet")

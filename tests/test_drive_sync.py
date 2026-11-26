@@ -973,6 +973,93 @@ class TestSave(SaveCase):
         self.assertEqual(code, 2)                # the file outside the store is not read; the preview is cut short
         self.assertFalse((self.pd / "ep01-bac-thi" / "out.md").exists())
 
+    def blob_result(self, uid, fid, path, mime="text/markdown", size="0.3KB"):
+        """The two records of a local-session download: the connector saved the file and only names it."""
+        return [
+            {"type": "assistant", "timestamp": "2026-11-26T09:00:00Z", "message": {"content": [
+                {"type": "tool_use", "id": uid, "name": "mcp__claude_ai_Google_Drive__download_file_content",
+                 "input": {"fileId": fid}}]}},
+            {"type": "user", "timestamp": "2026-11-26T09:00:01Z", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": uid, "content": [
+                    {"type": "text", "text": f"[Resource from claude.ai Google Drive at googledrive://file/{fid}] "
+                                             f"Binary content ({mime}, {size}) saved to {path}"},
+                    {"type": "text", "text": json.dumps({"id": fid, "title": "x.md", "mimeType": mime,
+                                                         "content": "(file sent separately)"})}]}]}}]
+
+    def test_connector_saved_file(self):
+        """Local session: `Binary content (...) saved to <file>` → the saved file is copied, size checked."""
+        data = "---\nstage: 3\n---\n# Tập 3 – sinh vật\n".encode("utf-8")
+        blob = self.own / "session-local" / "tool-results" / "mcp-claude_ai_Google_Drive-blob-1795651653356-ab12cd.md"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(data)
+        gone = self.own / "session-local" / "tool-results" / "mcp-claude_ai_Google_Drive-blob-2-gone.md"
+        outside = self.tmp / "mcp-claude_ai_Google_Drive-blob-3-out.md"
+        outside.write_bytes(b"x")
+        self.transcript("session-local.jsonl",
+                        self.blob_result("toolu_FAKE_61", "FAKE-BLOB-0061", blob)
+                        + self.blob_result("toolu_FAKE_62", "FAKE-GONE-0062", gone)
+                        + self.blob_result("toolu_FAKE_63", "FAKE-OUTS-0063", outside))
+        self.snapshot()
+        code, out, err = self.save("--id", "FAKE-BLOB-0061", "--to", "ep01-bac-thi/EPISODE.md",
+                                   "--size", str(len(data)))
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "EPISODE.md").read_bytes(), data)
+        self.assertIn("<- FAKE-BLOB-0061 (session-local.jsonl:2, saved file)", out)
+        self.assertIn(f"{hashlib.sha256(data).hexdigest()}  projects/demo/ep01-bac-thi/EPISODE.md\n", self.snap_text())
+        self.assertNotIn("sinh vật", out + err)
+        code, _, err = self.save("--id", "FAKE-BLOB-0061", "--to", "ep01-bac-thi/x.md", "--size", "5")
+        self.assertEqual(code, 2)
+        self.assertIn(f"decoded {len(data)} bytes, --size says 5", err)
+        code, _, err = self.save("--id", "FAKE-GONE-0062", "--to", "ep01-bac-thi/x.md")
+        self.assertEqual(code, 2)
+        self.assertIn("is gone", err)
+        code, _, err = self.save("--id", "FAKE-OUTS-0063", "--to", "ep01-bac-thi/x.md")
+        self.assertEqual(code, 2)
+        self.assertIn("outside the Claude transcript store", err)
+        self.assertIn("--from-file", err)
+        self.assertFalse((self.pd / "ep01-bac-thi" / "x.md").exists())
+
+    def test_separately_sent_without_a_file_hints_from_file(self):
+        rec = self.blob_result("toolu_FAKE_64", "FAKE-SEP-0064", "x")
+        rec[1]["message"]["content"][0]["content"] = rec[1]["message"]["content"][0]["content"][1:]   # JSON part only
+        self.transcript("session-sep.jsonl", rec)
+        code, _, err = self.save("--id", "FAKE-SEP-0064", "--to", "ep01-bac-thi/x.md")
+        self.assertEqual(code, 2)
+        self.assertIn("not base64", err)
+        self.assertIn("--from-file <file>", err)
+
+    def test_from_file(self):
+        """--from-file copies the named file without any transcript (the ID is in none); --size is required."""
+        data = b"\x89PNG\r\n\x1a\nraw blob"
+        blob = self.tmp / "blob.png"
+        blob.write_bytes(data)
+        self.snapshot("--include-out", "out/demo")
+        code, _, err = self.save("--id", "FAKE-FILE-0065", "--to", "out/demo/characters/bac-thi/k.png",
+                                 "--from-file", str(blob))
+        self.assertEqual(code, 2)
+        self.assertIn("--from-file needs --size", err)
+        code, _, err = self.save("--id", "FAKE-FILE-0065", "--to", "out/demo/characters/bac-thi/k.png",
+                                 "--from-file", str(self.tmp / "none.png"), "--size", "3")
+        self.assertEqual(code, 2)
+        self.assertIn("file not found", err)
+        code, _, err = self.save("--id", "FAKE-FILE-0065", "--to", "out/demo/characters/bac-thi/k.png",
+                                 "--from-file", str(blob), "--size", str(len(data) + 1))
+        self.assertEqual(code, 2)
+        self.assertFalse((self.out / "characters" / "bac-thi" / "k.png").exists())
+        code, out, err = self.save("--id", "FAKE-FILE-0065", "--to", "out/demo/characters/bac-thi/k.png",
+                                   "--from-file", str(blob), "--size", str(len(data)),
+                                   "--id", "FAKE-EP-0001", "--to", "ep01-bac-thi/research.md")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((self.out / "characters" / "bac-thi" / "k.png").read_bytes(), data)
+        self.assertEqual((self.pd / "ep01-bac-thi" / "research.md").read_bytes(), EP2)
+        self.assertIn("<- FAKE-FILE-0065 (--from-file blob.png)", out)
+        self.assertIn("  out/demo/characters/bac-thi/k.png\n", self.snap_text())
+
+    def test_native_path(self):
+        if os.sep == "/":
+            self.assertEqual(ds.native_path("C:\\Users\\A\\.claude\\x-blob.md"), "/mnt/c/Users/A/.claude/x-blob.md")
+        self.assertEqual(ds.native_path(" /tmp/a b.md "), "/tmp/a b.md")
+
     def test_errors_write_nothing(self):
         self.snapshot()
         before = self.snap_text()

@@ -54,7 +54,8 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
    `python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <đường dẫn> --size <fileSize>` (đọc kết quả
    trong bản ghi phiên, kiểm kích thước, đánh dấu đã kéo; nhiều file một lệnh được). **Không bao giờ chép lại base64
    bằng tay.** Mỗi file vẫn tốn ≈ 1,33 × kích thước của nó trong ngữ cảnh: vẫn kéo theo khâu. Lệch kích thước hay
-   không thấy kết quả → tải lại; file do agent con tải → `--transcript <glob>` (CONVENTIONS §11.6 bước 2).
+   không thấy kết quả → tải lại; file do agent con tải → `--transcript <glob>` (CONVENTIONS §11.6 bước 2). Phiên local:
+   connector trả `Binary content (…) saved to <file>` → `save` tự đọc file đó; cần thì `--from-file <file> --size <fileSize>`.
    `04_SanXuat/ep<NN>-<slug>/ledger.csv` → `out/<project>/ep<NN>/ledger.csv` (**bắt buộc** trước khi tạo ảnh: trần
    ngân sách cộng dồn từ ledger; thư mục có **hai** `ledger.csv` hoặc container đã có ledger riêng → tải mọi bản rồi
    `python3 tools/ark.py ledger-merge <các bản> -o out/<project>/ep<NN>/ledger.csv`, không chọn bản mới nhất –

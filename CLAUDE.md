@@ -87,7 +87,7 @@ python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron projects/<proj
 python3 tools/tts/vieneu_tts.py --script <tập>/script.md --pron ... --out <media>/vo --voice "<giọng>" --strict --require-watermark [--check]
 python3 tools/audio/score.py <tập>/score.json --dry-run | --out <media>/audio [--stems] [--seed N]   # nhạc dây gảy + tiếng động theo sự kiện, local, miễn phí
 python3 tools/check_episode.py episode projects/<project>/ep<NN>-<slug> [--probe] --out review/check-v<N>.txt
-python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
+python3 tools/drive_sync.py save projects/<project> --id <fileId> --to <path> --size <fileSize> [--from-file <blob>] [--id …] [--transcript GLOB]   # ngay sau mỗi download_file_content; không chép base64 tay
 python3 tools/drive_sync.py snapshot|pulled|plan|record projects/<project> [--include-out out/<project>] [--only <file…>]
 python3 tools/toon/toon.py still|turntable|clip|lookbook ... [--creature mac-loc]   # method: code, miễn phí: xem style vẽ bằng code, linh vật giot, dị thú 3D
 python3 tools/compose/inline.py <film>/film.html --init --toon         # film.html cho tập method: code (bộ TOON + mẫu shot)

@@ -133,10 +133,11 @@ bash tools/ci.sh [--install] [-- test_x ...]   # bộ test miễn phí (python �
   `docs/CONVENTIONS.md` §2. Không commit ảnh/video.
 - Sau khi người dùng duyệt shot: `python3 tools/bundle.py out/<project>/ep<NN> --shot s<NN>` (tập trên 99 shot: `s<NNN>`) rồi tải zip lên Drive
   `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` bằng connector Google Drive (`create_file` với
-  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng duyệt tải
-  lên riêng (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
+  tham chiếu file `sha256:<hash>:<đường dẫn>` mà bundle.py in ra; người dùng duyệt mỗi lần tải). Bản dựng đã nằm trong
+  `_ChuaDuyet/`: duyệt xong chuyển (bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`).
 - Container bị thu hồi khi phiên rảnh: thay đổi mã/quy trình (lõi) phải commit + push; dữ liệu dự án phải đẩy lên Drive
-  trước khi kết thúc.
+  trước khi kết thúc. Render, lời bình (`vo/`), âm thanh (`audio/`) đẩy **ngay khi tạo xong**, chưa duyệt, vào
+  `04_SanXuat/<tập>/_ChuaDuyet/`; còn `!!! UNSAVED MEDIA` (`drive_sync.py plan`) / `UNSAVED media` (`status.py`) thì chưa dừng phiên.
 
 ## Khi cải tiến repo
 - Sửa `tools/ark.py` → cập nhật `docs/MODELS.md` nếu đổi model, chạy `tools/doctor.sh`.

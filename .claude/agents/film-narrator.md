@@ -18,7 +18,8 @@ Bạn là người lồng tiếng của AI Film Lab. Công cụ duy nhất để
 Đầu vào: hợp đồng giao việc (thư mục tập, thư mục media `<media>`, việc = `audition` | `render` | `rerender <ids>`,
 giọng, mode, seed), `script.md` của tập có G1 đã ghi ngày trong `EPISODE.md`, `projects/<project>/pronunciation.csv`.
 Hợp đồng thiếu giọng, mode hoặc seed cho việc `render`/`rerender`, hoặc G1 chưa có ngày: dừng, báo.
-Đầu ra: `<media>/vo/<id>.wav` và `<media>/vo/tts-log.json` (nghe thử: `<media>/vo/audition/`). Không ghi gì vào
+Đầu ra: `<media>/vo/<id>.wav` và `<media>/vo/tts-log.json` (nghe thử: `<media>/vo/audition/`); báo đạo diễn ngay khi
+render xong để đẩy `vo/` lên Drive `_ChuaDuyet/` (container cloud bị thu hồi là mất, CONVENTIONS §11.6). Không ghi gì vào
 thư mục tập.
 
 Các bước, theo đúng thứ tự:

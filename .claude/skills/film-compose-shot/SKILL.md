@@ -241,8 +241,9 @@ và nói với người dùng trong một dòng. `make.py` chỉ giữ một lư
 - Phần chữ của phim (film.html, STATE.md của cinecode, review/, audio/mix.json…) nằm trong `out/` nên **không nằm
   trong bản làm việc `projects/`** và không được đẩy theo file: gói kèm bằng `python3 $FILM_LAB/tools/bundle.py $FILM_LAB/out/<project>/ep<NN> --shot s<NN> --with-film` (chỉ file chữ, bỏ
   render và media) sau mỗi bản nháp được duyệt.
-- Bản dựng duyệt tải riêng từng file: bản nháp vào `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối vào
-  `05_ThanhPham/ep<NN>-<slug>/`.
+- Bản dựng (`renders/`) và âm thanh (`audio/`) không chờ duyệt: xong một bản là báo đạo diễn ngay để đẩy vào
+  `04_SanXuat/ep<NN>-<slug>/_ChuaDuyet/` (container cloud bị thu hồi là mất; CONVENTIONS §11.6 "Media chưa duyệt").
+  Duyệt xong đạo diễn chuyển bản nháp vào `04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối vào `05_ThanhPham/ep<NN>-<slug>/`.
 - Container bị thu hồi khi phiên rảnh: thay đổi trong `tools/compose/` hay skill (lõi) phải commit + push trước khi dừng;
   dữ liệu của tập không bao giờ commit.
 

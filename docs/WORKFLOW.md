@@ -166,7 +166,7 @@ ClaudeFilmLab/<ProjectName>/
 ├── 01_TaiLieuGoc/  _ChoPhanLoai/ · SachThamKhao/ · NguyenVan/ · HinhAnhThamKhao/
 ├── 02_KinhThu/     SERIES.md · NhanVat/ · BoiCanh/ · PhongCach/
 ├── 03_KichBan/<thư mục tập>/           chữ của tập (= projects/<project>/<thư mục tập>/)
-├── 04_SanXuat/<thư mục tập>/<ngày>/    gói shot, bản nháp; ledger.csv
+├── 04_SanXuat/<thư mục tập>/<ngày>/    gói shot, bản nháp; ledger.csv; _ChuaDuyet/ render, vo/, audio/ chưa duyệt
 ├── 05_ThanhPham/<thư mục tập>/         bản cuối, xuất bản
 └── 99_LuuTru/      bản cũ (không xoá gì)
 ```
@@ -181,8 +181,12 @@ ClaudeFilmLab/<ProjectName>/
 - Media: `out/<project>/<id>/{plates,clips,renders}/` (git bỏ qua). Sau khi duyệt:
   `python3 tools/bundle.py out/<project>/<id> --shot s03` → một zip mỗi shot (tập `blender`: cả `renders3d/s03*/`
   `beauty.mp4` + `render.json`; khôi phục = giải nén trong `out/<project>/<id>/`), tải lên Drive
-  `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Bản nháp
-  duyệt cũng vào đó; bản cuối vào `05_ThanhPham/<thư mục tập>/`. Link ghi vào cột `drive_link` của `prompts.csv`.
+  `ClaudeFilmLab/<ProjectName>/04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (người dùng duyệt từng lần tải). Link ghi vào
+  cột `drive_link` của `prompts.csv`.
+- Render (bản nháp, bản cuối), lời bình `vo/`, âm thanh `audio/`: đẩy **ngay khi tạo xong**, chưa duyệt, vào
+  `04_SanXuat/<thư mục tập>/_ChuaDuyet/`; duyệt xong bản nháp chuyển vào thư mục ngày, bản cuối vào
+  `05_ThanhPham/<thư mục tập>/`. `drive_sync.py plan` in `!!! UNSAVED MEDIA`, `status.py` in `UNSAVED media` khi còn
+  file chưa lên Drive (CONVENTIONS §11.6).
 - Thay đổi lõi (công cụ, skill, style pack) mới commit + push vào repo; dữ liệu dự án không bao giờ commit.
 
 ## 6. Chuyển giao giữa phiên

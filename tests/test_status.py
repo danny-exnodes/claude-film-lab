@@ -461,6 +461,34 @@ class MediaTest(StatusCase):
         self.assertRegex(out, r"draft:? ep01_draft_v03\.mp4")
         self.assertRegex(out, r"final:? (none|-)")
 
+    def test_unsaved_media(self):
+        """Renders, takes and stems with no .pulled.sha256 line of their hash are UNSAVED; never blocking."""
+        code, out = self.run_status()
+        self.assertIn("UNSAVED media: none", out)
+        self.put("renders", "ep01_draft_v01.mp4")
+        self.put("vo", "VO1.wav", "VO2.wav", "tts-log.json")
+        self.put("vo/_stale", "VO3.wav")
+        self.put("audio", "music.wav")
+        code, out = self.run_status()
+        self.assertEqual(code, 0, out)
+        self.assertIn("UNSAVED media: 5 file(s) not on Drive (renders 1, vo 3, audio 1)", out)
+        self.assertIn("_ChuaDuyet", out)
+        self.assertIn("--include-out out/test-series", out)
+        self.assertIn("out/test-series/ep01/vo/VO1.wav", out)
+        self.assertNotIn("_stale", out)
+        self.assertIn("no .pulled.sha256", out)
+        pd = self.tmp / "projects" / "test-series"
+        lines = [f"{st.drive_sync.sha256(self.media / rel)}  out/test-series/ep01/{rel}\n"
+                 for rel in ("renders/ep01_draft_v01.mp4", "vo/VO1.wav", "vo/VO2.wav", "vo/tts-log.json")]
+        (pd / ".pulled.sha256").write_text("".join(lines), encoding="utf-8")
+        code, d = self.data()
+        self.assertEqual(d["media"]["unsaved"]["files"], ["out/test-series/ep01/audio/music.wav"])
+        self.assertEqual(d["media"]["unsaved"]["by_kind"], {"audio": 1})
+        (self.media / "vo" / "VO1.wav").write_bytes(b"new take")
+        code, out = self.run_status()
+        self.assertIn("UNSAVED media: 2 file(s) not on Drive (vo 1, audio 1)", out)
+        self.assertNotIn("no .pulled.sha256", out)
+
 
 class GateTest(StatusCase):
     def test_default_gate_is_the_first_undated(self):

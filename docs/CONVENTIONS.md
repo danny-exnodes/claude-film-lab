@@ -404,9 +404,10 @@ Xem `docs/WORKFLOW.md` (khâu 0–11, cổng G1–G4). Cổng duyệt luôn ở 
   của shot, chỉ file ở cấp đầu (`beauty.mp4` – bản compositor dùng –, `render.json`; `_keys`: `first.png`, `last.png`,
   `keyframes.json`); thư mục khung PNG (`beauty/`, `depth/`, `normal/`, `line/`, `mask/`; ~3 MB mỗi khung 1080p) không
   vào gói, trừ `beauty/` của render không có `beauty.mp4` (`--no-mp4`), hoặc khi thêm `--with-frames`. Turntable G2
-  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2. Bản nháp duyệt
-  (`renders/*_draft_*.mp4`) cũng vào `04_SanXuat/…/<YYYY-MM-DD>/`; bản cuối (`renders/*_final_*.mp4`) vào
-  `05_ThanhPham/<thư mục tập>/`, tải riêng từng file.
+  (`renders3d/turntable-<asset>/`): thêm `--with-turntables` vào gói của shot mẫu G2.
+- Render (`renders/*`: bản nháp, bản cuối), lời bình (`vo/`) và âm thanh (`audio/`) không chờ duyệt: tải riêng từng file
+  lên `04_SanXuat/<thư mục tập>/_ChuaDuyet/` **ngay khi tạo xong** (§11.6, mục "Media chưa duyệt"); duyệt xong bản nháp
+  chuyển sang `04_SanXuat/…/<YYYY-MM-DD>/`, bản cuối sang `05_ThanhPham/<thư mục tập>/`.
 - cinecode lưu định dạng ở `~/.cinecode/formats`; hook đặt `CINECODE_FORMATS=<repo>/formats` để định dạng sống qua các phiên.
 
 ## 10. Quyết định thiết kế
@@ -442,7 +443,7 @@ ClaudeFilmLab/<ProjectName>/            PascalCase không dấu, vd. SonHaiKinh
 ├── 01_TaiLieuGoc/  _ChoPhanLoai/ (hộp thư đến) · SachThamKhao/<MaSach>_<NoiDung>/ · NguyenVan/ · HinhAnhThamKhao/ · DanhMuc.csv
 ├── 02_KinhThu/     SERIES.md · pronunciation.csv · NhanVat/<slug>/CHARACTER.md (+ ảnh khóa) · BoiCanh/<slug>/LOCATION.md (+ ảnh khóa) · PhongCach/
 ├── 03_KichBan/<thư mục tập>/            EPISODE.md, budget.yaml, research.md, script.md, shots.csv, prompts.csv, anchors.json, prompts/, review/, publish.md
-├── 04_SanXuat/<thư mục tập>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt
+├── 04_SanXuat/<thư mục tập>/            ledger.csv · <YYYY-MM-DD>/ gói shot (tools/bundle.py), bản nháp đã duyệt · _ChuaDuyet/ render, vo/, audio/ chưa duyệt (§11.6)
 ├── 05_ThanhPham/<thư mục tập>/          bản cuối, thumbnail, tài liệu xuất bản
 └── 99_LuuTru/      bản cũ và thứ bỏ đi (chuyển vào đây, không xoá)
 ```
@@ -500,8 +501,9 @@ drive:
 | `02_KinhThu/PhongCach/` | `projects/<project>/style/` | kéo đầu phiên; đẩy khi đổi |
 | `03_KichBan/<thư mục tập>/` (cả `prompts/`, `review/`) | `projects/<project>/<thư mục tập>/` | kéo tập đang làm; đẩy sau mỗi khâu |
 | `04_SanXuat/<thư mục tập>/ledger.csv` | `out/<project>/<id>/ledger.csv` | **kéo đầu phiên** (ngân sách cộng dồn từ ledger); đẩy sau mỗi khâu có tạo ảnh/video |
-| `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` | `out/<project>/<id>/bundles/*.zip`, `renders/*_draft_*.mp4` | chỉ đẩy, sau khi duyệt |
-| `05_ThanhPham/<thư mục tập>/` | `out/<project>/<id>/renders/*_final_*.mp4`, thumbnail | chỉ đẩy, sau G4 |
+| `04_SanXuat/<thư mục tập>/_ChuaDuyet/` | `out/<project>/<id>/renders/*` (bản nháp, bản cuối, thumbnail), `vo/**` (trừ `_stale/`), `audio/**` | chỉ đẩy, **ngay khi tạo xong**, chưa duyệt (§11.6) |
+| `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` | `out/<project>/<id>/bundles/*.zip`; bản nháp đã duyệt | gói: chỉ đẩy, sau khi duyệt; bản nháp: chuyển từ `_ChuaDuyet/` (`update_file`) khi G3 qua |
+| `05_ThanhPham/<thư mục tập>/` | bản cuối đã duyệt | chuyển từ `_ChuaDuyet/` (`update_file`) khi G4 qua |
 | `99_LuuTru/` | – | không kéo |
 
 Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<project>/<thư mục tập>`,
@@ -571,6 +573,19 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    và `date -u +%Y-%m-%dT%H:%M:%SZ > projects/<project>/.pulled.at`. Mọi lần tải lên trong phiên ghi một dòng
    `<giờ UTC> <đường dẫn bản làm việc> <ID Drive mới>` vào `projects/<project>/.pushed.log` (`drive_sync.py record`).
 
+**Media chưa duyệt (ngay khi tạo xong, trước mọi cổng):** container cloud bị thu hồi khi rảnh và mọi thứ chỉ có trong
+`out/<project>/` mất theo (SHK Q1·T3, 11/2026: bản 600 s gồm 101 file lời bình và `final_v02.mp4` chờ G4 bị mất vì quy
+tắc cũ chỉ đẩy media sau khi duyệt). Vì vậy `renders/*`, `vo/**` (trừ `_stale/` và file tạm `*.raw.wav`, `*.tempo.wav`)
+và `audio/**` của mỗi tập được đẩy ngay sau khi agent tạo xong, vào `04_SanXuat/<thư mục tập>/_ChuaDuyet/` (render ở
+gốc thư mục đó, `vo/`, `audio/` giữ thư mục con), theo các bước đẩy dưới đây (`plan` ánh xạ sẵn, `record` sau mỗi lần
+tải). Người dùng duyệt → không tải lại: `update_file` file đã tải (ID trong `.pushed.log`) đổi `parentId` sang thư mục
+ngày `04_SanXuat/<thư mục tập>/<YYYY-MM-DD>/` (bản nháp, G3) hoặc `05_ThanhPham/<thư mục tập>/` (bản cuối, G4); dòng
+`note` của `plan` in sẵn đích. `vo/`, `audio/` ở lại `_ChuaDuyet/`. Bản không được duyệt cũng ở lại (không xoá).
+Mọi lần `plan` (có hay không `--include-out`) quét `out/<project>/<id>/` và in `!!! UNSAVED MEDIA: N file(s) not on
+Drive (renders …, vo …, audio …)` ở đầu và cuối khi còn file như vậy không có dòng cùng mã băm trong `.pulled.sha256`
+(kèm số plate/clip chưa vào gói nào); `status.py` in dòng `UNSAVED media` trong mục `MEDIA`. Còn dòng đó thì chưa dừng
+phiên cloud. Phiên local trên máy chủ lab không mất file khi dừng, nhưng vẫn đẩy như vậy để Drive là nguồn gốc.
+
 **Đẩy (sau mỗi khâu, sau mỗi lần sửa theo ghi chú, và trước khi dừng phiên – container bị thu hồi khi rảnh):**
 1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (`--json` để đọc
    bằng máy). Mỗi file mới/đã đổi có: thư mục đích (đường dẫn logic + ID từ `PROJECT.md`, hoặc
@@ -581,7 +596,7 @@ Công cụ chỉ thấy bản làm việc: `check_episode.py episode projects/<p
    push), archive it`: Drive có thể đã có file cùng tên (lần đẩy đầu sau khi người dùng tải tay lên, hoặc mất dấu) –
    vẫn chạy `search_files` sau khi tải lên, có kết quả nào khác ID vừa tạo thì chuyển vào `99_LuuTru/`, không có thì bỏ
    qua; nhờ vậy không sinh bản trùng. Cùng ánh xạ §11.3 cho media (`ledger.csv`, gói shot theo ngày
-   trong tên zip, bản nháp, bản cuối, ảnh khóa); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
+   trong tên zip, ảnh khóa; render, `vo/`, `audio/` vào `_ChuaDuyet/`); `plates/`, `clips/` không đẩy riêng (nằm trong gói shot).
    `TienDo_SanXuat.csv` được tách riêng (`[sheet]`, bước 5), không tải lên như file chữ. File không có ánh xạ (UNMAPPED)
    hay thư mục thiếu ID → mã thoát 1: tạo thư mục (`create_file` folder, `parentId` = ID cha), ghi ID vào
    `drive.folders`, chạy lại `plan`. File gốc trong `sources/` đã sửa thì không lập (chỉ `DanhMuc.csv` được sửa).

@@ -14,7 +14,8 @@ tools/ark.py does, then ATTENTION: OPEN / CUT-502 / FAILED / MISSING requests), 
 every shot, clips, orphan plates), FORECAST (what the episode will still cost, from shots.csv and prompts.csv
 alone: images to make, Seedance seconds planned, each against what is left under budget.yaml: `fits` or
 `OVER by N`; CONFLICT lines for ai_motion shots in a `method: layers` episode), MEDIA (files in no bundle,
-renders), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
+renders, and `UNSAVED media`: renders, vo/ takes and audio/ stems with no line of their current hash in the project's
+.pulled.sha256, i.e. not pushed to Drive 04_SanXuat/<episode>/_ChuaDuyet/ yet – tools/drive_sync.py), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
 of the local engines (model comfy:* or blender:*), free: they count against no cap and are never OPEN/MISSING paid
 requests (tools/ark.py skips them the same way); FORECAST adds the local GPU minutes still to run (estimates).
 
@@ -30,6 +31,7 @@ LAB = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import ark            # noqa: E402  (tools/ark.py: the one ledger/budget implementation; no import side effects)
 import check_episode  # noqa: E402  (tools/check_episode.py: front matter and text reading)
+import drive_sync     # noqa: E402  (tools/drive_sync.py: which media are on Drive, from .pulled.sha256)
 
 STAGES = {0: "Mở tập", 1: "Nghiên cứu nguồn", 2: "Kịch bản, shot list", 3: "Thiết kế nhân vật, bối cảnh",
           4: "Ảnh khóa", 5: "Lớp tranh", 6: "Clip AI", 7: "Dựng shot, âm thanh", 8: "Dựng cả tập",
@@ -618,6 +620,41 @@ def media_section(media, bundled, notes):
     return sec
 
 
+def unsaved_section(ep_dir, media, notes):
+    """Renders, narration takes and sound stems of this episode not on Drive yet (tools/drive_sync.py unsaved_in):
+    {files, by_kind, snapshot}. The project working copy is the episode folder's parent (projects/<project>/)."""
+    pd = os.path.dirname(os.path.abspath(ep_dir))
+    try:
+        snap = drive_sync.read_snapshot(pd)
+    except drive_sync.SyncError as e:
+        notes.append(f"{e}: every render, take and stem counts as not on Drive")
+        snap = None
+    found = drive_sync.unsaved_in(pd, media, snap) if media and os.path.isdir(media) else []
+    by = {}
+    for _, kind in found:
+        by[kind] = by.get(kind, 0) + 1
+    return {"files": [k for k, _ in found], "by_kind": {k: by[k] for k in drive_sync.SAVE_NOW if k in by},
+            "snapshot": snap is not None, "project": pd}
+
+
+def unsaved_text(m):
+    u = m.get("unsaved") or {"files": []}
+    loose = sum(m["unbundled"].values())
+    if not u["files"]:
+        return ["  UNSAVED media: none" + (f" (plates/clips in no bundle: {loose}, see above)" if loose else "")]
+    kinds = ", ".join(f"{k} {n}" for k, n in u["by_kind"].items())
+    project = show(u["project"])
+    out = [f"  UNSAVED media: {len(u['files'])} file(s) not on Drive ({kinds}) – lost when a cloud container is "
+           f"reclaimed: push them now to 04_SanXuat/<episode>/_ChuaDuyet/ "
+           f"(python3 tools/drive_sync.py plan {project} --include-out out/{os.path.basename(u['project'])})"]
+    out += [f"    {k}" for k in u["files"][:LIST_MAX]]
+    if len(u["files"]) > LIST_MAX:
+        out.append(f"    ... and {len(u['files']) - LIST_MAX} more (see --json)")
+    if not u["snapshot"]:
+        out.append(f"    (no {drive_sync.SNAPSHOT} in {project}: nothing counts as on Drive)")
+    return out
+
+
 # --------------------------------------------------------------------- gate ---
 def run_check(ep_dir, media):
     """Run tools/check_episode.py on the episode in a subprocess: (exit code, its Summary line)."""
@@ -844,6 +881,8 @@ def episode_text(d, notes):
     out.append(f"MEDIA  {show(m['dir']) if m['dir'] else '-'}")
     out += [f"  {shot}: {n} file(s) only in this container" for shot, n in m["unbundled"].items()]
     out.append(f"  draft: {m['draft'] or 'none'} · final: {m['final'] or 'none'}")
+    if m["exists"]:
+        out += unsaved_text(m)
     out += notes_text(notes["media"])
     g = d["gate"]
     if g is None:
@@ -924,6 +963,8 @@ def main(argv=None):
     d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"],
                                      d["video_engine"])
     d["media"] = media_section(media, bundled, notes["media"])
+    if d["media"]["exists"]:
+        d["media"]["unsaved"] = unsaved_section(a.episode, media, notes["media"])
     gate = a.gate or next((g for g in GATES if not d["gates"][g]), None)
     d["gate"] = gate_section(gate, a.episode, media, d, budget_state, ledger) if gate else None
     d["notes"] = flat(notes)

@@ -40,6 +40,11 @@ plan      list new/changed files: target folder (logical path + ID, or MISSING +
           A ledger.csv gets a `pre` block before its create_file line: download every Drive copy, ledger-merge,
           plan again, then upload (§11.6 push step 3); it has no approval gate. When ledger.drive-<n>.csv copies are
           on disk and every row of them is already in the ledger, the block says `pre done` (delete the copies).
+          Renders (renders/*), narration (vo/, minus _stale/) and sound (audio/) go to 04_SanXuat/<episode>/_ChuaDuyet/
+          as soon as they are made, before any approval (a reclaimed cloud container loses them, §11.6); once approved a
+          draft is moved (update_file) to 04_SanXuat/<episode>/<YYYY-MM-DD>/, a final to 05_ThanhPham/<episode>/.
+          Every plan (with or without --include-out) scans out/<project>/ and prints `!!! UNSAVED MEDIA` when such
+          files are not on Drive (no snapshot line with their hash), plus plates/clips in no bundle.
 record    after each successful create_file: replace just that file's line in .pulled.sha256 and append
           `<UTC> <path> <new Drive ID>` to projects/<project>/.pushed.log (§11.6 push steps 2 and 6).
           --sha256 (as the plan prints it) is the hash that was uploaded: when the file was edited after the
@@ -80,6 +85,10 @@ LEDGER, LEDGER_COPIES = "ledger.csv", "ledger.drive-*.csv"                # copi
 RE_SHOT_TAG = re.compile(r"_s\d{2,3}_")                                     # as tools/bundle.py picks shot media
 SNIPPETS_OFF = "  excludeContentSnippets=true"       # search_files returns long content snippets by default
 NOTE_MEDIA = "media: push only after the user approved it (§9)"
+UNAPPROVED = "_ChuaDuyet"                     # 04_SanXuat/<episode>/_ChuaDuyet/: media pushed before approval (§11.6)
+SAVE_NOW = ("renders", "vo", "audio")         # media folders pushed there as soon as they are made
+VO_SKIP = ("_stale",)                         # tools/tts/vieneu_tts.py: takes set aside, never used
+VO_TEMP = (".raw.wav", ".tempo.wav")          # vieneu_tts.py work files while a take renders
 NOTE_LEDGER = "ledger: push after every stage that generated; no approval gate"
 ARCHIVE = "99_LuuTru"
 IF_EXISTS = "if a file with this title already exists in the folder (first push), archive it"
@@ -376,10 +385,8 @@ def map_out(rel, project_dir, man, day):
         kind = "ledger"
     elif len(parts) == 3 and parts[1] == "bundles" and name.endswith(".zip"):
         kind = "bundle"
-    elif len(parts) == 3 and parts[1] == "renders" and "_draft_" in name and name.endswith(".mp4"):
-        kind = "draft"
-    elif len(parts) == 3 and parts[1] == "renders" and "_final_" in name:
-        kind = "final"
+    elif save_now_kind(parts[1:]):
+        kind = "unapproved"
     if not kind:
         return None, "skip"      # plates/, clips/, frames...: they travel inside the shot bundles (§9)
     eps = episode_dirs(project_dir, man, head)
@@ -390,10 +397,81 @@ def map_out(rel, project_dir, man, day):
     ep = eps[0]
     if kind == "ledger":
         return f"04_SanXuat/{ep}", None
-    if kind == "final":
-        return f"05_ThanhPham/{ep}", None
-    d = RE_BUNDLE_DATE.search(name) if kind == "bundle" else None
+    if kind == "unapproved":                     # renders/<file> -> _ChuaDuyet/<file>; vo/, audio/ keep their folder
+        sub = parts[2:-1] if parts[1] == "renders" else parts[1:-1]
+        return "/".join([f"04_SanXuat/{ep}", UNAPPROVED] + sub), None
+    d = RE_BUNDLE_DATE.search(name)
     return f"04_SanXuat/{ep}/" + (f"{d.group(1)}-{d.group(2)}-{d.group(3)}" if d else day), None
+
+
+def save_now_kind(parts):
+    """renders | vo | audio for a file of an episode media folder (parts: its path inside out/<project>/<id>/) that is
+    pushed to _ChuaDuyet/ as soon as it is made; None otherwise."""
+    if len(parts) < 2 or parts[0] not in SAVE_NOW:
+        return None
+    if parts[0] == "renders" and len(parts) != 2:
+        return None                              # only renders/<file>: drafts, finals, thumbnails
+    if parts[0] == "vo" and (any(p in VO_SKIP for p in parts) or parts[-1].endswith(VO_TEMP)):
+        return None
+    return parts[0]
+
+
+def approved_target(rel, project_dir, man, day):
+    """Where an approved file of _ChuaDuyet/ moves (update_file parentId): a draft to 04_SanXuat/<episode>/<day>/, a
+    final to 05_ThanhPham/<episode>/; None for narration and sound (they stay in _ChuaDuyet/)."""
+    parts = rel.split("/")
+    if len(parts) != 3 or parts[1] != "renders":
+        return None
+    eps = episode_dirs(project_dir, man, parts[0])
+    if len(eps) != 1:
+        return None
+    if "_final_" in parts[2]:
+        return f"05_ThanhPham/{eps[0]}"
+    if "_draft_" in parts[2]:
+        return f"04_SanXuat/{eps[0]}/{day}"
+    return None
+
+
+def unsaved_in(project_dir, media, snap):
+    """[(snapshot key, renders|vo|audio)] of the files of one episode media folder (out/<project>/<id>/) that are
+    pushed to _ChuaDuyet/ as soon as they are made and are not on Drive: no snapshot line with their current hash."""
+    out = []
+    if not media or not os.path.isdir(media):
+        return out
+    for rel in walk(media):
+        if is_temp(rel):
+            continue
+        kind = save_now_kind(rel.split("/"))
+        if not kind:
+            continue
+        full = os.path.join(media, rel)
+        key = key_for(project_dir, full)
+        if (snap or {}).get(key) != sha256(full):
+            out.append((key, kind))
+    return out
+
+
+def unsaved_media(project_dir, out_dir=None, snap=None):
+    """Media of every episode folder of out/<project>/ not on Drive yet (see unsaved_in):
+    {"files": [key...], "by_kind": {kind: n}, "snapshot": bool}."""
+    out_dir = out_dir or os.path.join(lab_root(project_dir), "out", os.path.basename(project_dir))
+    if snap is None:
+        try:
+            snap = read_snapshot(project_dir)
+        except SyncError:
+            snap = None
+    files, by = [], {}
+    names = sorted(os.listdir(out_dir)) if os.path.isdir(out_dir) else []
+    for name in names:
+        if RE_MEDIA_EP.match(name):
+            for key, kind in unsaved_in(project_dir, os.path.join(out_dir, name), snap):
+                files.append(key)
+                by[kind] = by.get(kind, 0) + 1
+    return {"files": files, "by_kind": {k: by[k] for k in SAVE_NOW if k in by}, "snapshot": snap is not None}
+
+
+def unsaved_text(u):
+    return ", ".join(f"{k} {n}" for k, n in u["by_kind"].items())
 
 
 # --- ledger copies (§11.6 push step 3) --------------------------------------------------------------------------
@@ -707,6 +785,12 @@ def build_plan(a):
                 unmerged = [key_for(pd, c) for c in copies if not ledger_adds_nothing(full, c)]
                 x["pre"]["ledger_merge"].update(copies=[key_for(pd, c) for c in copies], unmerged=unmerged,
                                                 done=not unmerged)
+        elif origin == "media" and f"/{UNAPPROVED}" in folder:
+            target = approved_target(rel, pd, man, day)
+            x["unapproved"] = {"move_when_approved": target, "parentId": folder_id(man, target) if target else None}
+            x["notes"].append("unapproved media: push now, before any approval (a reclaimed container loses it, §11.6)"
+                              + (f"; once approved move it: update_file <new ID> parentId=<ID of {target}>"
+                                 if target else "; it stays in " + UNAPPROVED + "/"))
         elif origin == "media":
             x["notes"].append(NOTE_MEDIA)
         counts[status] += 1
@@ -728,6 +812,8 @@ def build_plan(a):
                 seen.add(c["path"])
                 to_create.append(c)
     to_create.sort(key=lambda c: (c["path"].count("/"), c["path"]))
+    unsaved = unsaved_media(pd, a.include_out, snap if has_snapshot else None)
+    unsaved["include_out"] = bool(a.include_out)
     if any(c["parent_path"] == "(project root)" and not c["parent_id"] for c in to_create):
         warnings.append("drive.root has no ID in PROJECT.md: top-level folders cannot be created")
     return {
@@ -739,6 +825,7 @@ def build_plan(a):
         "unmapped": unmapped, "skipped_media": skipped, "warnings": warnings,
         "ignored_temp": sorted(ignored_temp),
         "unbundled_media": sum(1 for media, inside in shot_media if inside not in bundled.get(media, ())),
+        "unsaved_media": unsaved,
         "counts": dict(counts, unmapped=len(unmapped), deleted=len(deleted), folders_to_create=len(to_create)),
     }
 
@@ -786,6 +873,30 @@ def print_entry(x, label, project_arg, rel):
         print(f"  note         {note}")
 
 
+def unsaved_banner(plan, project_arg):
+    """The loud `!!! UNSAVED MEDIA` lines (empty list when every render, take and stem is on Drive)."""
+    u, n_loose = plan["unsaved_media"], plan["unbundled_media"]
+    if not u["files"] and not n_loose:
+        return []
+    parts = ([f"{len(u['files'])} file(s) not on Drive ({unsaved_text(u)})"] if u["files"] else []) + \
+            ([f"{n_loose} plate/clip file(s) in no bundle"] if n_loose else [])
+    out = [f"!!! UNSAVED MEDIA: {' · '.join(parts)} – only in this container; a cloud container loses them when it "
+           f"is reclaimed"]
+    if u["files"]:
+        out.append(f"!!! push renders, vo/, audio/ now to 04_SanXuat/<episode>/{UNAPPROVED}/ (§11.6)"
+                   + ("" if u["include_out"] else
+                      f": python3 tools/drive_sync.py plan {project_arg} --include-out out/<project> lists the uploads"))
+        out += [f"!!!   {k}" for k in u["files"][:LIST_UNSAVED]]
+        if len(u["files"]) > LIST_UNSAVED:
+            out.append(f"!!!   ... and {len(u['files']) - LIST_UNSAVED} more")
+    if not u["snapshot"]:
+        out.append(f"!!! (no {SNAPSHOT}: every file counts as not on Drive)")
+    return out
+
+
+LIST_UNSAVED = 10
+
+
 def print_plan(plan, project_arg):
     rel = lambda p: os.path.relpath(p)
     print(f"Plan  {rel(plan['project_dir'])} -> ClaudeFilmLab/{plan['drive_name']} (root {plan['drive_root']})")
@@ -793,6 +904,9 @@ def print_plan(plan, project_arg):
           f"{len(plan['pushed_ids'])} upload(s) in .pushed.log · archive time {plan['archive_time_utc']} UTC")
     for w in plan["warnings"]:
         print(f"WARN  {w}")
+    banner = unsaved_banner(plan, project_arg)
+    for line in banner:
+        print(line)
     if plan["create_folders"]:
         print(f"\nFolders to create first (create_file title=<name> mimeType={FOLDER_MIME} parentId=<parent>):")
         for c in plan["create_folders"]:
@@ -818,6 +932,9 @@ def print_plan(plan, project_arg):
         print(f"\nDELETED locally (still on Drive): {d} – to retire it, move it to 99_LuuTru (§11.7)")
     for u in plan["unmapped"]:
         print(f"UNMAPPED {u['local']}: {u['reason']}")
+    if banner:
+        print()
+        print(banner[0])
     k = plan["counts"]
     print(f"\nSummary: {k['new']} new, {k['changed']} changed, {k['unchanged']} unchanged, "
           f"{k['folders_to_create']} folder(s) to create, {k['unmapped']} unmapped, {k['deleted']} deleted locally"
@@ -827,6 +944,8 @@ def print_plan(plan, project_arg):
         if plan["unbundled_media"]:
             print(f"Nothing to push (text). {plan['unbundled_media']} plate/clip file(s) are in no bundle: they exist "
                   "only in this container (lost when it is reclaimed; bundle approved shots with tools/bundle.py)")
+        elif plan["unsaved_media"]["files"]:
+            print("Nothing to push (text). Media not on Drive: see !!! UNSAVED MEDIA")
         else:
             print("Nothing to push.")
 

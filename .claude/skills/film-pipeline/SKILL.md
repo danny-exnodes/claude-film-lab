@@ -73,9 +73,12 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 **Đẩy (sau mỗi khâu, sau mỗi vòng sửa theo ghi chú, trước khi dừng phiên):**
 1. Lập danh sách: `python3 tools/drive_sync.py plan projects/<project> --include-out out/<project>` (không gọi mạng).
    Mã thoát 1 = có thư mục thiếu ID (`MISSING – create folder … under <ID cha> first`) hoặc file UNMAPPED: tạo thư mục
-   (`create_file` folder), ghi ID vào `drive.folders` của `PROJECT.md`, chạy lại `plan`. Media trong danh sách
-   (gói shot, bản nháp, bản cuối, ảnh khóa) chỉ đẩy khi người dùng đã duyệt; `[sheet]` `TienDo_SanXuat` theo bước 3.
-   Báo người dùng danh sách trước khi tải.
+   (`create_file` folder), ghi ID vào `drive.folders` của `PROJECT.md`, chạy lại `plan`. Gói shot và ảnh khóa chỉ đẩy
+   khi người dùng đã duyệt. **Render (bản nháp, bản cuối), lời bình `vo/`, âm thanh `audio/` đẩy ngay khi tạo xong**,
+   chưa cần duyệt, vào `04_SanXuat/ep<NN>-<slug>/_ChuaDuyet/` (`plan` đã ánh xạ sẵn): container cloud bị thu hồi là mất
+   (SHK Q1·T3, 11/2026: mất cả bản 600 s chờ G4). `plan` in `!!! UNSAVED MEDIA` (cả khi không có `--include-out`) khi
+   còn file như vậy chưa lên Drive, và `status.py` có dòng `UNSAVED media`: không dừng phiên khi còn dòng đó.
+   `[sheet]` `TienDo_SanXuat` theo bước 3. Báo người dùng danh sách trước khi tải.
 2. Mỗi file đúng theo `plan`: với file CHANGED, trước khi tải chạy câu `search_files` của nó – kết quả có
    `modifiedTime` sau `.pulled.at` và ID không có trong `.pushed.log` = người dùng đã sửa → tải về, gộp trước.
    `create_file` (`title`, `parentId`, `contentMimeType`, `base64Content=sha256:<hex>:<đường dẫn tuyệt đối>`,
@@ -91,6 +94,7 @@ không có CLI. ID thư mục luôn lấy từ `PROJECT.md`, không tìm theo t�
 4. Không chạy lại `snapshot` sau khi đẩy (file người dùng từ chối tải phải còn trong danh sách lần sau); `plan` chạy
    lại phải in `Nothing to push.` trừ file cố ý chưa đẩy (`Nothing to push (text). N plate/clip file(s) are in no
    bundle…` = chữ đã đẩy hết nhưng còn plate/clip chỉ có trong container: báo người dùng trước khi dừng). Ghi giờ đẩy vào cột cuối hàng `## Nhật ký`. Gom file của một khâu đẩy một lượt (người dùng duyệt mỗi lần tải).
+   Trước khi dừng phiên cloud: `plan` không còn dòng `!!! UNSAVED MEDIA` cho render/`vo/`/`audio/`.
 
 ## 1. Việc đầu tiên mỗi phiên
 
@@ -302,14 +306,22 @@ Ghi chú người dùng đã đổi thành tham số: <nếu có>
 
 ## 7. Lưu media lên Drive
 
-Chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot, G3/G4 cho bản dựng):
+**Ngay khi tạo xong, chưa duyệt (mọi phiên, bắt buộc ở phiên cloud):** bản nháp, bản cuối và file khác trong `renders/`,
+lời bình `vo/` (trừ `_stale/`), âm thanh `audio/` → `04_SanXuat/ep<NN>-<slug>/_ChuaDuyet/` (`vo/`, `audio/` giữ thư mục
+con), theo đúng `drive_sync.py plan … --include-out out/<project>` rồi `record`. Agent tạo ra chúng (`film-compositor`,
+`film-narrator`) báo đạo diễn ngay khi xong để đẩy, không chờ hết khâu. `status.py` dòng `UNSAVED media: none` = đã lên
+Drive hết. Khi người dùng duyệt: bản nháp → `update_file` (ID trong `.pushed.log`) `parentId` = thư mục ngày
+`04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/`, bản cuối → `05_ThanhPham/ep<NN>-<slug>/` (chuyển, không tải lại; `plan` in
+sẵn đích ở dòng `note`); `vo/`, `audio/` ở lại `_ChuaDuyet/` (nguyên liệu, tiếng đã nằm trong bản cuối).
+
+Gói shot và ảnh khóa chỉ sau khi người dùng duyệt (G2 cho ảnh khóa và shot mẫu, sau khâu 5/6 cho từng shot):
 1. `python3 tools/bundle.py out/<project>/ep<NN> --shot s03` → `out/<project>/ep<NN>/bundles/ep<NN>_s03_<YYYYMMDD>.zip`
    (lớp, clip, dòng `prompts.csv` và `anchors.json` của shot; tập `blender`: `renders3d/s03*/` gồm `beauty.mp4` +
    `render.json` + khung `_keys`, không chuỗi PNG; G2 thêm `--with-turntables`; `blender-method.md` §3). Lệnh in sẵn
    tham chiếu `sha256:<hex>:<đường dẫn>`. Khôi phục: kéo zip về, giải nén trong `out/<project>/ep<NN>/` (file về đúng chỗ).
 2. Tải lên Drive `ClaudeFilmLab/<ProjectName>/04_SanXuat/ep<NN>-<slug>/<YYYY-MM-DD>/` (tạo thư mục ngày nếu chưa có,
-   ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp duyệt
-   (`renders/*_draft_*.mp4`) vào cùng thư mục ngày; bản cuối (`renders/*_final_*.mp4`) vào `05_ThanhPham/ep<NN>-<slug>/`.
+   ghi ID vào `PROJECT.md`) bằng `create_file` với tham chiếu đó; người dùng duyệt từng lần tải. Bản nháp và bản
+   cuối đã nằm trong `_ChuaDuyet/`: duyệt xong chỉ chuyển (đoạn trên).
    Ảnh khóa nhân vật/bối cảnh duyệt ở G2 → `02_KinhThu/NhanVat/<c>/`, `02_KinhThu/BoiCanh/<l>/`.
 3. Ghi `drive_link` và `approved=yes` vào `prompts.csv`, ghi Nhật ký, đẩy chữ (mục 0).
 

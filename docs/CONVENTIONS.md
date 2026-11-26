@@ -79,6 +79,8 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Shot 3D (`method: blender`, chữ) | `<thư mục tập>/shots3d/s<NN>.json` | `shots3d/s03.json` |
 | Render Blender (media) | `out/<project>/<id>/renders3d/s<NN>/` (render lại `s<NN>_v<NN>/`), `s<NN>_preview/`, `s<NN>_keys/`, `turntable-<asset>/` | `renders3d/s03/beauty/0001.png` |
 | Style frame (khâu 3b, media) | `out/<project>/<id>/styleframes/<id>_sf<NN>_<chủ-đề>_v<NN>.png` (nâng chất: `…_edit_v<NN>.png`); contact sheet `<id>_contact_v<NN>.png`, bảng màu `<id>_palette_v<NN>.png` trong `<thư mục tập>/review/styleframes/` | `ep01_sf03_dan-te_v01.png` |
+| Concept sinh vật (khâu 3a, `tools/concept.py`) | `out/<project>/characters/<slug>/concept/<slug>_<hướng>_s<seed>_v<NN>.png`, edit `..._e<NN>.png`, bảng ghép `<slug>_sheet_v<NN>.png` | `phuong-hoang_a_s1001_v01_e01.png` |
+| Shot lai (`tools/comfy/hybrid.py`) | `renders3d/s<NN>_keys/` (`render/`, `edit/k<n>_e<NN>.png`, `segments/k<a>-k<b>_v<NN>.mp4`, `hybrid.json`, `hybrid_approved.json`) → clip `clips/<id>_s<NN>_h3_v<NN>.mp4` | `ep01_s03_h3_v01.mp4` |
 
 Regex chuẩn (một định nghĩa trong `tools/episode_id.py`, dùng chung cho `check_episode.py`, `status.py`, `bundle.py`,
 `drive_sync.py`, `layers/anchors.py`, `layers/matte.py`; `<ID>` = `(?:ep\d{2}|q\d{2}t\d{2})`, `<S>` = `s(?:\d{2}|\d{3})`,

@@ -8,6 +8,7 @@ Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo �
 | File | Việc |
 |---|---|
 | `comfy.py` | CLI (chỉ thư viện chuẩn; Pillow để cắt khung hình): `ping`, `start`, `install`, `models`, `workflows`, `run`, `interrupt` |
+| `hybrid.py` | chuỗi shot lai: khung khoá Blender → Qwen-Image-Edit → kiểm bằng mắt → H3 nối khung → ghép (mục "Chuỗi shot lai"); concept: `tools/concept.py` |
 | `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model H3 và Qwen-Image (sha256 chưa ghim: `null`) |
 | `workflows/<id>.json` | graph ComfyUI dạng **API** (không subgraph, không node bị bypass), giá trị mặc định do lab đặt |
 | `workflows/<id>.meta.json` | bản đồ tham số (node → input), luật khung hình/kích thước, phần tuỳ chọn, ref và guide |
@@ -163,6 +164,45 @@ python tools/comfy/comfy.py run qwen-t2i --prompt-file concept.txt --turbo --see
 - Job mồ côi (tiến trình `run` chết giữa chừng): `comfy.py interrupt --prompt-id <task_id>` để dừng trên server, rồi
   `python3 tools/ark.py ledger-close --req <id> --status abandoned --ledger L` để đóng dòng.
 
+## Chuỗi concept (`tools/concept.py`)
+
+Khâu 3a (film-pipeline §2.2), phiên local: mỗi ảnh là một lần `comfy.py run qwen-t2i` (gen) hoặc `comfy.py run qwen-edit`
+(edit), có `--keep-models` trừ lần cuối của lô (VRAM trả lại cuối lô). Một lần gọi lỗi là dừng, không thử lại.
+
+```bash
+python tools/concept.py gen DESIGN-OPTIONS.md --slug phuong-hoang --out-dir out/<project>/characters/phuong-hoang/concept     --ledger out/<project>/<id>/ledger.csv --n 2 --dry-run          # 3 hướng × 2 seed = 6 ảnh
+python tools/concept.py edit out/<project>/characters/phuong-hoang/concept/phuong-hoang_a_s1001_v01.png     --instruction "remove the second horn, keep everything else exactly" --ledger out/<project>/<id>/ledger.csv
+python tools/concept.py sheet out/<project>/characters/phuong-hoang/concept       # bảng ghép có nhãn, trước/sau
+python3 tools/concept.py approve phuong-hoang out/<project>/characters/phuong-hoang/concept/phuong-hoang_a_s1001_v01_e01.png     --episode projects/<project>/<thư mục tập> --quote "<lời người dùng>"
+```
+
+- Tên: `<slug>_<hướng>_s<seed>_v<NN>.png` (vòng mới: `--version 2`), edit `..._e<NN>.png` (ghi trong
+  `concept_edits.json` cạnh ảnh: cùng ảnh, lệnh, seed, thiết lập thì bỏ qua; `--redo` làm bản mới), bảng
+  `<slug>_sheet_v<NN>.png`. Ảnh đã có thì bỏ qua (chạy lại là tiếp), không ghi đè gì.
+- File hướng (DESIGN-OPTIONS.md): mỗi hướng một tiêu đề `### <id>` (`### a`, `### a – Phượng thời Lý`, `### Hướng b: …`),
+  trong mục có dòng `Prompt EN: <prompt>` (hoặc nhãn một mình rồi một khối ``` ```), tuỳ chọn `Negative EN:` và
+  `Edit EN:` (lệnh sửa cho `edit --options`). Đọc được cả bảng `| Hướng | Dựa trên | Prompt |` của `ICONOGRAPHY.md` §5 và
+  file JSON (`{"slug", "seeds", "directions": [{"id", "prompt", "negative", "edit"}]}`). Định dạng đầy đủ:
+  `python tools/concept.py --help`.
+- `edit` mặc định Lightning 4, denoise 1.0, seed của ảnh gốc (`--seed` lặp lại để thử 2–3 seed). Không dùng concept
+  khác làm `--ref` (model chép nguyên ảnh tham chiếu).
+- `approve` ghi mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md` (của tập nếu tập có, không thì của dự án;
+  tạo mới khi chưa có) và ô Concept `duyệt <ngày> <file>` của dòng `<slug>` trong bảng `## Sinh vật của tập`
+  (thiếu dòng thì thêm: Chính có, Ảnh sách chờ); không đụng dòng khác; cùng file lần hai không đổi gì; đọc lại bằng
+  `check_episode.py` như `status.py --gate G2`.
+- `--review <build>` chuyển cho `comfy.py` (build kiểu `concept` khi tên build có chữ concept). `--dry-run` in kế hoạch.
+- Bài học SHK Q1·T3: Qwen-Image chỉ chữ hay bỏ sót chi tiết lạ (mặt người trên thú, ba chân, một sừng); cụm từ như
+  "water buffalo" kéo theo hai sừng → bỏ cụm gây nhiễu khỏi prompt rồi sửa bằng `edit`; chi tiết đếm được (sừng, chân,
+  mắt) dựng thẳng trong 3D, không cố sửa bằng edit.
+
+## Chuỗi shot lai (`hybrid.py`)
+
+`tools/comfy/hybrid.py <bước> <shot3d.json> --media out/<project>/<id> --ledger L`: `blender.py keyframes` (2–3 khung
+khoá) → `comfy.py run qwen-edit` mỗi khung khoá → **dừng chờ người dùng kiểm bằng mắt** (`approve k1,k2`) →
+`comfy.py run h3-i2v` khung đầu/cuối giữa hai khung duyệt liền nhau → ffmpeg nối thành `clips/<id>_s<NN>_h3_v<NN>.mp4`.
+Bước: `run` (tất cả, dừng ở bước kiểm), `keyframes`, `edit`, `approve`, `animate`, `assemble`, `status`. Khi nào dùng,
+giới hạn và bảng kiểm: `.claude/skills/film-compose-shot/references/local-video.md` §8; `python tools/comfy/hybrid.py --help`.
+
 ## Biến môi trường
 
 `FILM_COMFY_URL` (mặc định `http://127.0.0.1:8188`) · `FILM_COMFY_HOME` · `FILM_COMFY_MODELS` · `FILM_COMFY_PYTHON`
@@ -172,7 +212,9 @@ chỉ liên lạc `FILM_COMFY_URL` (trừ `install --portable`), không qua prox
 
 ## Kiểm thử
 
-`tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
+`tests/test_concept.py` và `tests/test_hybrid.py` thay mọi lệnh con (`comfy.py`, `blender.py`, ffmpeg) bằng bản giả và
+kiểm danh sách tham số, kế hoạch `--dry-run`, cổng duyệt, chạy tiếp/không ghi đè, bảng ghép, `approve` đọc lại bằng
+`check_episode.py`; có ffmpeg thì ghép thật hai clip nhỏ. `tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
 khung/kích thước, cắt ảnh, dry-run, đường thành công (file + sidecar + ledger, không tốn trần), lỗi thực thi, quá giờ →
 `interrupted`, `models --verify`, `install --dry-run`, `start`; `tests/test_comfy_ark.py` kiểm luật chi phí 0 và khoá
 ledger khi không có `fcntl` (Windows). Không cần GPU, chạy được trong WSL. Graph thật chỉ được xác nhận khi chạy với

@@ -60,6 +60,11 @@ thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Các
 - Qwen-Image (`qwen-t2i`): KSampler euler/simple, 30 bước, cfg 2.5, shift 3.1 (ModelSamplingAuraFlow); `--size` bội số 16,
   khung đã huấn luyện 1328×1328, 1664×928, 928×1664, 1472×1104, 1104×1472, 1584×1056, 1056×1584; có `--negative`.
   `python tools/comfy/comfy.py run qwen-t2i --prompt "..." --size 1664x928 --seed N --out <concepts>/<id>_v<NN>.png --ledger L`.
+- Chuỗi dùng các model này (chỉ gọi `comfy.py`/`blender.py`, không model riêng): `tools/concept.py` (concept sinh vật
+  khâu 3a: Qwen-Image → Qwen-Image-Edit → bảng ghép → duyệt; `tools/comfy/README.md` mục "Chuỗi concept") và
+  `tools/comfy/hybrid.py` (shot lai: khung khoá Blender → Qwen-Image-Edit → kiểm bằng mắt → H3 nối khung →
+  ghép; `.claude/skills/film-compose-shot/references/local-video.md` §8). Bài học: Qwen-Image chỉ chữ hay bỏ chi tiết lạ,
+  cụm từ gây nhiễu kéo theo giải phẫu riêng ("water buffalo" → hai sừng); số sừng/chân/mắt sửa trong 3D, không bằng edit.
 - **Giấy phép:** open weights; điều khoản chưa được xác minh trong repo → **đọc model card trước khi dùng thương mại**
   (kênh có kiếm tiền) và ghi kết quả vào đây.
 - Bản cài ComfyUI có node API **trả tiền** của MiniMax (`comfy_api_nodes/`): không dùng; `comfy.py` chỉ cho node trong

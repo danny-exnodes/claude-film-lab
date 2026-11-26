@@ -84,3 +84,44 @@ API + file meta, node trong danh sách cho phép). Không đưa JSON chưa chạ
 - Tập `blender`: clip là cả khung hình (không tách nền); compositor đặt nó vào shot thay cho đoạn render tương ứng,
   phóng 1344×768 theo chiều rộng khung dựng (1920 → cao 1097) và cắt ~8 px trên/dưới về 16:9.
 - G3: mỗi shot có `ai_motion` phải có clip trong `clips/` (`check_episode.py` ERROR từ khâu 8).
+
+## 8. Shot lai: khung khoá Blender → Qwen-Edit → H3 (`tools/comfy/hybrid.py`)
+
+Dùng khi render Blender đúng dáng, máy quay, ánh sáng nhưng bề mặt sinh vật còn "3D" (lông, mỏ, mắt, vảy) và shot có
+`ai_motion`: sửa 2–3 **khung khoá** lên chất concept bằng Qwen-Image-Edit 2511 rồi để H3 nội suy chuyển động giữa chúng.
+Shot không cần H3 dùng render Blender + grade như cũ. Thử nghiệm SHK Q1·T3 (Phượng hoàng, 27 ảnh): ảnh đơn gần chất
+concept mà giữ dáng/máy của 3D; **không** nhất quán qua khung liên tiếp (denoise 1.0) → không bao giờ sửa mọi khung.
+
+```
+python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/<id> --ledger out/<project>/<id>/ledger.csv \
+    --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json [--keys 3] --dry-run
+python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/<id> --ledger out/<project>/<id>/ledger.csv \
+    --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json      # dừng ở bước kiểm bằng mắt
+python tools/comfy/hybrid.py approve <tập>/shots3d/s03.json k1,k2 --media out/<project>/<id>   # người dùng duyệt
+python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/<id> --ledger out/<project>/<id>/ledger.csv \
+    --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json      # H3 + ghép → clips/<id>_s03_h3_v01.mp4
+python tools/comfy/hybrid.py status <tập>/shots3d/s03.json --media out/<project>/<id>
+```
+
+- Các bước (mỗi bước chạy riêng được: `keyframes`, `edit`, `animate`, `assemble`): `blender.py keyframes` (k1 = khung
+  đầu, k cuối = khung cuối; `--keys 3` thêm khung giữa bằng `blender.py still`, `--mid <khung>` chọn khung) → `comfy.py run
+  qwen-edit` mỗi khung khoá (mặc định Lightning 8, denoise 1.0, **một seed cho mọi khung**) → **dừng**, in bảng kiểm và
+  bảng ghép `check_v<NN>.png` (render | edit mỗi khung) → `approve` → `comfy.py run h3-i2v --image <khung a> --last <khung b>`
+  giữa hai khung duyệt liền nhau (độ dài = số khung giữa chúng / fps, H3 làm tròn lên lưới 17k+5) → ffmpeg nối (không
+  mã hoá lại khi được) thành `clips/<id>_s<NN>_h3_v<NN>.mp4` + `.mp4.json`.
+- Thư mục làm việc `renders3d/s<NN>_keys/` (vòng mới: `--root .../s<NN>_keys_v02`): `render/`, `edit/k1_e01.png`,
+  `segments/k1-k2_v01.mp4`, `hybrid.json` (trạng thái), `hybrid_approved.json` (khung đã duyệt + sha256). Chạy lại là tiếp
+  từ chỗ dừng; không ghi đè gì (phiên bản tăng). Khung đã có edit thì giữ: `edit --redo k2 --edit-seed <khác>` làm lại một
+  khung, `--redo all` khi đổi prompt. Edit đổi sau khi duyệt → phải duyệt lại. Khung bị loại: bỏ khỏi `approve`, H3 nối
+  hai khung hai bên.
+- Ledger: mỗi ảnh/clip một dòng do `comfy.py` ghi (0 đ), bước Blender một dòng `blender:keyframes` (0 đ). `--review
+  <build>` chuyển tiếp cho `blender.py keyframes` và `comfy.py`. `--dry-run` in mọi lệnh, không chạy gì.
+- **Giới hạn.** Qwen-Edit không nhất quán khung-nối-khung; khối sai (mỏ tròn, mắt lồi, thừa sừng) phải **sửa trong
+  Blender trước** – edit chỉ lo bề mặt, khối càng đúng thì càng ít trôi. Ở cận cảnh denoise 1.0 có thể dàn lại khung
+  (chủ thể nhỏ đi, dịch ngang): khung khoá lệch render làm H3 giật. Hai khung khoá cùng shot cần khớp nhau: nếu trôi, hạ
+  `--denoise 0.8` (0.75–0.85 giữ dáng, nhưng ở cận cảnh gần như chỉ đổi màu). Không dùng concept làm `--ref` (model chép
+  nguyên concept, bỏ render). Hai đoạn H3 liền nhau lặp lại khung khoá ở chỗ nối (một khung): compositor cắt khi dựng.
+- **Kiểm bằng mắt (người dùng, trước H3)** – mỗi khung đã edit: đếm sừng, chân, ngón/móng, mắt, cánh, dải đuôi đúng thiết
+  kế đã duyệt (`CHARACTER.md`); **không mắt công**, không mọc thêm đầu/mặt/chi; chủ thể nằm đúng chỗ của render (khung
+  không dịch, không thu nhỏ); mọi khung là cùng một con (màu, hoa văn, mào) và cùng ánh sáng; không chữ, không viền.
+  `--expect "<điều kiện>"` thêm dòng riêng của shot vào bảng kiểm. Gửi `check_v<NN>.png` cho người dùng trong hội thoại.

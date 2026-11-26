@@ -9,3 +9,12 @@
 | id (mã lớp `A-<id>`) | Nguồn (`preset:<id>` hoặc file GLB) | Tác giả / link | Giấy phép | Ghi chú (sửa gì, tỉ lệ) |
 |---|---|---|---|---|
 | giot | `preset:giot` | AI Film Lab | theo repo | linh vật, cao 1.0 |
+
+## Asset CC0 (HDRI, texture PBR, model scan) theo shot
+
+<!-- Look realistic: asset trong out/<project>/assets/ (asset_root của shots3d/*.json), tải bằng tools/assets.py
+     (plan → người dùng đồng ý → fetch --yes); nguồn, giấy phép, file, dung lượng nằm trong
+     out/<project>/assets/ASSETS_MANIFEST.csv. Bảng này chỉ ghi asset nào dùng ở shot nào. -->
+
+| id (trong `ASSETS_MANIFEST.csv`) | Loại (`hdri` / `texture` / `model`) | Nguồn | Shot | Dùng cho (vai trò `materials`, `world.hdri`, asset) |
+|---|---|---|---|---|

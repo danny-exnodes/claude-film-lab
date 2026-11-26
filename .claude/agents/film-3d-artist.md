@@ -23,9 +23,15 @@ từ PowerShell hoặc Git Bash), **không bao giờ qua `bash` của WSL** (WSL
 **Sinh vật: chỉ dựng theo concept đã duyệt.** Sinh vật chính (bảng `## Sinh vật của tập` của `EPISODE.md`, `Chính: có`)
 chỉ được dựng khi hợp đồng ghi concept đã duyệt và `characters/<slug>/CHARACTER.md` có mục `## Concept đã duyệt`
 (cổng 3a, `film-pipeline` mục 2.2). Thiếu: không dựng con đó, trả về `<slug>: chưa có concept duyệt`. Đọc
-`characters/<slug>/ICONOGRAPHY.md`: silhouette theo concept và hình tượng; ảnh thú thật chỉ cho giải phẫu và chất liệu,
+`characters/<slug>/ICONOGRAPHY.md` và `DESIGN-OPTIONS.md` (giải phẫu cho 3D: kích thước, khớp, chất liệu): silhouette
+theo concept và hình tượng; ảnh thú thật chỉ cho giải phẫu và chất liệu,
 không bao giờ cho silhouette (con thú thần thoại không được giống gà, công, trâu nuôi). Ảnh sách của chủ dự án
 (`out/<project>/assets/refs/<slug>/book/`) là chuẩn chất lượng, không chép.
+
+**Asset CC0** (HDRI, texture PBR, model scan cho look `realistic`): dùng cái đã có trong
+`out/<project>/assets/ASSETS_MANIFEST.csv` (`asset_root` của spec). Thiếu: ghi id đề xuất vào báo cáo (xem
+`python3 tools/assets.py search --type texture` hoặc `plan`), không chạy `tools/assets.py fetch` (đạo diễn hỏi người
+dùng trước khi tải). Asset CC0 dùng ở shot nào: ghi vào `NOTES.md` (đội) hoặc bảng CC0 của `ASSETS.md`.
 
 **Làm trong đội song song** (hợp đồng ghi `<tập>/TEAM-3d.md`, mẫu `templates/episode/TEAM-3d.md`): chỉ ghi file trong
 phạm vi của mình; **không sửa `ASSETS.md`, `shots.csv`**, `EPISODE.md` hay file của agent khác; nguồn, giấy phép và tiến

@@ -45,6 +45,12 @@ Dữ liệu dự án (chữ, đẩy Drive như `shots.csv`). Schema phiên bản
 | `camera` | `move` (**bằng cột `camera` của `shots.csv`**, lệch → WARN), `from`, `to`, `target` (id asset), `lens`, `ease` |
 | `passes`, `depth_range` | `depth`, `normal`, `line`, `mask`; khoảng độ sâu cố định cho cả shot (gần = trắng, không chuẩn hoá từng khung) |
 
+Asset CC0 của `asset_root` (HDRI, bộ texture PBR, model scan Poly Haven/ambientCG) lấy bằng `tools/assets.py`:
+`python3 tools/assets.py plan <id> ... --asset-root out/<project>/assets` in danh sách file, dung lượng, tổng; hỏi người
+dùng rồi mới `python3 tools/assets.py fetch <id> ... --asset-root out/<project>/assets --use "<shot, dùng cho gì>" --yes`
+(tải tiếp được, kiểm md5, không ghi đè, sổ `ASSETS_MANIFEST.csv`). Bố cục thư mục đúng như `spec.py` đọc: `hdri/<file>`,
+`textures/<id>/`, `models/<id>/`. Mỗi asset dùng trong tập: một dòng trong bảng CC0 của `ASSETS.md` (shot nào).
+
 Preset thủ tục: `mountains`, `rocks`, `pines`, `water`, `ground`, `giot` (linh vật của lab). Model GLB ghi nguồn và
 giấy phép trong `ASSETS.md`; file GLB là media: `out/<project>/characters/<c>/` hoặc `out/<project>/locations/<l>/` (Drive
 `02_KinhThu/NhanVat/<c>/`, `02_KinhThu/BoiCanh/<l>/`), `src` trỏ tới nó bằng đường dẫn tương đối từ file spec.
@@ -78,7 +84,7 @@ nén ngay trong `out/<project>/<id>/` → file về đúng `renders3d/<thư mụ
 |---|---|
 | 0 | người dùng chọn `method: blender` và một style `engine: blender` (`thuy-mac-blender`, `toon-3d-blender`, `chan-thuc-blender` cho hình chân thực); có cử động khó thì chọn thêm `video_engine: comfy` (clip H3 local, miễn phí) hoặc `seedance` (trả tiền); `budget.yaml`: `images: 0` |
 | 2 | `film-writer` viết `shots.csv` theo §5 |
-| 3a | sinh vật chính: cổng thiết kế (`film-pipeline` mục 2.2): ảnh sách của chủ dự án → `ICONOGRAPHY.md` → 2–3 concept Qwen-Image local → **người dùng chọn** → `CHARACTER.md` `## Concept đã duyệt`. Chưa duyệt thì không dựng model của sinh vật đó |
+| 3a | sinh vật chính: cổng thiết kế (`film-pipeline` mục 2.2): ảnh sách của chủ dự án → `film-iconographer` (`ICONOGRAPHY.md`, `DESIGN-OPTIONS.md`; bối cảnh `LOCATION-REFS.md`) → 2–3 concept Qwen-Image local (sửa chi tiết bằng `qwen-edit`) → **người dùng chọn** → `CHARACTER.md` `## Concept đã duyệt`. Chưa duyệt thì không dựng model của sinh vật đó |
 | 3 | `film-3d-artist`: model (preset, GLB có giấy phép, hoặc `.blend` tự dựng theo concept đã duyệt) + `ASSETS.md` + bản nháp `shots3d/s<NN>.json` (`blender.py check` sạch); nhiều nhóm sinh vật: đội song song theo `templates/episode/TEAM-3d.md` |
 | 4 | `film-3d-artist`: `turntable` mỗi model chính + một shot mẫu `render --preview` → **G2** (`status.py --gate G2`: turntable, shot mẫu, không vượt trần); duyệt xong: `bundle.py … --shot <shot mẫu> --with-turntables` (§3) |
 | 5 | `film-3d-artist`: `render` mọi shot không dùng lại (`renders3d/s<NN>/`); Nhật ký ghi phút GPU; mỗi shot duyệt: `bundle.py … --shot s<NN>` (§3) |

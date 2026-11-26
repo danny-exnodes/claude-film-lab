@@ -36,7 +36,7 @@ flowchart TD
 | 0 | Mở tập (dự án mới: tạo thư mục Drive và `PROJECT.md` trước) | đạo diễn | `EPISODE.md`, `budget.yaml`, thư mục tập trên Drive | người dùng chốt độ dài, style, **phương pháp dựng**, trần chi phí |
 | 1 | Nghiên cứu nguồn | đạo diễn → `film-researcher` | bảng `## Sinh vật của tập` (khi `SERIES.md` có `owner_refs.required`: xin ảnh sách của chủ dự án **trước**), `research.md` (nguyên văn, link, cách đọc tên) | – |
 | 2 | Kịch bản, shot list | `film-writer` | `script.md`, `shots.csv` | **G1** |
-| 3a | Thiết kế sinh vật (tập `blender`/`code` có sinh vật chính) | `film-researcher` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md`, 2–3 concept Qwen-Image local, `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
+| 3a | Thiết kế sinh vật, tư liệu bối cảnh (tập `blender`/`code` có sinh vật chính; sau ảnh sách của chủ dự án) | đạo diễn (`RESEARCH-BRIEF.md`) → `film-iconographer` → đạo diễn | `characters/<slug>/ICONOGRAPHY.md` + `DESIGN-OPTIONS.md`, `locations/<slug>/LOCATION-REFS.md` (mẫu `templates/research/`), ảnh tham chiếu có giấy phép (`tools/refs_fetch.py`), 2–3 concept Qwen-Image local, `CHARACTER.md` `## Concept đã duyệt` | người dùng chọn concept; `status.py --gate G2` kiểm |
 | 3 | Thiết kế nhân vật, bối cảnh | `film-art-director` | `characters/*/CHARACTER.md`, `locations/*/LOCATION.md`, `prompts/`, `prompts.csv` | – |
 | 4 | Ảnh khóa | `film-plate-maker` | ảnh khóa nhân vật + đủ lớp 1 shot mẫu (2K) | **G2** trước khi tạo hàng loạt |
 | 5 | Lớp tranh (`layers`: theo lô `ark.py image-batch`, gồm plate tư thế) | `film-plate-maker` (≤ 3 song song) | `out/.../plates/`, `prompts.csv`, `anchors.json` | – |
@@ -106,6 +106,10 @@ không có GPU nên chỉ làm phần chữ và kiểm tra của các tập dùn
 - Lần chạy local vẫn vào `ledger.csv` của tập (model `comfy:*`, `blender:*`), không tính vào trần nào; `status.py` liệt kê
   riêng (`LOCAL`) và dự báo phút GPU (ước lượng) trong `FORECAST`.
 - Một việc GPU một lúc: không render Blender khi clip ComfyUI đang chạy.
+- Asset CC0 cho look `realistic` (HDRI, texture PBR, model scan từ Poly Haven, ambientCG): `tools/assets.py`
+  (`search`, `plan`, `fetch --yes`) vào `out/<project>/assets/` (= `asset_root` của `shot3d.json`), sổ
+  `ASSETS_MANIFEST.csv`. Luôn `plan` trước, hỏi người dùng tổng dung lượng, rồi mới `fetch --yes`; asset nào dùng ở shot
+  nào ghi trong `ASSETS.md` của tập.
 
 Trước G2 đạo diễn đưa người dùng mục `FORECAST` của `python3 tools/status.py <thư mục tập>` (ảnh còn phải tạo, giây
 video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản muốn gì → làm thế nào" và danh sách kiểm trước G3 của
@@ -116,7 +120,8 @@ video dự kiến, so với trần). Quy tắc dàn cảnh, bảng "kịch bản
 | Agent | Vai | Skill nạp sẵn | Công cụ | Model | Ghi chú |
 |---|---|---|---|---|---|
 | *(phiên chính)* | Đạo diễn | `film-pipeline` | tất cả | – | giữ cổng, nói chuyện với người dùng, cập nhật EPISODE.md, kéo/đẩy Drive |
-| `film-researcher` | Nghiên cứu nguồn; hình tượng sinh vật (khâu 3a) | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` (và `ICONOGRAPHY.md` ở khâu 3a) |
+| `film-researcher` | Nghiên cứu nguồn (khâu 1) | – | WebSearch, WebFetch, Read, Write, Edit, Glob, Grep | sonnet | chỉ ghi `research.md` |
+| `film-iconographer` | Hình tượng sinh vật, tư liệu bối cảnh (khâu 3a) | – | WebSearch, WebFetch, Bash, Read, Write, Edit, Glob, Grep | sonnet | theo `RESEARCH-BRIEF.md`; ghi `ICONOGRAPHY.md`, `DESIGN-OPTIONS.md`, `LOCATION-REFS.md`; tải ảnh chỉ bằng `tools/refs_fetch.py` (giấy phép tự do, `_credits.jsonl`); song song được, mỗi agent một nhóm |
 | `film-writer` | Biên kịch | `film-script` | Read, Write, Edit, Glob, Grep | opus | không Bash |
 | `film-art-director` | Thiết kế, prompt lớp | `film-prompt-layers` | Read, Write, Edit, Glob, Grep | opus | `memory: project`, không tạo ảnh |
 | `film-plate-maker` | Tạo, tách lớp tranh | `film-prompt-layers` | Bash, Read, Write, Edit, Glob, Grep | sonnet | `FILM_AGENT`, `--ledger/--budget` |

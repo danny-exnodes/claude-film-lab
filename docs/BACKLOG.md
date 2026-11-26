@@ -304,6 +304,19 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - **#63** Venv TTS trên D: và wrapper `.tts.sh` là của máy chủ lab, ngoài repo; `tools/doctor.sh` chạy trong WSL mới thấy
   venv (từ Git Bash: qua `wsl.exe`).
 
+## Nghiên cứu hình tượng và asset CC0 (#73, #77): việc còn nợ
+
+- `tools/refs_fetch.py` và `tools/assets.py` chỉ được thử với máy chủ giả (test); dạng JSON của Commons API
+  (`imageinfo` + `extmetadata`, `formatversion=2`), Poly Haven API (`/assets`, `/info/<id>`, `/files/<id>`) và ambientCG
+  (`api/v2/full_json`, `downloadFolders`) viết theo tài liệu, chưa chạy với mạng thật. Lần dùng thật đầu tiên: chạy
+  `search` và `plan` (không tải) trước, so kết quả với trang web; lệch thì sửa hàm `ph_plan` / `acg_plan` / `file_info`.
+- ambientCG không công bố md5: chỉ kiểm kích thước. Model ambientCG (zip) được giải nén phẳng vào `models/<id>/` (không
+  giữ thư mục con trong zip); `.blend` trong zip bị bỏ qua.
+- `refs_fetch.py` chỉ tải từ Wikimedia Commons. Bảo tàng mở khác (Smithsonian, Cleveland, Met – API trả 410 trong
+  vòng SHK, Rijksmuseum) chưa có: agent ghi link + giấy phép, đạo diễn tải tay.
+- `status.py`/`check_episode.py` chưa kiểm `DESIGN-OPTIONS.md` (có 2–3 hướng, mỗi hướng có Prompt/Edit) hay số ảnh trong
+  `_credits.jsonl` (15–40); cổng 3a vẫn do người dùng chọn concept.
+
 ## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
 
 - Cần người xem: duyệt linh vật "Giọt" (turntable) và lookbook 11 style; chọn style nào lên `status: stable` (mỗi pack

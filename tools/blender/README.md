@@ -26,7 +26,11 @@ normal, line, mask) + `render.json`. **Miễn phí, local**: không API, không 
 - **EEVEE** (mặc định) cần GPU trong phiên desktop đang đăng nhập. Nếu EEVEE hỏng sau khi cảnh đã dựng mà chưa ra khung
   nào, `blender.py` tự render lại bằng **Cycles** (OptiX → CUDA → CPU) và ghi `fallback` vào `render.json`.
   `--engine cycles` chọn Cycles ngay; `FILM_BLENDER_DEVICE=CPU|OPTIX|CUDA` ép thiết bị của Cycles.
-- Đừng chạy Blender GPU cùng lúc với một job ComfyUI (16 GB VRAM dùng chung).
+- **Hàng đợi GPU**: `render`, `still`, `turntable`, `keyframes`, `lookbook` giữ khoá GPU chung của lab
+  (`tools/gpu_run.py`, `out/_gpu/gpu.lock` của bản checkout chính, mọi worktree dùng chung) trong lúc Blender chạy; job khác
+  đang giữ thì chờ và in `waiting for the GPU (held by …)`. `--dry-run`, `check`, `find` không lấy khoá.
+  `FILM_GPU_WAIT=<giây>` từ chối (mã 2, chưa render) khi chờ quá; `FILM_GPU_QUEUE=0` tắt hàng đợi. Xem ai giữ:
+  `python tools/gpu_run.py status`.
 
 ## Lệnh
 
@@ -40,8 +44,26 @@ python tools/blender/blender.py still <shot3d.json> --frame 60 --out <file>.png 
 python tools/blender/blender.py keyframes <shot3d.json> --out <thư mục> [--size 864x480]   # first.png + last.png + keyframes.json
 python tools/blender/blender.py turntable preset:giot --out <thư mục> --look clay [--seconds 4] [--preview]
 python tools/blender/blender.py turntable <model>.glb --out <thư mục>
+python tools/blender/blender.py turntable <model>.blend#<Collection> --out <thư mục> --look realistic --frames 72 \
+    --samples 64 [--fill 0.7] [--front 180] [--stills front,34,side,head] [--hdri <studio>.hdr]   # turntable duyệt G2
 python tools/blender/blender.py lookbook --out <thư mục> [--spec S] [--frame N] [--size 960x540]
 ```
+
+### Turntable (duyệt model, G2)
+
+Asset **xoay tại chỗ** trước một máy quay cố định (không còn máy bay vòng quanh asset cỡ 2 m): đứng giữa trục xoay trên
+z = 0, giữ **kích thước thật** (`--fit M` để co về M mét), máy quay đặt theo **bounding box** cho chiều cao asset chiếm
+`--fill` khung (mặc định 0,7; vòng xoay rộng nhất vẫn lọt 90 % bề ngang), ngang ngực, nhìn vào giữa; phía sau là **phông
+cyc liền** (sàn uốn cong lên tường, preset `cyc`, `--backdrop none` để bỏ). Một vòng 360° liền mạch: `--frames 72` (24 fps)
+hoặc `--seconds 4` (mặc định). `--look realistic` = Cycles + ba đèn studio (key ấm trước-trái, fill lạnh trước-phải, rim
+sau) trên trời xám phẳng, hoặc thêm `--hdri <file>.hdr` làm ánh sáng nền mờ; `--samples N` đè số sample của look.
+`--front <độ>` xoay mặt trước của model về máy (model nhìn về +Y: `--front 180`).
+- Ảnh tĩnh `--stills` (mặc định `front,34,side,head`, `none` để bỏ; có thêm `back`): góc xoay so với mặt trước 0°, 35°, 90°,
+  180°; `head` = cận đầu ở góc ba phần tư, ống kính 85 mm, theo xương tên `--head-bone` (mặc định `head`, khớp đúng tên
+  rồi tới tên chứa chữ đó) của armature, không có thì lấy phần trên 45 % của asset.
+- Đầu ra: `beauty/` + `beauty.mp4` + `still_<view>.png` + `render.json` (mục `turntable`: khoảng cách máy, chiều cao,
+  bán kính xoay, cách tìm đầu, giây mỗi ảnh tĩnh) + `turntable.json` (spec đã dựng, có khoá `turntable`).
+- Đo 2026-11-26 (RTX 5070 Ti): `preset:giot`, realistic, 960x540, 16 sample, 24 khung + 4 ảnh tĩnh ≈ 1 s/khung, 31 s cả lệnh.
 
 - Mã thoát: **0** xong · **1** không tìm thấy Blender hoặc render lỗi (in 15 dòng cuối của Blender) · **2** bị từ chối
   trước khi render (spec sai, tham số sai, `--out` không trống) — chưa chạy gì · **3** (chỉ `find`) thấy Blender nhưng
@@ -90,8 +112,15 @@ Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.j
   | `<file>.blend` hoặc `<file>.blend#<Collection>` (append mọi object hoặc một collection, giữ vật liệu, modifier,
   geometry nodes, hair curves; tương đối với file spec), `at`, `rot`, `scale`, `fit` (co asset cho cạnh lớn nhất bằng `fit` mét, đặt đứng trên z = 0),
   `color`, `ink` (0–1, độ đậm mực ở look ink-wash), `lines` (false = không nét mực), `mask`, `params` (tham số preset),
-  `anim`: `action` (preset: `giot` có `idle, hop, walk, wave`; `pines` có `sway`; `.glb`: tên action trong file; không ghi `action` thì model `.glb` đứng yên),
-  `path` [[t, [dx, dy, dz]], …] (độ lệch so với `at`), `ease`, `face_path` (quay mặt theo hướng đi, mặc định bật), `speed`.
+  `anim`: `action` (preset: `giot` có `idle, hop, walk, wave`; `pines` có `sway`; `.glb`/`.blend`: tên action trong file; không ghi `action` thì model `.glb` đứng yên),
+  `path` [[t, [dx, dy, dz]], …] (độ lệch so với `at`), `ease`, `face_path` (quay mặt theo hướng đi, mặc định bật), `speed`,
+  `fps` (chỉ `.blend`: fps action được key; mặc định fps của scene đầu tiên trong file).
+  Action của `.glb`/`.blend` chạy theo **giây của shot** ở fps của chính nó (khung đầu của action = t 0; NLA strip có
+  `scale` = fps render / (fps action × `speed`)), nên `--preview` 12 fps khớp thời gian bản cuối 24 fps; `render.json`
+  ghi mục `actions` (fps, nguồn fps, scale). glTF được nhập ở fps của spec.
+- `turntable` (do `blender.py turntable` viết): `asset` (id), `fill`, `stills`, `front`, `backdrop` (`cyc|none`),
+  `head_bone`, `lens`, `studio` (ba đèn studio); có khoá này thì asset xoay tại chỗ, máy quay cố định đặt theo bounding box
+  (`camera` của spec bị bỏ qua).
 - `camera`: `move` (`static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track` — cùng nghĩa với
   `tools/toon/project.js`), `from`, `target` (id asset hoặc [x, y, z]), `aim` (độ lệch điểm nhìn; mặc định nửa chiều cao
   của preset/asset `fit`), `to`, `lens` (mm, sensor 36 mm), `lens_to`, `roll`, `ease` (`linear, in, out, inout, sine`),
@@ -117,7 +146,8 @@ của mặt trời (không bóng đổ): bảng màu giữ nguyên, bóng đổ 
 `mountains` (`width, depth, height, peaks, sharp, detail, res, seed`: dãy núi dựng đứng kiểu sơn thuỷ, có vai núi chen
 quanh đỉnh, nếp gấp toả xuống, chân chìm xuống đất; nét mực chỉ vẽ phần trên chân sương), `rocks` (`count, spread, size,
 seed`: đá tảng mặt vát), `pines` (`count, spread, height, seed`: thông thủy mặc, thân cong, tán là các chùm kim xoè),
-`water` (`width, depth`), `ground` (`width, depth, relief, seed`), `giot` (`body, cheek`: linh vật Giọt theo
+`water` (`width, depth`), `ground` (`width, depth, relief, seed`), `cyc` (`width, depth, back, height, radius`: phông
+studio liền, sàn từ y = -depth uốn cong bán kính `radius` lên tường ở y = back), `giot` (`body, cheek`: linh vật Giọt theo
 `tools/toon/demo/giot.json`). Hình học là hàm thuần của tham số + seed.
 
 ## Shot mẫu (`demo/`)

@@ -109,6 +109,14 @@ class TestValidation(unittest.TestCase):
         self.assertIn("assets[1].anim.action: primitives have no actions (use path)", joined)
         d["assets"][0]["anim"] = {"path": [[0, [0, 0, 0]]]}
         self.assertIn("assets[0].anim.path: must be a list of at least two [t, [dx, dy, dz]] keys", errs(d))
+        d["assets"][0]["anim"] = {"action": "walk", "fps": 24}
+        self.assertIn("assets[0].anim.fps: only for .blend actions", " ".join(errs(d)))
+        d = shot()
+        d["assets"][1]["src"] = "fox.blend#Fox"
+        d["assets"][1]["anim"] = {"action": "fly", "fps": 24}
+        self.assertEqual(errs(d), [])
+        d["assets"][1]["anim"]["fps"] = 0
+        self.assertIn("assets[1].anim.fps: must be between 1 and 240 (got 0)", errs(d))
 
     def test_glb_paths(self):
         with helpers_tmp() as tmp:
@@ -201,7 +209,7 @@ class TestValidation(unittest.TestCase):
         src = (BL / "presets.py").read_text(encoding="utf-8")
         for name in spec.PRESETS:
             self.assertRegex(src, rf"\ndef {name}\(", name)
-        self.assertEqual(set(spec.PRESETS), {"mountains", "rocks", "pines", "water", "ground", "giot"})
+        self.assertEqual(set(spec.PRESETS), {"mountains", "rocks", "pines", "water", "ground", "giot", "cyc"})
 
     def test_blender_side_files_compile(self):
         for name in ("scene.py", "looks.py", "presets.py", "spec.py", "blender.py"):
@@ -243,6 +251,76 @@ class TestCameraMath(unittest.TestCase):
         self.assertEqual(spec.timeline(s), (1920, 1080, 24, 120))
         self.assertEqual(spec.timeline(s, preview=True), (960, 540, 12, 60))
         self.assertEqual(spec.preview_size([1344, 768]), [960, 548])
+
+    def test_action_timing_is_the_same_in_preview_and_final(self):
+        # issue #55: a 24 fps action (.blend scene fps) rendered with --preview at 12 fps: at every second t the
+        # NLA strip evaluates the same action frame as the final 24 fps render (and the old frame = scene frame
+        # mapping would have played it at half speed)
+        act_fps, start = 24, 1.0
+        for render_fps in (12, 24, 25, 30):
+            scale = spec.nla_scale(render_fps, act_fps)
+            for t in (0, 0.25, 0.5, 1.0, 2.5, 4.958):
+                f = 1 + t * render_fps                                   # scene frame at time t (frame 1 = t 0)
+                self.assertAlmostEqual(spec.frame_time(f, render_fps), t)
+                self.assertAlmostEqual(spec.nla_frame(f, 1, scale, start), spec.action_frame(t, act_fps, start),
+                                       msg=f"render {render_fps} fps, t {t}")
+        prev, final = spec.nla_scale(12, 24), spec.nla_scale(24, 24)
+        self.assertEqual((prev, final), (0.5, 1.0))
+        t = 1.5
+        self.assertAlmostEqual(spec.nla_frame(1 + t * 12, 1, prev, start), spec.nla_frame(1 + t * 24, 1, final, start))
+        self.assertAlmostEqual(spec.action_frame(t, 24, start), 37.0)
+        self.assertNotAlmostEqual(1 + t * 12, 37.0, msg="the bug: scene frame 19 at 12 fps is action frame 19")
+        # speed plays the action faster, a glTF action keyed from frame 0 starts at 0
+        self.assertAlmostEqual(spec.nla_frame(1 + 12, 1, spec.nla_scale(12, 24, 2.0), 0.0), 48.0)
+        self.assertAlmostEqual(spec.action_frame(0, 30, 0.0), 0.0)
+
+    def test_turntable_framing(self):
+        size = [1920, 1080]
+        tan_v = spec.sensor_height(size) / (2 * 50)
+        tan_h = tan_v * 16 / 9
+        c = spec.turntable_camera([-0.3, -0.5, 0], [0.3, 0.5, 1.6], size, 50, 0.7)
+        self.assertAlmostEqual(c["height"] / (2 * c["distance"] * tan_v), 0.7)        # 70 % of the frame height
+        self.assertEqual(c["pos"][:2], [0.0, -c["distance"]])
+        self.assertAlmostEqual(c["target"][2], 0.8)
+        self.assertGreater(c["pos"][2], c["target"][2])                                  # a little above the middle
+        wide = spec.turntable_camera([-2, -0.3, 0], [2, 0.3, 1.0], size, 50, 0.7)       # wings: the turn decides
+        r = wide["radius"]
+        self.assertLessEqual(r / ((wide["distance"] - r) * tan_h), 0.9 + 1e-9)
+        self.assertLess(wide["height"] / (2 * wide["distance"] * tan_v), 0.7)
+        tall = spec.turntable_camera([-0.1, -0.1, 0], [0.1, 0.1, 1.6], [1080, 1920], 50, 0.7)   # portrait frame
+        self.assertAlmostEqual(tall["height"] / (2 * tall["distance"] * spec.sensor_height([1080, 1920]) / 100), 0.7)
+        p = spec.cyc_params(c, size)
+        far = c["distance"] + p["back"]
+        self.assertGreater(p["width"] / 2, far * tan_h, "the wall is wider than the frame")
+        self.assertGreater(p["height"], c["pos"][2] + far * tan_v, "and taller")
+        self.assertGreater(p["depth"], c["distance"], "the floor runs under the camera")
+        self.assertGreater(p["back"] - p["radius"], c["radius"], "the curve starts behind the turning asset")
+        d = shot(assets=[{"id": "bg", "src": "preset:cyc", "params": p}], camera={"move": "static", "from": [0, -6, 1],
+                                                                                  "target": [0, 0, 0]})
+        self.assertEqual(errs(d), [])
+        self.assertEqual(spec.turntable_angle({"front": 180.0}, 1, 72), 180.0)
+        self.assertEqual(spec.turntable_angle({"front": 180.0}, 37, 72), 360.0)
+        self.assertAlmostEqual(spec.turntable_angle({}, 72, 72), 355.0)                  # frame 73 would be frame 1
+        h = spec.closeup_camera([0.1, -0.2, 1.5], 0.3, size)
+        self.assertAlmostEqual(0.3 / (2 * h["distance"] * spec.sensor_height(size) / (2 * 85)), 0.8)
+        self.assertEqual(h["target"], [0.1, -0.2, 1.5])
+        self.assertAlmostEqual(h["pos"][1], -0.2 - h["distance"])
+
+    def test_turntable_key(self):
+        d = shot(turntable={"asset": "hero", "fill": 0.7, "stills": ["front", "head"], "front": 180})
+        self.assertEqual(errs(d), [])
+        s = spec.normalize(d)
+        self.assertEqual(s["turntable"]["backdrop"], "cyc")
+        self.assertEqual(s["turntable"]["head_bone"], "head")
+        d = shot(turntable={"asset": "nobody", "fill": 3, "stills": ["top", "top"], "front": 999, "backdrop": "sky",
+                            "head_bone": "", "lens": 1, "studio": "yes", "spin": 1})
+        joined = "\n".join(errs(d))
+        for want in ("turntable.asset: must be the id of an asset", "turntable.fill: must be between 0.1 and 1.0",
+                     "turntable.stills: must be a list of front, 34, side, back, head", "turntable.front: must be",
+                     "turntable.backdrop: 'sky' is not one of cyc, none", "turntable.head_bone: must be a bone name",
+                     "turntable.lens: must be between 10 and 300", "turntable.studio: must be true or false",
+                     "turntable.spin: unknown key"):
+            self.assertIn(want, joined)
 
     def test_parse_frames(self):
         self.assertEqual(spec.parse_frames("2:4", 10), [2, 3, 4])
@@ -426,7 +504,15 @@ if "mp4" in opt:
     mp4 = {"file": "beauty.mp4", "encoder": "blender"}
 info = {"engine": "CYCLES" if engine == "cycles" else "BLENDER_EEVEE", "device": "fake", "look": opt.get("look", shot["look"]),
         "size": [W, H], "fps": fps, "frame_count": n, "frames": frames, "seconds_per_frame": [0.01] * len(frames),
-        "mean_seconds_per_frame": 0.01, "blender": "5.3.0", "passes": passes, "mp4": mp4}
+        "mean_seconds_per_frame": 0.01, "blender": "5.3.0", "passes": passes, "mp4": mp4,
+        "env_gpu_held": os.environ.get("FILM_GPU_HELD")}
+if "turntable" in shot and os.environ.get("FAKE_BLENDER_FAIL") != "stills":
+    tt = shot["turntable"]
+    for v in tt["stills"]:
+        png(os.path.join(out, f"still_{v}.png"), W, H)
+        print(f"film-blender: still {v} 0.01 s", flush=True)
+    info["turntable"] = {"asset": tt["asset"], "fill": tt["fill"], "camera_distance_m": 4.2, "height_m": 1.6,
+                         "stills": {v: {"file": f"still_{v}.png"} for v in tt["stills"]}}
 json.dump(info, open(os.path.join(out, "render.json"), "w"))
 print("film-blender: done", flush=True)
 '''
@@ -461,9 +547,11 @@ class FakeBlenderCase(helpers.TmpDirCase, unittest.TestCase):
         self.log = self.tmp / "argv.log"
         self.exe = make_exe(self.bin, "blender", FAKE)
         self.env = mock.patch.dict(os.environ, {"FILM_BLENDER": str(self.exe), "FAKE_BLENDER_LOG": str(self.log),
-                                                "FAKE_BLENDER_SPEC_PY": str(BL / "spec.py")})
+                                                "FAKE_BLENDER_SPEC_PY": str(BL / "spec.py"),
+                                                "FILM_GPU_LOCK": str(self.tmp / "gpu" / "gpu.lock")})
         self.env.start()
-        os.environ.pop("FAKE_BLENDER_FAIL", None)
+        for k in ("FAKE_BLENDER_FAIL", "FILM_GPU_HELD", "FILM_GPU_QUEUE", "FILM_GPU_WAIT", "FILM_AGENT"):
+            os.environ.pop(k, None)
         self.noff = mock.patch.object(bl, "ffmpeg_path", lambda: None)
         self.noff.start()
         self.spec_path = self.tmp / "shot.json"
@@ -692,16 +780,79 @@ class TestCli(FakeBlenderCase):
         self.assertEqual(Path(self.opt(call, "--spec")), (out / "turntable.json").resolve())
         t = json.loads((out / "turntable.json").read_text())
         self.assertEqual(spec.validate(t), [])
-        self.assertEqual(t["camera"]["move"], "orbit")
-        self.assertEqual(t["camera"]["degrees"], 360)
+        self.assertEqual(t["camera"]["move"], "static")                       # the asset turns, the camera stays
         self.assertEqual(t["look"], "toon-ink")
+        self.assertEqual(t["engine"], "eevee")
+        self.assertEqual([a["src"] for a in t["assets"]], ["preset:giot"])    # no floor asset, no fit: own size
+        self.assertNotIn("fit", t["assets"][0])
+        self.assertEqual(t["turntable"], {"asset": "asset", "fill": 0.7, "stills": ["front", "34", "side", "head"],
+                                          "front": 0.0, "backdrop": "cyc", "head_bone": "head", "lens": 50.0,
+                                          "studio": False})
         self.assertEqual(len(list((out / "beauty").iterdir())), 48)          # 4 s at 12 fps
+        for v in ("front", "34", "side", "head"):
+            self.assertTrue((out / f"still_{v}.png").is_file(), v)
+        self.assertTrue((out / "beauty.mp4").is_file())
+        self.assertIn("stills front, 34, side, head", so)
         glb = self.tmp / "hero.glb"
         glb.write_bytes(b"glTF")
         out2 = self.tmp / "tt2"
         code, so, err = self.run_cli("turntable", glb, "--out", out2, "--dry-run")
         self.assertEqual(code, 0, err)
         self.assertFalse(out2.exists())
+
+    def test_turntable_realistic_blend_for_g2(self):
+        """Issue #56: one command for the G2 turntable of a .blend model."""
+        blend = self.tmp / "models" / "phoenix.blend"
+        blend.parent.mkdir()
+        blend.write_bytes(b"BLENDER")
+        hdri = self.tmp / "studio.hdr"
+        hdri.write_bytes(b"#?RADIANCE")
+        out = self.tmp / "tt_g2"
+        code, so, err = self.run_cli("turntable", f"{blend}#Phoenix", "--out", out, "--look", "realistic",
+                                     "--frames", "72", "--samples", "64", "--fill", "0.65", "--front", "180",
+                                     "--stills", "front,34,side,head", "--hdri", hdri, "--fit", "1.6")
+        self.assertEqual(code, 0, err)
+        (call,) = self.calls()
+        self.assertEqual(self.opt(call, "--engine"), "cycles")
+        self.assertEqual(self.opt(call, "--samples"), "64")
+        t = json.loads((out / "turntable.json").read_text())
+        self.assertEqual(spec.validate(t, str(self.tmp)), [])
+        self.assertEqual((t["fps"], t["seconds"], spec.timeline(spec.normalize(t))[3]), (24, 3.0, 72))
+        self.assertTrue(t["assets"][0]["src"].replace("\\", "/").endswith("models/phoenix.blend#Phoenix"))
+        self.assertEqual(t["assets"][0]["fit"], 1.6)
+        self.assertEqual(t["world"]["sun_strength"], 0)
+        self.assertEqual(Path(t["world"]["hdri"]), hdri.resolve())
+        self.assertEqual((t["turntable"]["fill"], t["turntable"]["front"], t["turntable"]["studio"]), (0.65, 180.0, True))
+        self.assertEqual(len(list((out / "beauty").glob("*.png"))), 72)
+        self.assertEqual(sorted(p.name for p in out.glob("still_*.png")),
+                         ["still_34.png", "still_front.png", "still_head.png", "still_side.png"])
+        info = json.loads((out / "render.json").read_text())
+        self.assertEqual(info["turntable"]["fill"], 0.65)
+        self.assertTrue((out / "beauty.mp4").is_file())
+
+    def test_turntable_refusals(self):
+        for args, want in ((["--stills", "front,top"], "--stills: 'top' is not one of"),
+                           (["--hdri", "x.hdr"], "--hdri is for --look realistic"),
+                           (["--look", "realistic", "--hdri", "nope.hdr"], "no such file"),
+                           (["--frames", "1"], "--frames must be at least 2"),
+                           (["--fill", "2"], "turntable.fill: must be between 0.1 and 1.0"),
+                           (["--look", "sepia"], "--look 'sepia' is not one of")):
+            with self.subTest(args=args):
+                code, so, err = self.run_cli("turntable", "preset:giot", "--out", self.tmp / "r", *args)
+                self.assertEqual(code, 2, err)
+                self.assertIn(want, err)
+        self.assertEqual(self.calls(), [])
+        with mock.patch.dict(os.environ, {"FAKE_BLENDER_FAIL": "stills"}):
+            code, so, err = self.run_cli("turntable", "preset:giot", "--out", self.tmp / "nostills", "--preview",
+                                         "--seconds", "0.25")
+        self.assertEqual(code, 1)
+        self.assertIn("without still_front.png", err)
+        code, so, err = self.run_cli("turntable", "preset:giot", "--out", self.tmp / "none", "--preview",
+                                     "--seconds", "0.25", "--stills", "none", "--backdrop", "none")
+        self.assertEqual(code, 0, err)
+        t = json.loads((self.tmp / "none" / "turntable.json").read_text())
+        self.assertEqual((t["turntable"]["stills"], t["turntable"]["backdrop"]), ([], "none"))
+        self.assertEqual(list((self.tmp / "none").glob("still_*.png")), [])
 
     def test_lookbook(self):
         out = self.tmp / "lb"
@@ -719,6 +870,76 @@ class TestCli(FakeBlenderCase):
 
     def test_lookbook_default_spec_exists(self):
         self.assertTrue(Path(bl.LOOKBOOK_SPEC).is_file())
+
+
+HOLD = ("import sys, time; sys.path.insert(0, sys.argv[1]); import gpu_run\n"
+        "with gpu_run.gpu_lock(sys.argv[2]):\n"
+        "    print('held', flush=True)\n"
+        "    time.sleep(float(sys.argv[3]))\n")
+
+
+class TestGpuQueue(FakeBlenderCase):
+    """Issue #57: Blender renders take the lab-wide GPU lock (tools/gpu_run.py) by themselves."""
+
+    def hold(self, label="comfy run h3-i2v", seconds=20):
+        import subprocess
+        env = {k: v for k, v in os.environ.items() if k != "FILM_GPU_HELD"}
+        p = subprocess.Popen([sys.executable, "-c", HOLD, str(helpers.TOOLS), label, str(seconds)],
+                             stdout=subprocess.PIPE, text=True, env=env)
+        self.assertEqual(p.stdout.readline().strip(), "held")
+        self.addCleanup(lambda: (p.kill(), p.wait(), p.stdout.close()))
+        return p
+
+    def test_render_runs_inside_the_lock(self):
+        out = self.tmp / "r"
+        code, so, err = self.run_cli("render", self.spec_path, "--out", out)
+        self.assertEqual(code, 0, err)
+        info = json.loads((out / "render.json").read_text())
+        self.assertEqual(info["env_gpu_held"], str(os.getpid()), "Blender ran as a child of the lock holder")
+        self.assertFalse((self.tmp / "gpu" / "gpu.owner").exists(), "the lock is given back")
+        self.assertNotIn("FILM_GPU_HELD", os.environ)
+
+    def test_busy_gpu_refuses_after_film_gpu_wait(self):
+        self.hold()
+        with mock.patch.dict(os.environ, {"FILM_GPU_WAIT": "0.3", "FILM_AGENT": "film-3d-artist"}):
+            code, so, err = self.run_cli("render", self.spec_path, "--out", self.tmp / "r")
+            self.assertEqual(code, 2, err)
+            self.assertIn("the GPU is still busy", err)
+            self.assertIn("comfy run h3-i2v", so + err)
+            self.assertEqual(self.calls(), [], "Blender never started")
+            code, so, err = self.run_cli("still", self.spec_path, "--frame", "1", "--out", self.tmp / "s.png",
+                                         "--dry-run")
+            self.assertEqual(code, 0, err)                                   # --dry-run never waits for the GPU
+            code, so, err = self.run_cli("check", self.spec_path)
+            self.assertEqual(code, 0, err)
+        with mock.patch.dict(os.environ, {"FILM_GPU_QUEUE": "0"}):
+            code, so, err = self.run_cli("render", self.spec_path, "--out", self.tmp / "r2")
+            self.assertEqual(code, 0, err)
+
+    def test_label_names_the_job_not_paths(self):
+        import argparse
+        a = argparse.Namespace(cmd="turntable", asset=str(self.tmp / "models" / "phoenix.blend") + "#Phoenix")
+        with mock.patch.dict(os.environ, {"FILM_AGENT": "film-3d-artist"}):
+            label = bl.gpu_label(a)
+        self.assertEqual(label, "film-3d-artist: blender turntable phoenix.blend Phoenix")
+        a = argparse.Namespace(cmd="render", spec=str(self.tmp / "shots3d" / "s21.json"))
+        self.assertEqual(bl.gpu_label(a), "blender render s21")
+
+    def test_lookbook_holds_one_turn_for_every_look(self):
+        lb = self.tmp / "lb.json"
+        lb.write_text(json.dumps(shot(passes=[])), encoding="utf-8")
+        held = []
+        real = bl.gpu.gpu_lock
+
+        def spy(*args, **kw):
+            held.append(args[0])
+            return real(*args, **kw)
+        with mock.patch.object(bl.gpu, "gpu_lock", spy):
+            code, so, err = self.run_cli("lookbook", "--out", self.tmp / "lbo", "--spec", lb, "--size", "96x54")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(self.calls()), len(spec.look_ids()))
+        self.assertEqual(held[0], "blender lookbook")
+        self.assertTrue(all(h == "blender lookbook" for h in held))
 
 
 class TestFind(helpers.TmpDirCase, unittest.TestCase):

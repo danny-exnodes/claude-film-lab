@@ -30,6 +30,13 @@
   render, lời bình và âm thanh đẩy lên `04_SanXuat/<tập>/_ChuaDuyet/` ngay khi tạo, `plan` in `!!! UNSAVED MEDIA`,
   `status.py` dòng `UNSAVED media` (#62). Thay đổi hành vi: bản nháp/bản cuối không còn đi thẳng vào thư mục ngày/`05_ThanhPham`.
 - TTS trên máy chủ lab Windows: `FILM_TTS_PYTHON` trỏ venv trên D:, `doctor.sh` kiểm venv đó, `docs/setup-local-windows.md` (#63).
+- Sửa theo review: `comfy.py`/`blender.py` kiểm lại đầu ra sau khi chờ GPU và không bao giờ thay file có sẵn (`.film-claim`
+  giữ chỗ thư mục Blender); dừng Blender/lệnh con trước khi nhả khoá GPU (SIGTERM, Ctrl+Break); `comfy.py run` gọi `/free`
+  trước khi nhả khoá (`--keep-models` cho loạt ảnh liền nhau); turntable không cắt mép ở `--fill` cao; bảng sinh vật nhận mọi
+  dấu cột GFM, ô `Chính` trống tính là sinh vật chính; `drive_sync` chỉ chép file trong thư mục phiên của transcript.
+- Sửa theo review (review): chip dự án/tập/shot chỉ suy từ đường dẫn bên trong lab (không lộ tên thư mục ngoài); `down` tắt mọi
+  tunnel đã mở, URL cloudflared cũ không bị in lại; pid không kiểm được thì giữ file; media được chép (không hard-link);
+  watcher chờ file đứng yên hai lượt quét và không đi theo symlink; tên nhóm tag như `constructor` bị từ chối; seed > 2^53 đúng.
 
 ### Look Blender chân thực: `realistic` + style `chan-thuc-blender` (2026-11-26)
 - `tools/blender`: look `realistic` (Cycles, AgX Medium High Contrast, adaptive sampling, motion blur): trời HDRI

@@ -108,7 +108,14 @@ python tools/comfy/comfy.py interrupt --ledger out/<project>/ep01/ledger.csv    
 - `--seed` mặc định ngẫu nhiên, luôn in ra và ghi lại; `--timeout` (mặc định 2400 s) quá thì job bị dừng.
 - **Hàng đợi GPU**: `run` (trừ `--dry-run`) giữ khoá GPU chung của lab (`tools/gpu_run.py`) từ ngay trước dòng ledger
   `pending` tới khi job xong; Blender hay job khác đang giữ thì chờ (in người giữ). `FILM_GPU_WAIT=<giây>` từ chối
-  (mã 2, chưa gửi gì, không dòng ledger) khi chờ quá; `FILM_GPU_QUEUE=0` tắt hàng đợi.
+  (mã 2, chưa gửi gì, không dòng ledger) khi chờ quá; `FILM_GPU_QUEUE=0` tắt hàng đợi. Lấy được khoá thì kiểm lại
+  đầu ra (lần chạy khác cùng `--out` có thể đã xong trong lúc chờ: mã 2, chưa gửi gì, không dòng ledger); lúc tải về
+  không bao giờ ghi đè file vừa xuất hiện.
+- **Giải phóng VRAM**: hết job (thành công hay lỗi), trước khi nhả khoá, `run` gọi `POST /free`
+  (`unload_models`, `free_memory`) để việc kế tiếp (render Blender) có đủ 16 GB. `--keep-models` bỏ bước này khi chạy
+  nhiều job comfy liên tiếp (lần sau khỏi nạp lại model 20 GB); job cuối của loạt thì bỏ cờ.
+- Mất server khi đang hỏi `/history`: `run` giữ khoá thêm tối đa 10 phút, chờ prompt rời hàng đợi (`/queue`) rồi mới
+  nhả; quá hạn thì dòng ledger ghi `MAY STILL RUN` kèm lệnh `comfy.py interrupt --prompt-id <id>`.
 
 ## Tạo ảnh concept (`qwen-t2i`)
 

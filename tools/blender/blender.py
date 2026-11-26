@@ -48,6 +48,7 @@ import os
 import platform
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -90,6 +91,17 @@ class Refused(Exception):
 
 class Failed(Exception):
     """Exit 1."""
+
+
+class Stopped(BaseException):
+    """SIGTERM/SIGHUP (Ctrl+Break on Windows) for blender.py: Blender is killed before the GPU lock is released."""
+
+    def __init__(self, signum):
+        super().__init__(signum)
+        self.signum = signum
+
+
+CLAIM = ".film-claim"          # in an --out folder while a job owns it (from before the GPU wait to the end)
 
 
 # ------------------------------------------------------------------ finding Blender
@@ -163,6 +175,46 @@ def check_out_dir(path):
         raise Refused(f"--out {path} is not empty (nothing is overwritten; pick a new folder, e.g. _v02)")
 
 
+@contextlib.contextmanager
+def claim_out(path, dry_run=False):
+    """check_out_dir, then an exclusive claim file in the folder, taken BEFORE the GPU wait: a second job with the same
+    --out is refused at once (the folder is not empty), or, when it checked in the same instant, by the exclusive
+    create; it never renders into this job's folder. The claim is removed at the end; a job killed hard leaves it
+    (the folder then reads as not empty: pick a new one). --dry-run: the check only."""
+    check_out_dir(path)
+    if dry_run:
+        yield
+        return
+    os.makedirs(path, exist_ok=True)
+    claim = os.path.join(path, CLAIM)
+    try:
+        fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise Refused(f"--out {path} is taken by another job ({CLAIM}); pick a new folder, e.g. _v02") from None
+    with os.fdopen(fd, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    try:
+        yield
+    finally:
+        with contextlib.suppress(OSError):
+            os.remove(claim)
+
+
+def move_new(src, dst):
+    """Move a file to dst, never replacing one that appeared meanwhile (Failed): hard link + unlink, else check +
+    rename (src and dst are on the same disk)."""
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise Failed(f"{dst} appeared while this job ran (another job with the same --out?): not replaced") from None
+    except OSError:
+        if os.path.exists(dst):
+            raise Failed(f"{dst} appeared while this job ran (another job with the same --out?): not replaced")
+        os.rename(src, dst)
+        return
+    os.remove(src)
+
+
 def load_shot(path):
     data, errors = spec.load(path)
     if errors:
@@ -223,9 +275,27 @@ def run_blender(cmd, timeout=None, hook=None):
                     hook.update(i / n if n else 0.0, f"frame {m.group(1)} · {i}/{n}")
         rc = proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        stop_process(proc)
         raise Failed(f"Blender did not finish in {timeout} s (killed)")
+    except BaseException:           # Ctrl+C, SIGTERM (Interrupted), a hook error: Blender never outlives the GPU lock
+        stop_process(proc)
+        raise
     return rc, built, tail
+
+
+def stop_process(proc):
+    """Kill Blender and wait until it is gone (before the GPU lock is released)."""
+    with contextlib.suppress(OSError):
+        proc.kill()
+    while True:
+        try:
+            proc.wait()
+            break
+        except KeyboardInterrupt:       # a second Ctrl+C: Blender is already killed, keep waiting for it
+            continue
+    if proc.stdout:
+        with contextlib.suppress(OSError):
+            proc.stdout.close()
 
 
 def _clear(path):
@@ -283,7 +353,7 @@ def _render_locked(blender, spec_path, out, extra, engine, a, keep, hook, cmd):
         if hook:
             hook.update(0.0, "EEVEE failed: rendering with Cycles", force=True)
         for name in os.listdir(out):
-            if name not in keep:
+            if name not in keep and name != CLAIM:
                 p = os.path.join(out, name)
                 shutil.rmtree(p) if os.path.isdir(p) else os.remove(p)
         cmd = command(blender, spec_path, out, extra + ["--engine", "cycles"])
@@ -453,7 +523,7 @@ def cmd_render(a):
         extra += ["--frames", a.frames]
     if a.passes:
         extra += ["--passes", passes_arg(a.passes)]
-    check_out_dir(a.out)
+    check_out_dir(a.out)                    # early refusal; claim_out checks again and claims the folder
     engine = a.engine or shot["engine"]
     ff = None if a.no_mp4 else ffmpeg_path()
     mp4 = os.path.join(os.path.abspath(a.out), "beauty.mp4")
@@ -471,7 +541,8 @@ def cmd_render(a):
             write_json(os.path.join(a.out, "render.json"), info)
         return info, [render_entry(a.out, info, os.path.splitext(os.path.basename(a.spec))[0])]
 
-    info = with_review(hook, f"render {os.path.basename(a.spec)} · {len(frames)} frames", work)
+    with claim_out(a.out, a.dry_run):
+        info = with_review(hook, f"render {os.path.basename(a.spec)} · {len(frames)} frames", work)
     if info is None:
         return 0
     if not info.get("mp4"):
@@ -499,7 +570,7 @@ def cmd_still(a):
         info = render_into(a.spec, work, extra, a.engine or shot["engine"], a)
         if info is None:
             return 0
-        shutil.move(os.path.join(work, "beauty", f"{a.frame:04d}.png"), a.out)
+        move_new(os.path.join(work, "beauty", f"{a.frame:04d}.png"), a.out)
         side = os.path.splitext(a.out)[0] + ".render.json"
         if not os.path.exists(side):
             write_json(side, info)
@@ -518,8 +589,6 @@ def cmd_keyframes(a):
     frames = [1, n] if n > 1 else [1]
     extra = _render_args(a, shot) + ["--frames", ",".join(map(str, frames)), "--passes", "none",
                                      "--size", "%dx%d" % size]
-    if not a.dry_run:
-        os.makedirs(a.out, exist_ok=True)
     work = os.path.join(a.out, ".work")
     hook = review_hook(a)
 
@@ -537,7 +606,8 @@ def cmd_keyframes(a):
         return info, [{"label": f"{stem} {name}", "image": os.path.join(a.out, f"{name}.png"), "engine": eng}
                       for name in ("first", "last")]
 
-    info = with_review(hook, f"keyframes {os.path.basename(a.spec)} · {size[0]}x{size[1]}", render_keyframes)
+    with claim_out(a.out, a.dry_run):
+        info = with_review(hook, f"keyframes {os.path.basename(a.spec)} · {size[0]}x{size[1]}", render_keyframes)
     if info is None:
         return 0
     kf = {"tool": "tools/blender/blender.py keyframes", "spec": os.path.abspath(a.spec), "spec_sha256": sha256(a.spec),
@@ -612,11 +682,12 @@ def cmd_turntable(a):
     errors = spec.validate(data, os.getcwd())
     if errors:
         raise Refused("turntable: " + "; ".join(errors))
-    if a.dry_run:
-        path = os.path.join(tempfile.gettempdir(), "turntable.json")
-    else:
-        os.makedirs(a.out, exist_ok=True)
-        path = os.path.join(a.out, "turntable.json")
+    with claim_out(a.out, a.dry_run):
+        return _turntable_claimed(a, look, stills, data)
+
+
+def _turntable_claimed(a, look, stills, data):
+    path = os.path.join(tempfile.gettempdir() if a.dry_run else a.out, "turntable.json")
     write_json(path, data)
     extra = ["--preview"] if a.preview else []
     if a.size:
@@ -666,12 +737,9 @@ def cmd_lookbook(a):
     frame = a.frame or (n + 1) // 2
     if not 1 <= frame <= n:
         raise Refused(f"--frame {frame} is outside 1..{n}")
-    check_out_dir(a.out)
-    if not a.dry_run:
-        os.makedirs(a.out, exist_ok=True)
     book = {"tool": "tools/blender/blender.py lookbook", "spec": os.path.abspath(spec_path),
             "spec_sha256": sha256(spec_path), "frame": frame, "size": list(size), "looks": {}}
-    with contextlib.nullcontext() if a.dry_run else gpu_turn(a):         # one GPU turn for every look
+    with claim_out(a.out, a.dry_run), (contextlib.nullcontext() if a.dry_run else gpu_turn(a)):   # one GPU turn
         _lookbook_looks(a, spec_path, shot, frame, size, book)
     if not a.dry_run:
         write_json(os.path.join(a.out, "lookbook.json"), book)
@@ -769,6 +837,18 @@ def main(argv=None):
     a = p.parse_args(argv)
     fn = {"find": cmd_find, "check": cmd_check, "render": cmd_render, "still": cmd_still, "turntable": cmd_turntable,
           "keyframes": cmd_keyframes, "lookbook": cmd_lookbook}[a.cmd]
+    fired = []
+
+    def on_stop(signum, frame):
+        if not fired:                   # once: a second signal must not break the cleanup (kill + wait Blender)
+            fired.append(signum)
+            raise Stopped(signum)
+
+    prev = {}
+    for name in ("SIGTERM", "SIGHUP", "SIGBREAK"):
+        if hasattr(signal, name):
+            with contextlib.suppress(ValueError, OSError):      # ValueError: not the main thread
+                prev[getattr(signal, name)] = signal.signal(getattr(signal, name), on_stop)
     try:
         return fn(a)
     except Refused as e:
@@ -777,6 +857,14 @@ def main(argv=None):
     except Failed as e:
         print(f"blender: {e}", file=sys.stderr)
         return 1
+    except Stopped as e:
+        print(f"blender: stopped by signal {e.signum} (Blender was stopped before the GPU lock was released)",
+              file=sys.stderr)
+        return 128 + e.signum
+    finally:
+        for sig, h in prev.items():
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, h)
 
 
 if __name__ == "__main__":

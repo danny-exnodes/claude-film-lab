@@ -1,7 +1,7 @@
 """tools/blender (method: blender): shot3d.json validation and camera math (spec.py), the CLI (blender.py) with a fake
 Blender executable that records its argv and writes what scene.py would write, and the Blender lookup order.
 No Blender, no GPU, no network: the real renders are tests/test_blender_render.py (skipped where Blender is missing)."""
-import json, math, os, re, shutil, struct, sys, unittest, zlib
+import io, json, math, os, re, shutil, signal, struct, subprocess, sys, time, unittest, zlib
 from pathlib import Path
 from unittest import mock
 
@@ -306,6 +306,66 @@ class TestCameraMath(unittest.TestCase):
         self.assertEqual(h["target"], [0.1, -0.2, 1.5])
         self.assertAlmostEqual(h["pos"][1], -0.2 - h["distance"])
 
+    @staticmethod
+    def turn_extent(cam, lo, hi, size, lens, render_size=None):
+        """(max |x|, max |y|) in half-frame units of the 8 box corners turned every 1 degree about z, projected by
+        an independent look-at camera (no roll, vertical sensor fit to spec size)."""
+        rw, rh = render_size or size
+        tan_v = spec.sensor_height(size) / (2.0 * lens)
+        tan_h = tan_v * rw / rh
+        c, t = cam["pos"], cam["target"]
+        f = [t[i] - c[i] for i in range(3)]
+        n = math.sqrt(sum(x * x for x in f))
+        f = [x / n for x in f]
+        r = [f[1], -f[0], 0.0]
+        rn = math.hypot(r[0], r[1])
+        r = [r[0] / rn, r[1] / rn, 0.0]
+        u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]]
+        dot = lambda a, b: sum(x * y for x, y in zip(a, b))
+        mx = my = 0.0
+        for deg in range(360):
+            a = math.radians(deg)
+            for x in (lo[0], hi[0]):
+                for y in (lo[1], hi[1]):
+                    for z in (lo[2], hi[2]):
+                        p = [x * math.cos(a) - y * math.sin(a), x * math.sin(a) + y * math.cos(a), z]
+                        v = [p[i] - c[i] for i in range(3)]
+                        d = dot(v, f)
+                        mx, my = max(mx, abs(dot(v, r)) / (d * tan_h)), max(my, abs(dot(v, u)) / (d * tan_v))
+        return mx, my
+
+    def test_turntable_whole_turn_stays_in_frame(self):
+        """A deep biped and a wide bird at high --fill: every corner over the whole turn stays inside the frame (the
+        old framing used the height at the turn axis only and cut the near corners); a compact asset at the default
+        fill keeps the old distance."""
+        size = [1920, 1080]
+        tan_v = spec.sensor_height(size) / 100
+        tan_h = tan_v * 16 / 9
+        biped = ([-0.3, -0.4, 0.0], [0.3, 0.4, 2.0])           # 2 m tall, 0.8 m deep
+        bird = ([-0.7, -0.25, 0.0], [0.7, 0.25, 1.2])          # 1.2 m tall, 1.4 m span
+        for name, (lo, hi) in (("biped", biped), ("bird", bird)):
+            for fill in (0.7, 0.85, 1.0):
+                for rs in (None, [1344, 768], [1080, 1920]):
+                    with self.subTest(asset=name, fill=fill, render=rs):
+                        c = spec.turntable_camera(lo, hi, size, 50, fill, rs)
+                        mx, my = self.turn_extent(c, lo, hi, size, 50, rs)
+                        self.assertLessEqual(my, 1.0, f"vertical {my:.3f} of the half frame")
+                        self.assertLessEqual(mx, 1.0, f"horizontal {mx:.3f} of the half frame")
+                        if rs is None:
+                            self.assertGreater(my, 0.5, "and still fills the frame")
+        old = lambda lo, hi, fill: max((hi[2] - lo[2]) / fill / (2 * tan_v), 0.0)
+        lo, hi = biped
+        cut = {"pos": [0.0, -old(lo, hi, 1.0), lo[2] + 0.58 * 2.0], "target": [0.0, 0.0, 1.0]}
+        self.assertGreater(self.turn_extent(cut, lo, hi, size, 50)[1], 1.0, "the old framing cut the biped")
+        compact = ([-0.3, -0.3, 0.0], [0.3, 0.3, 1.8])
+        for lo, hi in (compact, ([-0.3, -0.5, 0], [0.3, 0.5, 1.6])):
+            c = spec.turntable_camera(lo, hi, size, 50, 0.7)
+            r = max(math.hypot(x, y) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]))
+            was = max(old(lo, hi, 0.7), r + r / (0.9 * tan_h), 1.5 * r + 0.05)
+            self.assertAlmostEqual(c["distance"], was, places=6, msg="fill 0.7 of a compact asset: as before")
+        mx, my = spec.turntable_reach(spec.turntable_camera(*bird, size, 50, 1.0), *bird, tan_v, tan_h)
+        self.assertLessEqual(my, spec.TURNTABLE_EDGE + 1e-6)
+
     def test_turntable_key(self):
         d = shot(turntable={"asset": "hero", "fill": 0.7, "stills": ["front", "head"], "front": 180})
         self.assertEqual(errs(d), [])
@@ -448,7 +508,7 @@ class TestCameraMath(unittest.TestCase):
 
 # ------------------------------------------------------------------ the CLI with a fake Blender
 FAKE = r'''
-import json, os, sys, zlib, struct
+import json, os, sys, time, zlib, struct
 argv = sys.argv[1:]
 with open(os.environ["FAKE_BLENDER_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps(argv) + "\n")
@@ -480,6 +540,12 @@ frames = spec.parse_frames(opt["frames"], n) if "frames" in opt else list(range(
 passes = shot["passes"] if "passes" not in opt else ([] if opt["passes"] == "none" else opt["passes"].split(","))
 engine = opt.get("engine", shot["engine"])
 print(f"film-blender: scene built: {W}x{H} {fps} fps, {len(frames)} of {n} frames, engine {engine}", flush=True)
+if os.environ.get("FAKE_BLENDER_FAIL") == "hang":
+    open(os.environ["FAKE_BLENDER_PID"], "w").write(str(os.getpid()))
+    print("film-blender: frame 1 (1/3) 0.01 s", flush=True)
+    time.sleep(60)
+    open(os.environ["FAKE_BLENDER_PID"] + ".survived", "w").write("still ran")
+    sys.exit(0)
 if engine == "eevee" and os.environ.get("FAKE_BLENDER_FAIL") == "eevee":
     print("GPU: failed to create a context", flush=True)
     sys.exit(1)
@@ -505,7 +571,8 @@ if "mp4" in opt:
 info = {"engine": "CYCLES" if engine == "cycles" else "BLENDER_EEVEE", "device": "fake", "look": opt.get("look", shot["look"]),
         "size": [W, H], "fps": fps, "frame_count": n, "frames": frames, "seconds_per_frame": [0.01] * len(frames),
         "mean_seconds_per_frame": 0.01, "blender": "5.3.0", "passes": passes, "mp4": mp4,
-        "env_gpu_held": os.environ.get("FILM_GPU_HELD")}
+        "env_gpu_held": os.environ.get("FILM_GPU_HELD"),
+        "claim_seen": os.path.exists(os.path.join(out, ".film-claim"))}
 if "turntable" in shot and os.environ.get("FAKE_BLENDER_FAIL") != "stills":
     tt = shot["turntable"]
     for v in tt["stills"]:
@@ -704,6 +771,73 @@ class TestCli(FakeBlenderCase):
         self.assertIn("EEVEE failed", info["fallback"])
         self.assertEqual(info["engine"], "CYCLES")
         self.assertIn("rendered with Cycles", so)
+
+    def test_claim_is_kept_through_the_cycles_fallback_and_removed_after(self):
+        out = self.tmp / "fbc"
+        with mock.patch.dict(os.environ, {"FAKE_BLENDER_FAIL": "eevee"}):
+            code, so, err = self.run_cli("render", self.spec_path, "--out", out, "--no-mp4")
+        self.assertEqual(code, 0, err)
+        self.assertTrue(json.loads((out / "render.json").read_text())["claim_seen"], "the fallback kept the claim")
+        self.assertFalse((out / bl.CLAIM).exists())
+        code, so, err = self.run_cli("keyframes", self.spec_path, "--out", self.tmp / "kf", "--size", "64x36")
+        self.assertEqual(code, 0, err)
+        self.assertFalse((self.tmp / "kf" / bl.CLAIM).exists())
+
+    def test_run_blender_kills_blender_on_any_error(self):
+        """Ctrl+C, SIGTERM (blender.py raises Stopped) or a hook error while Blender runs: Blender is killed and
+        waited for before the GPU lock (held around run_blender) is released."""
+        pidfile = self.tmp / "blender.pid"
+        procs, real = [], subprocess.Popen
+
+        def spy(*a, **kw):
+            procs.append(real(*a, **kw))
+            return procs[-1]
+        hook = mock.MagicMock()
+        hook.update.side_effect = KeyboardInterrupt
+        cmd = bl.command("blender", str(self.spec_path), str(self.tmp / "o"), [])
+        cmd = [sys.executable, str(self.bin / "blender.py")] + cmd[1:]          # no .cmd wrapper: one process
+        with mock.patch.dict(os.environ, {"FAKE_BLENDER_FAIL": "hang", "FAKE_BLENDER_PID": str(pidfile)}), \
+                mock.patch.object(bl.subprocess, "Popen", spy):
+            with self.assertRaises(KeyboardInterrupt), mock.patch.object(sys, "stdout", io.StringIO()):
+                bl.run_blender(cmd, None, hook)
+        self.assertEqual(len(procs), 1)
+        self.assertIsNotNone(procs[0].poll(), "Blender was killed and reaped")
+        self.assertFalse(Path(str(pidfile) + ".survived").exists())
+
+    @unittest.skipUnless(os.name == "posix", "SIGTERM can be caught on POSIX only (Windows: Ctrl+Break)")
+    def test_sigterm_stops_blender_before_the_lock_is_released(self):
+        pidfile = self.tmp / "blender.pid"
+        env = {k: v for k, v in os.environ.items() if k != "FILM_GPU_HELD"}
+        env.update(FAKE_BLENDER_FAIL="hang", FAKE_BLENDER_PID=str(pidfile))
+        p = subprocess.Popen([sys.executable, str(BL / "blender.py"), "render", str(self.spec_path), "--out",
+                              str(self.tmp / "r"), "--no-mp4"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, env=env)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait()))
+        deadline = time.monotonic() + 30
+        while not (pidfile.exists() and pidfile.read_text().strip()):
+            self.assertLess(time.monotonic(), deadline, "the fake Blender never started")
+            time.sleep(0.05)
+        child = int(pidfile.read_text())
+        p.send_signal(signal.SIGTERM)
+        so, err = p.communicate(timeout=30)
+        self.assertEqual(p.returncode, 128 + signal.SIGTERM, so + err)
+        self.assertIn("stopped by signal", err)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)                                   # killed and reaped, not left running on the GPU
+        self.assertFalse((self.tmp / "gpu" / "gpu.owner").exists())
+        self.assertFalse((self.tmp / "r" / bl.CLAIM).exists())
+
+    def test_move_new_never_replaces(self):
+        src, dst = self.tmp / "a.png", self.tmp / "b.png"
+        src.write_bytes(b"new")
+        dst.write_bytes(b"old")
+        with self.assertRaises(bl.Failed):
+            bl.move_new(str(src), str(dst))
+        self.assertEqual(dst.read_bytes(), b"old")
+        dst.unlink()
+        bl.move_new(str(src), str(dst))
+        self.assertEqual(dst.read_bytes(), b"new")
+        self.assertFalse(src.exists())
 
     def test_failure_before_the_scene_is_not_retried(self):
         out = self.tmp / "bad"
@@ -915,6 +1049,36 @@ class TestGpuQueue(FakeBlenderCase):
         with mock.patch.dict(os.environ, {"FILM_GPU_QUEUE": "0"}):
             code, so, err = self.run_cli("render", self.spec_path, "--out", self.tmp / "r2")
             self.assertEqual(code, 0, err)
+
+    def test_same_out_is_refused_while_the_first_job_waits_for_the_gpu(self):
+        """Two renders with one --out: the first claims the folder before it waits for the GPU, the second is refused
+        at once (and never renders into the first job's folder), also when both checked in the same instant."""
+        holder = self.hold(seconds=30)
+        out = self.tmp / "r"
+        env = {k: v for k, v in os.environ.items() if k != "FILM_GPU_HELD"}
+        first = subprocess.Popen([sys.executable, str(BL / "blender.py"), "render", str(self.spec_path), "--out",
+                                  str(out), "--no-mp4"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 env=env)
+        self.addCleanup(lambda: (first.poll() is None and first.kill(), first.wait()))
+        deadline = time.monotonic() + 30
+        while not (out / bl.CLAIM).exists():
+            self.assertLess(time.monotonic(), deadline, "the first job never claimed its folder")
+            time.sleep(0.05)
+        code, so, err = self.run_cli("render", self.spec_path, "--out", out, "--no-mp4")
+        self.assertEqual(code, 2, so + err)
+        self.assertIn("is not empty", err)
+        with mock.patch.object(bl, "check_out_dir", lambda path: None):     # both passed the check together
+            code, so, err = self.run_cli("render", self.spec_path, "--out", out, "--no-mp4")
+        self.assertEqual(code, 2, so + err)
+        self.assertIn("is taken by another job", err)
+        self.assertEqual(self.calls(), [], "neither second job started Blender")
+        holder.kill()
+        holder.wait()
+        so, err = first.communicate(timeout=60)
+        self.assertEqual(first.returncode, 0, so + err)
+        self.assertEqual(len(self.calls()), 1)
+        self.assertFalse((out / bl.CLAIM).exists())
+        self.assertTrue(json.loads((out / "render.json").read_text())["claim_seen"])
 
     def test_label_names_the_job_not_paths(self):
         import argparse

@@ -42,6 +42,9 @@ class FakeComfy:
         self.calls, self.uploads, self.prompts, self.interrupts, self.deletes = [], {}, [], [], []
         self.polls = {}
         self.ws, self.ws_clients, self.ws_done = True, [], threading.Event()   # /ws: sampler progress of image jobs
+        self.frees, self.history_status, self.queue_gone_after, self.queue_calls = [], None, None, 0
+        self.on_view, self.owner = None, None      # on_view(): runs before /view answers; owner: a gpu.owner path
+        self.held = []                             # (method, path, the GPU lock's owner file existed?)
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -100,6 +103,7 @@ class FakeComfy:
 
             def do_GET(self):
                 fake.calls.append(("GET", self.path))
+                fake.held.append(("GET", self.path, bool(fake.owner and os.path.exists(fake.owner))))
                 u = urlparse(self.path)
                 if u.path == "/ws" and fake.ws:
                     return self.websocket(u)
@@ -120,6 +124,8 @@ class FakeComfy:
                     if cls == "VAELoader":        # V3-style combo on one loader, to cover both shapes
                         spec["vae_name"] = ["COMBO", {"options": sorted(fake.models)}]
                     return self.send_json({cls: {"input": {"required": spec}}})
+                if u.path.startswith("/history/") and fake.history_status:
+                    return self.send_json({"error": "boom"}, fake.history_status)
                 if u.path.startswith("/history/"):
                     pid = u.path.rsplit("/", 1)[1]
                     fake.polls[pid] = fake.polls.get(pid, 0) + 1
@@ -127,10 +133,15 @@ class FakeComfy:
                         return self.send_json({})
                     return self.send_json({pid: fake.history(pid)})
                 if u.path == "/queue":
+                    fake.queue_calls += 1
+                    if fake.queue_gone_after is not None and fake.queue_calls > fake.queue_gone_after:
+                        return self.send_json({"queue_running": [], "queue_pending": []})
                     running = [[1, p["prompt_id"], {}, {}, []] for p in fake.prompts]
                     pending = [[2, pid, {}, {}, []] for pid in fake.pending]
                     return self.send_json({"queue_running": running, "queue_pending": pending})
                 if u.path == "/view":
+                    if fake.on_view:
+                        fake.on_view()
                     q = parse_qs(u.query)
                     fake.view = q
                     data = PNG if q["filename"][0].endswith(".png") else MP4
@@ -142,6 +153,7 @@ class FakeComfy:
 
             def do_POST(self):
                 fake.calls.append(("POST", self.path))
+                fake.held.append(("POST", self.path, bool(fake.owner and os.path.exists(fake.owner))))
                 raw = self.body()
                 if self.path in fake.drop_posts:     # the server goes away mid-request: no answer at all
                     self.close_connection = True
@@ -160,6 +172,9 @@ class FakeComfy:
                     return self.send_json({"prompt_id": data["prompt_id"], "number": 1, "node_errors": {}})
                 if self.path == "/interrupt":
                     fake.interrupts.append(data)
+                    return self.send_json({})
+                if self.path == "/free":
+                    fake.frees.append(data)
                     return self.send_json({})
                 if self.path == "/queue":
                     fake.deletes.append(data)
@@ -209,7 +224,8 @@ class ComfyCase(TmpDirCase, unittest.TestCase):
         env["FILM_GPU_LOCK"] = str(self.tmp / "gpu" / "gpu.lock")   # never the lab's own GPU lock
         self._env = mock.patch.dict(os.environ, env, clear=True)
         self._env.start()
-        for name, val in (("POLL_SECONDS", 0.01), ("PROGRESS_SECONDS", 0), ("START_POLL", 0.1)):
+        for name, val in (("POLL_SECONDS", 0.01), ("PROGRESS_SECONDS", 0), ("START_POLL", 0.1), ("LOST_POLL", 0.01),
+                          ("FREE_WAIT", 0)):
             p = mock.patch.object(comfy, name, val)
             p.start()
             self.addCleanup(p.stop)
@@ -232,6 +248,7 @@ class ComfyCase(TmpDirCase, unittest.TestCase):
         f = FakeComfy()
         self.addCleanup(f.stop)
         os.environ["FILM_COMFY_URL"] = f.url
+        f.owner = str(self.tmp / "gpu" / "gpu.owner")
         return f
 
     def run_comfy(self, *argv):
@@ -1236,6 +1253,156 @@ class TestQwenImage(ComfyCase):
         self.assertIn("--size WxH (default 1664x928)", out)
         self.assertIn("~135 s for 30 steps at 1664x928", out)
 
+
+class TestGpuSafety(ComfyCase):
+    """Review round 2: outputs checked again once the GPU lock is held and never replaced; VRAM freed before the
+    lock goes; the lock kept while a lost prompt may still run; a pending row always gets its final row."""
+
+    def appear_during_wait(self, *paths):
+        """Another run with the same --out finishes while this one waits for the GPU lock."""
+        real = comfy.hold_gpu
+
+        def hold(wid):
+            for p in paths:
+                Path(p).parent.mkdir(parents=True, exist_ok=True)
+                Path(p).write_bytes(b"another run")
+            real(wid)
+        return mock.patch.object(comfy, "hold_gpu", hold)
+
+    def owner_gone(self):
+        self.assertFalse((self.tmp / "gpu" / "gpu.owner").exists(), "the GPU lock is given back")
+
+    def test_output_that_appeared_during_the_gpu_wait_is_refused(self):
+        f = self.server()
+        for appear in ([self.out], [self.out + ".json"]):
+            with self.subTest(appear=appear), self.appear_during_wait(*appear):
+                code, _, err = self.run_clip()
+                self.assertEqual(code, 2, err)
+                self.assertIn("appeared while this run waited for the GPU", err)
+                self.assertIn("nothing sent, no ledger row", err)
+            for p in appear:
+                os.remove(p)
+        png = str(self.tmp / "concepts" / "phuong-hoang_v01.png")
+        with self.appear_during_wait(png):
+            code, _, err = self.run_still()
+        self.assertEqual(code, 2, err)
+        self.assertEqual(Path(png).read_bytes(), b"another run")
+        self.assertEqual((f.prompts, f.uploads, f.frees), ([], {}, []))
+        self.assertFalse(os.path.exists(self.ledger), "no ledger row")
+        self.owner_gone()
+
+    def test_download_never_replaces_a_file_that_appeared(self):
+        f = self.server()
+        f.on_view = lambda: Path(self.out).write_bytes(b"another run")
+        code, _, err = self.run_clip()
+        self.assertEqual(code, 1, err)
+        self.assertIn("not replaced", err)
+        self.assertEqual(Path(self.out).read_bytes(), b"another run")
+        rows = self.rows()
+        self.assertEqual([r["status"] for r in rows], ["pending", "failed"])
+        self.assertIn("not replaced", rows[-1]["note"])
+        self.assertEqual(list(Path(self.out).parent.glob("*.part")), [])
+        self.assertFalse(os.path.exists(self.out + ".json"))
+
+    def test_place_new_never_replaces(self):
+        src, dst = self.tmp / "a.part", self.tmp / "a.mp4"
+        src.write_bytes(b"new")
+        dst.write_bytes(b"old")
+        with self.assertRaises(FileExistsError):
+            comfy.place_new(str(src), str(dst))
+        self.assertEqual((dst.read_bytes(), src.read_bytes()), (b"old", b"new"))
+        dst.write_bytes(b"")                                   # an empty file counts as free (as ark.guard_output)
+        comfy.place_new(str(src), str(dst))
+        self.assertEqual(dst.read_bytes(), b"new")
+        self.assertFalse(src.exists())
+        src.write_bytes(b"newer")
+        with mock.patch.object(comfy.os, "link", side_effect=PermissionError("no hard links here")):
+            with self.assertRaises(FileExistsError):
+                comfy.place_new(str(src), str(dst))
+            dst.unlink()
+            comfy.place_new(str(src), str(dst))
+        self.assertEqual(dst.read_bytes(), b"newer")
+        self.assertFalse(src.exists())
+
+    def test_models_are_freed_before_the_gpu_lock_is_released(self):
+        f = self.server()
+        code, out, err = self.run_clip()
+        self.assertEqual(code, 0, err)
+        self.assertEqual(f.frees, [{"unload_models": True, "free_memory": True}])
+        posts = [c for c in f.calls if c[0] == "POST" or c[1].startswith("/view")]
+        self.assertEqual(posts[-1], ("POST", "/free"), "after the download")
+        self.assertIn(("POST", "/free", True), f.held, "while the GPU lock is still held")
+        self.assertIn("models unloaded", out)
+        self.owner_gone()
+        f.mode = "error"                                       # a failed job frees them too
+        self.out = str(self.tmp / "clips" / "ep01_s03_clip_v02.mp4")
+        self.assertEqual(self.run_clip()[0], 1)
+        self.assertEqual(len(f.frees), 2)
+        f.mode = "success"
+        code, _, err = self.run_still("--keep-models")         # a batch of comfy runs keeps them
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(f.frees), 2)
+        code, _, err = self.run_still(out=str(self.tmp / "concepts" / "b_v01.png"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(len(f.frees), 3)
+        self.assertEqual(f.held[-1][:2], ("POST", "/free"))
+        self.assertTrue(f.held[-1][2])
+        code, _, err = self.run_still("--dry-run", out=str(self.tmp / "concepts" / "c_v01.png"))
+        self.assertEqual((code, len(f.frees)), (0, 3), "a dry run sends nothing")
+
+    def test_free_failure_is_only_a_warning(self):
+        f = self.server()
+        f.drop_posts.add("/free")
+        code, _, err = self.run_still()
+        self.assertEqual(code, 0, err)
+        self.assertIn("could not ask ComfyUI to unload its models", err)
+        self.owner_gone()
+
+    def test_lost_server_keeps_the_lock_until_the_prompt_left_the_queue(self):
+        f = self.server()
+        f.history_status = 500
+        f.queue_gone_after = comfy.POLL_ERRORS + 3            # the polling loop reads /queue once per try
+        code, _, err = self.run_clip()
+        self.assertEqual(code, 1, err)
+        row = self.rows()[-1]
+        self.assertEqual(row["status"], "failed")
+        self.assertIn("polling stopped", row["note"])
+        self.assertIn("no longer queued or running", row["note"])
+        queue = [h for h in f.held if h[1] == "/queue"]
+        self.assertGreater(len(queue), comfy.POLL_ERRORS + 3, "waited for the prompt to leave the queue")
+        self.assertTrue(all(h[2] for h in queue), "with the GPU lock held")
+        self.owner_gone()
+        f.queue_gone_after = None                              # never leaves: a bounded wait, then a clear note
+        self.out = str(self.tmp / "clips" / "ep01_s03_clip_v02.mp4")
+        with mock.patch.object(comfy, "LOST_WAIT", 0.2):
+            code, _, err = self.run_clip()
+        self.assertEqual(code, 1)
+        self.assertIn("MAY STILL RUN", self.rows()[-1]["note"])
+        self.assertIn("comfy.py interrupt --prompt-id", err)
+        with mock.patch.object(comfy, "LOST_WAIT", 0.2):    # the image workflow too
+            code, _, err = self.run_still()
+        self.assertEqual(code, 1)
+        self.assertIn("MAY STILL RUN", self.rows()[-1]["note"])
+
+    def test_wait_gone_when_the_server_is_down(self):
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            note = comfy.wait_gone("abc", limit=30)            # FILM_COMFY_URL: a closed port
+        self.assertIn("the server is down", note)
+
+    def test_interrupt_right_after_the_pending_row_writes_the_final_row(self):
+        f = self.server()
+        hook = mock.MagicMock()
+        hook.start.side_effect = ark.Interrupted(15)
+        with mock.patch.object(comfy, "review_hook", return_value=hook):
+            code, _, err = self.run_clip()
+        self.assertEqual(code, 143, err)
+        self.assertEqual([r["status"] for r in self.rows()], ["pending", "interrupted"])
+        self.assertEqual(f.prompts, [])
+        with mock.patch.object(comfy.StepListener, "connect", side_effect=ark.Interrupted(2)):
+            code, _, err = self.run_still()
+        self.assertEqual(code, 130, err)
+        self.assertEqual([r["status"] for r in self.rows()][-2:], ["pending", "interrupted"])
+        self.owner_gone()
 
 if __name__ == "__main__":
     unittest.main()

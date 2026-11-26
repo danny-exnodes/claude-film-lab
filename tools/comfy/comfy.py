@@ -14,10 +14,10 @@
   python tools/comfy/comfy.py run <workflow> (--prompt TEXT | --prompt-file F.json|.yaml) --out <clips>/<name>_v<NN>.mp4
                      [--image START.png [--last END.png]] [--ref IMG ...] [--guide SECONDS=IMG ...] [--ref-size match|max]
                      [--seconds 5] [--res 480p|768p] [--seed N] [--steps N] [--turbo] [--timeout 2400] [--keep-frames]
-                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py run qwen-t2i (--prompt TEXT | --prompt-file F.txt) --out <concepts>/<id>_v<NN>.png
                      [--negative TEXT] [--size 1664x928] [--seed N] [--steps 30] [--cfg 2.5] [--turbo]
-                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD]
+                     (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
 
 Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.json):
@@ -50,7 +50,12 @@ Output: <out> (mp4 with audio, or the png of an image workflow, written atomical
 sha256 of the filled graph, seed, prompt, sizes, frames, model files, ComfyUI/torch versions, GPU seconds).
 GPU queue: `run` (not --dry-run) holds the lab's GPU lock (tools/gpu_run.py) from just before the ledger row to the
 end of the job, waiting while a Blender render or another job holds it; FILM_GPU_WAIT=S refuses after S seconds
-(exit 2, nothing sent), FILM_GPU_QUEUE=0 turns the queue off.
+(exit 2, nothing sent), FILM_GPU_QUEUE=0 turns the queue off. Once the lock is taken the output checks run again
+(another run with the same --out may have finished during the wait: exit 2, nothing sent, no ledger row), and the
+download never replaces a file that appeared meanwhile. Before the lock is released: POST /free (unload_models,
+free_memory) so the next holder (a Blender render) gets the 16 GB VRAM (--keep-models skips it, for a batch of
+consecutive comfy runs); when polling lost the server, up to LOST_WAIT (10 min) waiting for our prompt to leave
+ComfyUI's queue (else the ledger note says it may still run).
 
 Env: FILM_COMFY_URL (default http://127.0.0.1:8188), FILM_COMFY_HOME (Windows default
 %LOCALAPPDATA%\\Comfy-Desktop\\ComfyUI-Installs\\ComfyUI: Desktop layout ComfyUI\\.venv\\Scripts\\python.exe + ComfyUI\\main.py;
@@ -79,6 +84,9 @@ POLL_SECONDS = 2          # /history polling interval (no websocket dependency)
 PROGRESS_SECONDS = 30     # a progress line at least this often
 POLL_ERRORS = 5           # consecutive failed polls before the job is given up (the server died)
 HTTP_TIMEOUT = 30
+LOST_WAIT = 600           # polling lost the server: seconds to wait for our prompt to leave the queue (GPU lock held)
+LOST_POLL = 5             # seconds between /queue tries during that wait
+FREE_WAIT = 10            # seconds to wait for VRAM to come back after POST /free
 UPLOAD_TIMEOUT = 120
 START_POLL = 2
 # GPU seconds per sampling step for a 124-frame (5.2 s) clip on the owner's RTX 5070 Ti, plus a fixed setup/decode
@@ -112,9 +120,10 @@ OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))   # localh
 
 
 class ComfyError(Exception):
-    def __init__(self, msg, status=None, body=None):
+    def __init__(self, msg, status=None, body=None, refused=False):
         super().__init__(msg)
         self.status, self.body = status, body
+        self.refused = refused          # connection refused: nothing listens on the port (the server is down)
 
 
 def refuse(msg):
@@ -224,7 +233,9 @@ def call(method, path, body=None, *, raw=None, ctype=None, timeout=HTTP_TIMEOUT,
         text = e.read().decode("utf-8", "replace")
         raise ComfyError(f"HTTP {e.code}: {text[:600]}", status=e.code, body=text) from None
     except (urllib.error.URLError, OSError, http.client.HTTPException) as e:
-        raise ComfyError(f"network error: {type(e).__name__}: {getattr(e, 'reason', None) or e}") from None
+        why = getattr(e, "reason", None) or e
+        raise ComfyError(f"network error: {type(e).__name__}: {why}",
+                         refused=isinstance(why, ConnectionRefusedError)) from None
     if want == "bytes":
         return payload
     try:
@@ -775,10 +786,100 @@ def download_view(item, out):
     data = call("GET", "/view?" + q, want="bytes", timeout=300)
     if not data:
         raise ComfyError("empty file from /view")
-    part = out + ".part"
+    part = f"{out}.{os.getpid()}.part"
     with open(part, "wb") as f:
         f.write(data)
-    os.replace(part, out)
+    try:
+        place_new(part, out)
+    except FileExistsError:
+        with contextlib.suppress(OSError):
+            os.remove(part)
+        raise ComfyError(f"{out} appeared while this job ran (another run with the same --out?): not replaced")
+
+
+def place_new(src, dst):
+    """Move src to dst, never replacing a file at dst (FileExistsError): a hard link refuses an existing dst on every
+    OS; a filesystem without hard links falls back to a check + rename. An empty dst counts as free (as
+    ark.guard_output)."""
+    with contextlib.suppress(OSError):
+        if os.path.isfile(dst) and os.path.getsize(dst) == 0:
+            os.remove(dst)
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise
+    except OSError:
+        if os.path.exists(dst):
+            raise FileExistsError(dst) from None
+        os.rename(src, dst)
+        return
+    os.remove(src)
+
+
+def outputs_taken(a, frames_dir=None):
+    """The outputs of `run` that exist now: the file (size > 0), its sidecar, a non-empty --keep-frames folder."""
+    taken = [p for p in (a.out, a.out + ".json") if os.path.isfile(p) and (p != a.out or os.path.getsize(p) > 0)]
+    if frames_dir and os.path.isdir(frames_dir) and os.listdir(frames_dir):
+        taken.append(frames_dir)
+    return taken
+
+
+def recheck_outputs(a, frames_dir=None):
+    """The output checks again, once the GPU lock is held: another run with the same --out may have finished while
+    this one waited (hours). Exit 2, nothing sent, no ledger row."""
+    taken = outputs_taken(a, frames_dir)
+    if taken:
+        refuse(f"{', '.join(taken)} appeared while this run waited for the GPU (another run with the same --out; "
+               "versions only go up: use the next _v<NN>); nothing sent, no ledger row")
+
+
+def wait_gone(pid, limit=None):
+    """Polling lost the server: before the GPU lock is released, wait (at most LOST_WAIT s) until our prompt has left
+    ComfyUI's queue, so the next holder does not share the GPU with it. -> a note for the ledger and stderr."""
+    limit = LOST_WAIT if limit is None else limit
+    print(f"comfy: waiting up to {limit / 60:g} min for prompt {pid} to leave ComfyUI's queue before the GPU is "
+          "released", file=sys.stderr, flush=True)
+    t0 = time.monotonic()
+    while True:
+        try:
+            q = call("GET", "/queue", timeout=10)
+            ids = {x[1] for k in ("queue_running", "queue_pending") for x in q.get(k) or []
+                   if isinstance(x, (list, tuple)) and len(x) > 1}
+            if pid not in ids:
+                return "the prompt is no longer queued or running"
+        except ComfyError as e:
+            if e.refused:
+                return "the server is down (connection refused): the prompt no longer runs"
+        if time.monotonic() - t0 >= limit:
+            return (f"the prompt MAY STILL RUN on the GPU (no answer that it left the queue in {limit:g} s): "
+                    f"python tools/comfy/comfy.py interrupt --prompt-id {pid}")
+        time.sleep(LOST_POLL)
+
+
+def vram_free():
+    try:
+        return int(((call("GET", "/system_stats", timeout=5).get("devices") or [{}])[0]).get("vram_free"))
+    except (ComfyError, TypeError, ValueError, AttributeError):
+        return None
+
+
+def free_models():
+    """POST /free {unload_models, free_memory} while the GPU lock is still held (a GPU_HOLD callback), so the next
+    holder (a Blender render) is not left 16 GB of VRAM minus ComfyUI's cached models. Waits up to FREE_WAIT s for
+    the VRAM to come back (ComfyUI unloads in its worker thread). Best effort: never raises (--keep-models skips it)."""
+    try:
+        before = vram_free()
+        call("POST", "/free", {"unload_models": True, "free_memory": True}, timeout=10)
+        t0 = time.monotonic()
+        while before is not None and time.monotonic() - t0 < FREE_WAIT:
+            now = vram_free()
+            if now is None or now > before:
+                break
+            time.sleep(0.5)
+        print("comfy: models unloaded (POST /free) before the GPU lock is released", flush=True)
+    except Exception as e:          # noqa: BLE001  (best effort, inside the lock's cleanup)
+        warn(f"could not ask ComfyUI to unload its models ({e}); its VRAM may stay in use until its next job "
+             "(python tools/comfy/comfy.py ping shows VRAM free)")
 
 
 def review_hook(a, kind="clip"):
@@ -1015,6 +1116,7 @@ def run(a):
     if problems:
         refuse("the server cannot run this graph, nothing sent:\n  " + "\n  ".join(problems))
     hold_gpu(wid)
+    recheck_outputs(a, plan["frames_dir"] if a.keep_frames else None)
     rid = ark.new_req()
     tmpdir = tempfile.mkdtemp(prefix="film-comfy-")
     try:
@@ -1055,13 +1157,12 @@ def run(a):
            "out": a.out, "task_id": pid}
     seed_note = f"seed={plan['seed']}"
     ark.make_out_dir(a.out)
+    hook = None
     ark.reserve(a, req, rid, tag=seed_note)
     t0 = time.monotonic()
     state = {"logged": False}
-    hook = review_hook(a)
-    if hook:
-        hook.key = f"comfy-{pid}"          # the review monitor links ComfyUI's running prompt to this build by it
-        hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
+    if not a.keep_models:
+        GPU_HOLD.callback(free_models)      # runs before the lock is released (ExitStack: last in, first out)
 
     def final(status, note="", usage="", cat=None):
         """The ledger row (full detail). The review server is public: it gets a fixed category only (`cat`), never
@@ -1072,7 +1173,11 @@ def run(a):
             if hook and status != "ok":
                 hook.failed(f"{status}: {cat}" if cat else status)
 
-    try:
+    try:                                    # everything after the pending row: an interrupt writes the final row
+        hook = review_hook(a)
+        if hook:
+            hook.key = f"comfy-{pid}"      # the review monitor links ComfyUI's running prompt to this build by it
+            hook.start(f"{wid} · {plan['frames']} frames {w}x{h} · ~{est / 60:.0f} min GPU (estimate)")
         try:
             r = call("POST", "/prompt", {"prompt": graph, "client_id": "film-lab-" + rid[:12], "prompt_id": pid})
         except ComfyError as e:
@@ -1097,9 +1202,9 @@ def run(a):
             except ComfyError as e:
                 errors += 1
                 if errors > POLL_ERRORS:
-                    final("failed", f"polling stopped: {e}", f"gpu_s={round(el, 1)}", cat="server lost")
-                    print(f"lost the server while polling ({e}); prompt {pid} may still run: "
-                          f"python tools/comfy/comfy.py interrupt --prompt-id {pid}", file=sys.stderr)
+                    gone = wait_gone(pid)           # the GPU lock stays held while the prompt may still run
+                    final("failed", f"polling stopped: {e}; {gone}", f"gpu_s={round(el, 1)}", cat="server lost")
+                    print(f"lost the server while polling ({e}); {gone}", file=sys.stderr)
                     return FAILED
                 hist = {}
             entry = hist.get(pid)
@@ -1305,6 +1410,7 @@ def run_image(a, wid, template, meta, wf_sha):
     if problems:
         refuse("the server cannot run this graph, nothing sent:\n  " + "\n  ".join(problems))
     hold_gpu(wid)
+    recheck_outputs(a)
     rid = ark.new_req()
     gsha = graph_sha(graph)
     pid = str(uuid.uuid4())
@@ -1312,17 +1418,14 @@ def run_image(a, wid, template, meta, wf_sha):
     req = {"kind": "image", "model": model, "size": f"{w}x{h}", "count": 1, "out": a.out, "task_id": pid}
     seed_note = f"seed={plan['seed']}"
     ark.make_out_dir(a.out)
+    hook = None
+    steps = StepListener(client_id, meta.get("progress_node"))
+    steps.prompt_id = pid
     ark.reserve(a, req, rid, tag=seed_note)
     t0 = time.monotonic()
     state = {"logged": False}
-    hook = review_hook(a, "image")
-    if hook:
-        hook.key = f"comfy-{pid}"          # the review monitor links ComfyUI's running prompt to this build by it
-        hook.start(f"{wid} · {w}x{h} · {plan['steps']} steps · ~{est:.0f} s GPU (estimate)")
-    steps = StepListener(client_id, meta.get("progress_node"))
-    steps.prompt_id = pid
-    if steps.connect():
-        steps.start()
+    if not a.keep_models:
+        GPU_HOLD.callback(free_models)      # runs before the lock is released (ExitStack: last in, first out)
 
     def final(status, note="", usage="", cat=None):
         """Ledger row in full; the public review page gets a fixed category only (as run())."""
@@ -1339,7 +1442,13 @@ def run_image(a, wid, template, meta, wf_sha):
                 hook.update(min(0.99, v / m), f"step {v}/{m} · {int(el)} s", force=True, step=v, steps=m,
                             eta=round(el / v * (m - v), 1) if v else None)
 
-    try:
+    try:                                    # everything after the pending row: an interrupt writes the final row
+        hook = review_hook(a, "image")
+        if hook:
+            hook.key = f"comfy-{pid}"      # the review monitor links ComfyUI's running prompt to this build by it
+            hook.start(f"{wid} · {w}x{h} · {plan['steps']} steps · ~{est:.0f} s GPU (estimate)")
+        if steps.connect():
+            steps.start()
         try:
             call("POST", "/prompt", {"prompt": graph, "client_id": client_id, "prompt_id": pid})
         except ComfyError as e:
@@ -1365,9 +1474,9 @@ def run_image(a, wid, template, meta, wf_sha):
             except ComfyError as e:
                 errors += 1
                 if errors > POLL_ERRORS:
-                    final("failed", f"polling stopped: {e}", f"gpu_s={round(el, 1)}", cat="server lost")
-                    print(f"lost the server while polling ({e}); prompt {pid} may still run: "
-                          f"python tools/comfy/comfy.py interrupt --prompt-id {pid}", file=sys.stderr)
+                    gone = wait_gone(pid)           # the GPU lock stays held while the prompt may still run
+                    final("failed", f"polling stopped: {e}; {gone}", f"gpu_s={round(el, 1)}", cat="server lost")
+                    print(f"lost the server while polling ({e}); {gone}", file=sys.stderr)
                     return FAILED
                 hist = {}
             entry = hist.get(pid)
@@ -1855,6 +1964,9 @@ r.add_argument("--dry-run", action="store_true", help="validate and print the fi
 r.add_argument("--timeout", type=positive_float, default=2400, help="seconds before the job is interrupted (2400)")
 r.add_argument("--review", default=None, metavar="BUILD",
                help="publish progress + the clip/image to the review server (env FILM_REVIEW_BUILD; tools/review/)")
+r.add_argument("--keep-models", action="store_true",
+               help="leave the models in VRAM after the job (default: POST /free before the GPU lock is released; "
+                    "for a batch of consecutive comfy runs)")
 r.add_argument("--keep-frames", action="store_true", help="also extract the raw PNG frames to <clips>/<clip stem>/raw/000001.png (ffmpeg; the folder tools/layers/matte_seq.py keys from)")
 t = sp.add_parser("interrupt", help="stop our own job: --prompt-id, or every open comfy job of --ledger")
 t.add_argument("--prompt-id", default=None)

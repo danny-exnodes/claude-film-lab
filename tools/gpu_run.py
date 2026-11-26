@@ -29,13 +29,18 @@ holder dies (Windows msvcrt.locking, POSIX flock); a stale gpu.owner is ignored 
 Env: FILM_GPU_LOCK (another lock file; gpu.owner goes next to it), FILM_GPU_QUEUE=0 (no lock at all: gpu_run runs
 the command at once, gpu_lock() does nothing), FILM_GPU_WAIT (default seconds to wait in blender.py/comfy.py),
 FILM_GPU_HELD (set by the holder for its children; never set it by hand).
-Exit codes: the command's own; 75 the wait ran out (nothing was run); 2 bad arguments.
+Exit codes: the command's own; 75 the wait ran out (nothing was run); 2 bad arguments; 128+N stopped by signal N.
+Stopping gpu_run (SIGTERM/SIGHUP on POSIX, Ctrl+Break on Windows) stops the command first (terminate, then kill after
+TERM_GRACE seconds) and only then frees the GPU; Ctrl+C reaches the command too, so gpu_run waits for it. A hard kill
+of gpu_run itself (kill -9, Windows TerminateProcess: Task Manager, Stop-Process, taskkill /F) cannot be caught: the
+lock is freed while the command may still run (docs/RUNBOOK.md, "GPU queue").
 """
 import contextlib
 import datetime
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -48,6 +53,7 @@ OWNER_GRACE = 0.5               # seconds to wait for a new holder's owner file 
 LABEL_MAX = 60
 LABEL_BAD = re.compile(r"[^A-Za-z0-9 _.:/-]+")
 HELD_ENV = "FILM_GPU_HELD"
+TERM_GRACE = 10.0               # seconds the command gets to exit after terminate() before it is killed
 
 if os.name == "nt":
     import msvcrt
@@ -305,6 +311,76 @@ def _parse(argv):
     return label, wait, []
 
 
+class _Stop(BaseException):
+    """A stop signal for gpu_run itself (raised once by the handler)."""
+
+    def __init__(self, signum):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def stop_signals():
+    """The signals that stop gpu_run gracefully: SIGTERM (+ SIGHUP) on POSIX, Ctrl+Break (SIGBREAK) on Windows."""
+    names = ("SIGTERM", "SIGHUP", "SIGBREAK")
+    return [getattr(signal, n) for n in names if hasattr(signal, n)]
+
+
+def stop_child(proc, grace=None):
+    """Terminate the command, kill it after `grace` seconds, wait until it is gone (before the GPU lock is freed)."""
+    grace = TERM_GRACE if grace is None else grace
+    if proc.poll() is not None:
+        return
+    with contextlib.suppress(OSError):
+        proc.terminate()
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            proc.kill()
+        proc.wait()
+
+
+def _run_locked(cmd, label, wait):
+    """Run cmd under the GPU lock; a stop signal stops the command before the lock is released."""
+    fired = []
+
+    def on_stop(signum, frame):
+        if not fired:                   # once: a second signal must not break the cleanup below
+            fired.append(signum)
+            raise _Stop(signum)
+
+    prev = {}
+    for sig in stop_signals():
+        with contextlib.suppress(ValueError, OSError):      # ValueError: not the main thread
+            prev[sig] = signal.signal(sig, on_stop)
+    proc = None
+    try:
+        with gpu_lock(label, wait):
+            try:
+                try:
+                    proc = subprocess.Popen(cmd)
+                except OSError as e:
+                    print(f"gpu_run: cannot run {cmd[0]}: {e}", file=sys.stderr)
+                    return 127
+                while True:
+                    try:
+                        return proc.wait()
+                    except KeyboardInterrupt:     # the child got the Ctrl+C too: wait for it, then free the GPU
+                        continue
+            except _Stop as e:
+                if proc is not None:
+                    print(f"gpu_run: stopped by signal {e.signum}: stopping the command before the GPU is released",
+                          file=sys.stderr, flush=True)
+                    stop_child(proc)
+                return 128 + e.signum
+    except _Stop as e:                  # while waiting for the lock: nothing ran
+        return 128 + e.signum
+    finally:
+        for sig, h in prev.items():
+            with contextlib.suppress(ValueError, OSError):
+                signal.signal(sig, h)
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv in (["-h"], ["--help"]):
@@ -329,17 +405,7 @@ def main(argv=None):
         print("gpu: FILM_GPU_QUEUE=0: running without the GPU lock", file=sys.stderr, flush=True)
         return subprocess.call(cmd)
     try:
-        with gpu_lock(label, wait):
-            try:
-                proc = subprocess.Popen(cmd)
-            except OSError as e:
-                print(f"gpu_run: cannot run {cmd[0]}: {e}", file=sys.stderr)
-                return 127
-            while True:
-                try:
-                    return proc.wait()
-                except KeyboardInterrupt:     # the child got the Ctrl+C too: wait for it, then free the GPU
-                    continue
+        return _run_locked(cmd, label, wait)
     except GpuBusy as e:
         print(f"gpu_run: {e}; the command was not run", file=sys.stderr)
         return BUSY_EXIT

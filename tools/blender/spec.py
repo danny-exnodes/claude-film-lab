@@ -638,21 +638,71 @@ def turntable_angle(tt, frame, n):
     return float(tt.get("front", 0.0)) + 360.0 * (frame - 1) / float(max(1, n))
 
 
+TURNTABLE_EDGE = 0.98      # the turning box stays inside 98 % of the half frame height (a 1 % margin each side)
+TURNTABLE_SIDE = 0.9       # ... and 90 % of the half frame width
+
+
+def turntable_reach(cam, lo, hi, tan_v, tan_h, step=2.0):
+    """(max |x|, max |y|) in half-frame units of the bounding box [lo, hi] over a whole turn about the z axis, seen from
+    the camera cam (pos, target; no roll). The box sweeps a cylinder of its widest corner radius from lo z to hi z;
+    the image of a cylinder is the hull of its top and bottom circles, sampled every `step` degrees (with the nearest
+    and side points exactly)."""
+    c, t = cam["pos"], cam["target"]
+    f = [t[i] - c[i] for i in range(3)]
+    n = math.sqrt(sum(x * x for x in f))
+    f = [x / n for x in f]
+    hz = math.hypot(f[0], f[1])
+    r = [f[1] / hz, -f[0] / hz, 0.0]                                    # right: horizontal, no roll
+    u = [r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0]]     # up = right x forward
+    rad = cam["radius"]
+    mx = my = 0.0
+    k = max(4, int(round(360.0 / step)))
+    for z in (lo[2], hi[2]):
+        for i in range(k):
+            a = 2.0 * math.pi * i / k
+            v = [rad * math.cos(a) - c[0], rad * math.sin(a) - c[1], z - c[2]]
+            depth = sum(v[j] * f[j] for j in range(3))
+            if depth <= 1e-6:
+                return float("inf"), float("inf")
+            mx = max(mx, abs(sum(v[j] * r[j] for j in range(3))) / (depth * tan_h))
+            my = max(my, abs(sum(v[j] * u[j] for j in range(3))) / (depth * tan_v))
+    return mx, my
+
+
 def turntable_camera(lo, hi, spec_size, lens=50.0, fill=0.7, render_size=None):
     """Fixed turntable camera for an asset whose bounding box [lo, hi] (metres) turns about the z axis through
-    x = y = 0: its height fills `fill` of the frame height, its widest turn fits the frame width (90 %), the camera
-    stands in front (-y) a little above the middle and aims at the middle. The vertical field of view comes from
-    spec_size (the camera's sensor fit), the width check from render_size (--size). -> {"pos", "target", "lens",
-    "distance", "height", "radius"}."""
+    x = y = 0: its height at the turn axis fills `fill` of the frame height, its widest turn fits the frame width
+    (90 %), the camera stands in front (-y) a little above the middle and aims at the middle. Then the camera backs
+    off until every corner of the box, over the whole turn and with the camera's height and tilt, stays inside the
+    frame (TURNTABLE_EDGE of the half height, TURNTABLE_SIDE of the half width): a deep or wide asset at a high fill
+    comes nearer the camera as it turns and would be cut. The vertical field of view comes from spec_size (the
+    camera's sensor fit), the width check from render_size (--size). -> {"pos", "target", "lens", "distance",
+    "height", "radius"}."""
     rw, rh = render_size or spec_size
     tan_v = sensor_height(spec_size) / (2.0 * lens)
     tan_h = tan_v * rw / float(rh)
     height = max(hi[2] - lo[2], 1e-3)
     radius = max(math.hypot(x, y) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]))
+
+    def at(d):
+        return {"pos": [0.0, -d, lo[2] + 0.58 * height], "target": [0.0, 0.0, lo[2] + 0.5 * height],
+                "lens": float(lens), "roll": 0.0, "distance": d, "height": height, "radius": radius}
+
+    def fits(d):
+        mx, my = turntable_reach(at(d), lo, hi, tan_v, tan_h)
+        return mx <= TURNTABLE_SIDE and my <= TURNTABLE_EDGE
+
     d = height / fill / (2.0 * tan_v)
     d = max(d, radius + radius / (0.9 * tan_h), 1.5 * radius + 0.05)
-    return {"pos": [0.0, -d, lo[2] + 0.58 * height], "target": [0.0, 0.0, lo[2] + 0.5 * height], "lens": float(lens),
-            "roll": 0.0, "distance": d, "height": height, "radius": radius}
+    if not fits(d):
+        near, far = d, d * 1.25
+        while not fits(far):
+            near, far = far, far * 1.25
+        for _ in range(40):
+            mid = 0.5 * (near + far)
+            near, far = (near, mid) if fits(mid) else (mid, far)
+        d = far
+    return at(d)
 
 
 def cyc_params(cam, spec_size, render_size=None):

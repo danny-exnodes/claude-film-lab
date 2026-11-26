@@ -168,5 +168,75 @@ class TestLock(GpuCase):
             self.assertIsNone(gr.default_wait())
 
 
+class TestStop(GpuCase):
+    """Stopping gpu_run stops its command first: the GPU lock is never free while the command still runs."""
+
+    def wait_for(self, path, timeout=30):
+        deadline = time.monotonic() + timeout
+        while not (path.exists() and path.read_text().strip()):
+            self.assertLess(time.monotonic(), deadline, f"{path.name} never appeared")
+            time.sleep(0.05)
+
+    @unittest.skipUnless(os.name == "posix", "SIGTERM can be caught on POSIX only")
+    def test_sigterm_stops_the_command_before_the_gpu_is_released(self):
+        import signal
+        log, ready = self.tmp / "events.log", self.tmp / "ready"
+        job = ("import signal, sys, time\n"
+               "def bye(*a):\n"
+               "    time.sleep(0.5)\n"                       # a command that needs a moment to stop cleanly
+               "    open(sys.argv[1], 'a').write(f'cmd-exit {time.time()}\\n'); sys.exit(0)\n"
+               "signal.signal(signal.SIGTERM, bye)\n"
+               "open(sys.argv[2], 'w').write('up')\n"
+               "time.sleep(60)\n")
+        first = subprocess.Popen([sys.executable, CLI, "--label", "render", "--", sys.executable, "-c", job,
+                                  str(log), str(ready)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 env=self.child_env())
+        self.addCleanup(lambda: (first.poll() is None and first.kill(), first.wait()))
+        self.wait_for(ready)
+        nxt = subprocess.Popen([sys.executable, CLI, "--label", "next", "--", *self.py(
+            f"import time; open({str(log)!r}, 'a').write(f'next-start {{time.time()}}\\n')")],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.child_env())
+        self.addCleanup(lambda: (nxt.poll() is None and nxt.kill(), nxt.wait()))
+        time.sleep(0.5)                                         # the next job is waiting for the GPU
+        first.send_signal(signal.SIGTERM)
+        out, err = first.communicate(timeout=60)
+        self.assertEqual(first.returncode, 128 + signal.SIGTERM, err)
+        self.assertIn("stopping the command before the GPU is released", err)
+        nxt.communicate(timeout=60)
+        ev = dict(l.split() for l in log.read_text().splitlines())
+        self.assertLessEqual(float(ev["cmd-exit"]), float(ev["next-start"]), "the GPU went free only after the "
+                                                                              "command had stopped")
+        self.assertEqual(self.cli("status").stdout.strip(), "free")
+
+    @unittest.skipUnless(os.name == "posix", "SIGTERM can be ignored on POSIX only")
+    def test_stop_child_kills_a_command_that_ignores_terminate(self):
+        p = subprocess.Popen(self.py("import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                                     "print('up', flush=True); time.sleep(60)"), stdout=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait(), p.stdout.close()))
+        self.assertEqual(p.stdout.readline().strip(), "up")
+        t0 = time.monotonic()
+        gr.stop_child(p, grace=0.3)
+        self.assertIsNotNone(p.poll())
+        self.assertLess(time.monotonic() - t0, 20)
+
+    @unittest.skipUnless(os.name == "nt", "Ctrl+Break is the Windows stop signal")
+    def test_ctrl_break_stops_the_command_and_frees_the_gpu(self):
+        import signal
+        ready = self.tmp / "ready"
+        job = f"import time; open({str(ready)!r}, 'w').write('up'); time.sleep(60)"
+        p = subprocess.Popen([sys.executable, CLI, "--label", "render", "--", *self.py(job)],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.child_env(),
+                             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        self.addCleanup(lambda: (p.poll() is None and p.kill(), p.wait()))
+        self.wait_for(ready)
+        try:
+            os.kill(p.pid, signal.CTRL_BREAK_EVENT)
+        except OSError as e:
+            self.skipTest(f"no console to send Ctrl+Break to ({e})")
+        out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 128 + signal.SIGBREAK, err)
+        self.assertEqual(self.cli("status").stdout.strip(), "free")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -54,7 +54,15 @@ Chi tiết và cách co giãn theo độ dài: `references/structure.md`. Tóm t
 - Giữa: đọc nguồn **theo từng mệnh đề, mỗi mệnh đề một hành động nhìn thấy được** (một shot hoặc một nhịp trong shot).
 - **Câu hỏi treo** đặt sớm (trước 25%), **lật** ở khoảng 2/3, **giải** trước khi kết.
 - Kết quay về hình mở đầu nhưng đã đổi. **Một motif lặp 3 lần** (lần 3 đổi nghĩa).
-- Shot 3–13 s, dài ngắn xen kẽ; hai shot liền nhau không cùng cả cỡ cảnh lẫn chuyển động máy.
+- Shot 3–13 s, dài ngắn xen kẽ.
+
+**Luật nhịp máy quay** (`film-dop` soát lại ở khâu 2b và viết `CAMERA-BIBLE.md`; biên kịch viết đúng từ đầu):
+- Không hai shot liền nhau cùng cả `shot_size` lẫn `camera` (`check_episode.py`: ERROR).
+- Mỗi sinh vật chính (bảng `## Sinh vật của tập` của `EPISODE.md`): **≥ 1 cận chi tiết** (`close`, `extreme-close` hoặc
+  `insert`: mắt, vảy, móng, lông) và **≥ 1 cảnh nhỏ giữa non sông** (`extreme-wide`: con vật nhỏ trên sống núi, bên
+  sông). Tập `blender`/`code`: sinh vật nằm trong shot qua mã lớp `A-<slug>` (blender), `C-<slug>`/`M-<slug>` (code);
+  `check_episode.py` WARN khi thiếu.
+- Xen kẽ chi tiết và non sông theo chương, không dồn một mạch toàn cảnh rồi một mạch cận cảnh.
 
 ## 3. Lời bình
 
@@ -142,6 +150,7 @@ mã lớp `L4b`… hay `pose-cycle`.
 - [ ] `method` của `EPISODE.md` đã đọc; `layers`: không shot nào có `ai_motion`, mọi hành động là tư thế giữ + id
       `code_motion`, plate tư thế ghi thành `L4b`… kèm `pose-cycle`; `seedance`: không có `L4b`/`pose-cycle`.
 - [ ] Tổng thời lượng shot = `length_s`; shot 3–13 s; không hai shot liền nhau trùng cả cỡ cảnh và máy.
+- [ ] Mỗi sinh vật chính có ≥ 1 cận chi tiết và ≥ 1 `extreme-wide`.
 - [ ] Mỗi câu có mốc, cách nhau ≥ 3 s; không dấu gạch ngang; một câu luận đề; kết có giây không lời.
 - [ ] Mỗi mệnh đề nguồn dùng trong phim có trong `research.md` nguyên văn + link; diễn giải được đánh dấu.
 - [ ] Motif xuất hiện 3 lần; câu hỏi treo, lật, giải có mốc.

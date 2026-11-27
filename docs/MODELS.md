@@ -41,8 +41,10 @@ Kiểm tra ngày 2026-11-10 trên tài khoản Ark của Film Lab. Model trong C
 
 ## Model local (máy chủ lab, ComfyUI) – miễn phí, chỉ phiên local
 
-Chạy bằng `tools/comfy/comfy.py` trên Comfy Desktop của chủ lab (RTX 5070 Ti 16 GB); model đã có sẵn trên máy, **không tải
-thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Cách dùng:
+Chạy bằng `tools/comfy/comfy.py` trên Comfy Desktop của chủ lab (RTX 5070 Ti 16 GB); model đã có sẵn trên máy; tải
+thêm chỉ bằng `python tools/comfy/comfy.py models --fetch <bộ>` **sau khi chủ lab đồng ý** (không `--yes` thì chỉ in kế
+hoạch). Kiểm kê, ổ trống, gợi ý dọn: `models --inventory --suggest-clean` (chỉ đọc). Dòng ledger `comfy:<workflow>` không
+tính vào trần nào. Cách dùng:
 `.claude/skills/film-compose-shot/references/local-video.md`.
 
 | Model | File (bản đóng gói Comfy-Org/MiniMax-H3) | Workflow | Dùng cho | Đo được |
@@ -54,19 +56,43 @@ thêm gì**. Dòng ledger `comfy:<workflow>` không tính vào trần nào. Các
 | LoRA Turbo | `minimax_h3_fl2v_turbo_8step_v1.0`, `minimax_h3_ref2v_turbo_4step_v0.1` | nháp | **chỉ bản nháp**, không cho bản dùng hay mặt nhân vật | |
 | Qwen-Image 2512 – text to image | `qwen_image_2512_fp8_e4m3fn` + bộ mã hoá `qwen_2.5_vl_7b_fp8_scaled` + VAE `qwen_image_vae` | `qwen-t2i` | ảnh concept (sinh vật, đạo cụ, bối cảnh) để người dùng chọn trước khi dựng 3D; ledger `comfy:qwen-image`, kind `image` | 30 bước ở 1664×928 ≈ **135 s** mỗi ảnh (chủ lab đo, model đã nạp); lần đầu của phiên thêm thời gian nạp model |
 | LoRA Turbo Qwen | `Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16` | `qwen-t2i --turbo` | 2 bước, cfg 1: **chỉ nháp**, không phải ảnh người dùng duyệt | ước lượng ~25 s |
+| Qwen-Image-Edit 2511 – sửa ảnh | `qwen_image_edit_2511_fp8mixed` (+ bộ mã hoá, VAE của Qwen-Image) | `qwen-edit` | vẽ lại bề mặt/mặt/chất liệu của **ảnh tĩnh và khung khoá** (render Blender, khung đầu/cuối của clip H3); ledger `comfy:qwen-edit`, kind `image` | 1 MP, 40 bước cfg 4: **240–250 s** (chủ lab đo 2026-11-26) |
+| LoRA Lightning Qwen-Edit | `Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16`, `…-8steps-…` (lightx2v) | `qwen-edit --lightning 4\|8` | 4/8 bước, cfg 1: dùng được cho bản duyệt (4 thường đủ) | 4 bước **17–22 s**, 8 bước 27–34 s |
+| Hunyuan3D 2.1 – image to 3D | `hunyuan_3d_v2.1` (`checkpoints/`, bản đóng gói Comfy-Org, 7,4 GB) | `hunyuan3d` | **phôi** điêu khắc (mesh không màu) của sinh vật từ concept đã duyệt, nền trắng, toàn thân; ledger `comfy:hunyuan3d`, kind `image` | octree 256 + 30 bước ≈ **40 s** mỗi mesh (đỉnh VRAM cả card ~8,8 GB); octree 512 + 50 bước ≈ **3 phút** (~9,8 GB); chủ lab đo 2026-11-26 |
 
 - H3: 24 hình/s, số khung theo lưới `17k + 5`, bản dùng 1344×768 (7:4), nháp 864×480 (≈ 1 phút cho 5 s, ước lượng);
   không negative prompt (cfg 1); prompt tiếng Anh theo trường.
 - Qwen-Image (`qwen-t2i`): KSampler euler/simple, 30 bước, cfg 2.5, shift 3.1 (ModelSamplingAuraFlow); `--size` bội số 16,
   khung đã huấn luyện 1328×1328, 1664×928, 928×1664, 1472×1104, 1104×1472, 1584×1056, 1056×1584; có `--negative`.
   `python tools/comfy/comfy.py run qwen-t2i --prompt "..." --size 1664x928 --seed N --out <concepts>/<id>_v<NN>.png --ledger L`.
-- **Giấy phép:** open weights; điều khoản chưa được xác minh trong repo → **đọc model card trước khi dùng thương mại**
-  (kênh có kiếm tiền) và ghi kết quả vào đây.
+- Chuỗi dùng các model này (chỉ gọi `comfy.py`/`blender.py`, không model riêng): `tools/concept.py` (concept sinh vật
+  khâu 3a: Qwen-Image → Qwen-Image-Edit → bảng ghép → duyệt; `tools/comfy/README.md` mục "Chuỗi concept") và
+  `tools/comfy/hybrid.py` (shot lai: khung khoá Blender → Qwen-Image-Edit → kiểm bằng mắt → H3 nối khung →
+  ghép; `.claude/skills/film-compose-shot/references/local-video.md` §9). Bài học: Qwen-Image chỉ chữ hay bỏ chi tiết lạ,
+  cụm từ gây nhiễu kéo theo giải phẫu riêng ("water buffalo" → hai sừng); số sừng/chân/mắt sửa trong 3D, không bằng edit.
+- Qwen-Edit (`qwen-edit`): `--image` ảnh 1 (ảnh được sửa), `--ref` tối đa 2 ảnh ("Picture 2/3"), cỡ ra = cỡ ảnh vào
+  (`--size` đổi), `--denoise` mặc định 1.0. **Không** đổi được số lượng (thêm/dời chân, sừng: có khi mọc thêm); denoise
+  1.0 mỗi khung một con khác, 0.75 giữ dáng nhưng chỉ đổi màu → chỉ cho ảnh đơn và khung khoá; ảnh concept làm `--ref`
+  thì model chép nguyên concept, bỏ ảnh 1; `--negative` vô tác dụng ở cfg 1 (`comfy.py` từ chối).
+  `python tools/comfy/comfy.py run qwen-edit --image <in>.png --prompt "..." --lightning 4 --out <dir>/<id>_v<NN>.png --ledger L`.
+- Hunyuan3D 2.1 (`hunyuan3d`): `ImageOnlyCheckpointLoader` → `ModelSamplingAuraFlow` (shift 1.0) → `KSampler` (euler/normal,
+  cfg 5); `CLIPVisionEncode` (cắt giữa) → `Hunyuan3Dv2Conditioning`; `EmptyLatentHunyuan3Dv2` (4096) →
+  `VAEDecodeHunyuan3D` (octree 256/512) → `VoxelToMesh` (surface net, 0,6) → `SaveGLB`. Mesh 137k–1M tam giác, **không
+  kín** (hàng chục nghìn cạnh non-manifold, vài trăm cạnh hở), không vòng cạnh: luôn qua
+  `python tools/blender/blender.py mesh-prep` trước khi điêu khắc/rig. Phần mảnh (vây, tóc, gạc) vỡ. Độ trùng bóng với
+  concept (IoU) 0,85–0,99.
+  **Giấy phép: Tencent Hunyuan 3D 2.1 Community License – không áp dụng ở EU, Anh, Hàn Quốc**; thương mại có điều kiện
+  (ngưỡng người dùng hằng tháng, ghi nguồn): ghi vào `ASSETS.md` mọi model dựng từ mesh này, đọc bản giấy phép đi kèm
+  model trước khi phát hành. Cách dùng: `.claude/skills/film-compose-shot/references/blender-method.md` §8.
+- **Giấy phép:** Hunyuan3D 2.1: *Tencent Hunyuan 3D 2.1 Community License*, **không áp dụng ở EU, Anh, Hàn Quốc**, dùng
+  thương mại có điều kiện, ghi nguồn (`comfy.lock.json` → `sets`). Qwen-Image-Edit 2511 và LoRA Lightning: Apache-2.0
+  theo model card (chưa xác minh trong repo). Các model khác: open weights; điều khoản chưa được xác minh trong repo →
+  **đọc model card trước khi dùng thương mại** (kênh có kiếm tiền) và ghi kết quả vào đây.
 - Bản cài ComfyUI có node API **trả tiền** của MiniMax (`comfy_api_nodes/`): không dùng; `comfy.py` chỉ cho node trong
   danh sách cho phép, server chạy `--offline`.
-- Có trên máy, **chưa nối** vào lab (không workflow, không công cụ): LTX-2.3 22B dev fp8 (+ spatial upscaler x2, distilled
-  LoRA, bộ mã hoá gemma 3 12B fp4), SeedVR2 3B (phóng video), Qwen-Image-Edit 2511 (+ LoRA Lightning 4/8 bước) và
-  Z-Image Turbo (model ảnh local), Wan Animate 2. Wan 2.2 và LTX-2.5 không dùng.
+- Có trên máy, **chưa nối** vào lab (không workflow, không công cụ): SeedVR2 3B (phóng video). LTX-2.3, Wan Animate 2,
+  Z-Image Turbo đã xoá khỏi máy chủ lab (2026-11-26, chủ lab duyệt bảng kiểm kê, #75). Wan 2.2 và LTX-2.5 không dùng. ComfyUI lõi có node TRELLIS.2
+  (ảnh → 3D có texture PBR) nhưng **model chưa tải** (~16 GB): hỏi chủ lab trước khi tải (`docs/BACKLOG.md`).
 - Mọi job GPU local (Blender, ComfyUI) đi qua khoá GPU chung của lab `tools/gpu_run.py` (`out/_gpu/gpu.lock` của bản
   checkout chính, một khoá cho mọi worktree): `blender.py` và `comfy.py run` tự lấy khoá; lệnh GPU khác chạy qua
   `python tools/gpu_run.py --label <việc> -- <lệnh>`.

@@ -1,0 +1,49 @@
+{
+  "id": "qwen-edit",
+  "title": "Qwen-Image-Edit 2511 image edit: image 1 redrawn by the prompt, up to 2 reference images (key frames, stills)",
+  "source": "https://github.com/Comfy-Org/workflow_templates (MIT, Copyright (c) 2023-present Comfy Org; THIRD_PARTY.md): template image_qwen_image_edit_2511.json, API format; node classes, input names and wiring (ModelSamplingAuraFlow -> CFGNorm, ImageScaleToTotalPixels, TextEncodeQwenImageEditPlus, FluxKontextMultiReferenceLatentMethod index_timestep_zero) from the template as tried in the lab owner's trial script (issue #68); the ref_mode vl variant (ReferenceLatent), the Lightning LoRA switch, denoise and the output ImageScale are ours",
+  "verified": false,
+  "kind": "image",
+  "edit": true,
+  "model_set": "qwen-image-edit-2511",
+  "ledger_model": "comfy:qwen-edit",
+  "size_multiple": 1,
+  "size": {"min": 64, "max": 4096},
+  "defaults": {"steps": 40, "cfg": 4.0, "negative": "", "denoise": 1.0, "megapixels": 1.0, "ref_mode": "full"},
+  "lightning": {
+    "4": {"lora": "Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors", "steps": 4, "cfg": 1.0},
+    "8": {"lora": "Qwen-Image-Edit-2511-Lightning-8steps-V1.0-bf16.safetensors", "steps": 8, "cfg": 1.0}
+  },
+  "estimate": {"seconds_per_step": 3.0, "setup_seconds": 8.0, "seconds_per_ref": 8.0,
+               "note": "owner's RTX 5070 Ti 16 GB, 1 MP, models loaded: Lightning 4 17-22 s, Lightning 8 27-34 s, 40 steps cfg 4 240-250 s; each reference +5-15 s"},
+  "progress_node": "41",
+  "negative": true,
+  "prompt_format": "plain",
+  "images": {"image": {"flag": "--image", "prepare": "upload", "required": true}},
+  "refs": {"nodes": ["30", "31"], "prefix": "image", "first": 2, "min": 0, "max": 2, "ids_from": 11},
+  "params": {
+    "prompt": [["30", "prompt"]],
+    "negative": [["31", "prompt"]],
+    "image": [["10", "image"]],
+    "megapixels": [["20", "megapixels"]],
+    "seed": [["41", "seed"]],
+    "steps": [["41", "steps"]],
+    "cfg": [["41", "cfg"]],
+    "denoise": [["41", "denoise"]],
+    "lora": [["6", "lora_name"]],
+    "out_width": [["43", "width"]],
+    "out_height": [["43", "height"]],
+    "crop": [["43", "crop"]],
+    "prefix": [["44", "filename_prefix"]]
+  },
+  "optional": {
+    "turbo": {"remove": ["6"], "rewire": [["41", "model", "5", 0]]},
+    "ref_latent": {"remove": ["34", "35"], "rewire": [["32", "conditioning", "30", 0], ["33", "conditioning", "31", 0]]},
+    "encoder_vae": {"drop": [["30", "vae"], ["31", "vae"]]}
+  },
+  "ref_modes": {
+    "full": {"drop": ["ref_latent"], "note": "every image is also a reference latent (the template's wiring)"},
+    "vl": {"drop": ["encoder_vae"], "note": "references only seen by the Qwen2.5-VL encoder; image 1 is the only reference latent"}
+  },
+  "output": {"node": "44", "type": "image", "ext": ".png"}
+}

@@ -45,6 +45,24 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   PATH (mp4 do encoder của Blender làm; nhánh ffmpeg và nhánh EEVEE→Cycles mới thử bằng fake); look phẳng trong Cycles
   không đổ bóng.
 - `check_episode.py`: kiểm nội dung `ASSETS.md` (mỗi `A-<asset>` trong `shots.csv` có một dòng nguồn + giấy phép).
+- Grade thuỷ mặc (`tools/compose/grade.py`, issue #70): tham số `grade:` của `chan-thuc-blender` là điểm khởi đầu, chưa
+  duyệt trên render Cycles thật; chưa thử pass depth/mask thật của Blender (chỉ pass giả cùng định dạng). Còn nợ: dựng lại
+  mask khi khung đã sửa bằng model ảnh (hình lệch khỏi mask Blender: ROI + tương phản + hình thái học, bản tham khảo cần
+  scipy); chạy song song nhiều khung (~0,6 s/khung 1080p, một lõi); mp4 đầu ra không cùng byte giữa hai lần (x264), chỉ
+  chuỗi PNG được bảo đảm.
+- Chuỗi concept/shot lai (#74, #76) mới thử bằng bản giả (không GPU): chạy thật `tools/concept.py` và
+  `tools/comfy/hybrid.py` trên một sinh vật và một shot mẫu (workflow `qwen-edit` có từ đợt này, graph chưa kiểm với server thật); đo giây mỗi
+  bước, xem cờ `--lightning/--denoise` khớp workflow thật.
+- `hybrid.py`: chỉ `h3-i2v` first/last; biến thể `h3-r2v` + `--guide` (nhiều khung khoá trong một clip) chưa nối. Hai đoạn
+  liền nhau lặp khung khoá ở chỗ nối (ghép không mã hoá lại): chưa tự cắt.
+- `hybrid.py approve` gắn duyệt với tên file edit (và sha256 lúc duyệt), chưa với đúng byte người dùng đã xem: file bị
+  thay tay cùng tên giữa lúc xem và lúc duyệt thì không phát hiện (cần ghi sha256 vào bảng ghép `check_v<NN>` rồi so).
+  Kiểm độ dài bản ghép cần `ffprobe` trên PATH (máy chủ lab chưa có `ffmpeg`): thiếu thì bỏ qua.
+- `comfy.py models --suggest-clean`: bản trùng của file chỉ workflow dùng mà lock không ghi thư mục thì vẫn giữ theo thứ
+  tự đường dẫn (chưa biết thư mục loader của node).
+- `blender.py mesh-prep`: `prep.json` thiếu `files.blend` giờ ghi `null` vào báo cáo; chưa có test riêng (bản Blender giả
+  luôn ghi đủ).
+- Review site: tag chọn/loại cho build `concept` (#74) chưa làm; `concept.py approve` chưa đẩy kết quả duyệt lên review.
 
 ## Lỗi reviewer xác nhận nhưng chưa sửa
 
@@ -304,6 +322,33 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - **#63** Venv TTS trên D: và wrapper `.tts.sh` là của máy chủ lab, ngoài repo; `tools/doctor.sh` chạy trong WSL mới thấy
   venv (từ Git Bash: qua `wsl.exe`).
 
+## Nghiên cứu hình tượng và asset CC0 (#73, #77): việc còn nợ
+
+- `tools/refs_fetch.py` và `tools/assets.py` chỉ được thử với máy chủ giả (test); dạng JSON của Commons API
+  (`imageinfo` + `extmetadata`, `formatversion=2`), Poly Haven API (`/assets`, `/info/<id>`, `/files/<id>`) và ambientCG
+  (`api/v2/full_json`, `downloadFolders`) viết theo tài liệu, chưa chạy với mạng thật. Lần dùng thật đầu tiên: chạy
+  `search` và `plan` (không tải) trước, so kết quả với trang web; lệch thì sửa hàm `ph_plan` / `acg_plan` / `file_info`.
+- ambientCG không công bố md5: chỉ kiểm kích thước. Model ambientCG (zip) được giải nén phẳng vào `models/<id>/` (không
+  giữ thư mục con trong zip); `.blend` trong zip bị bỏ qua.
+- `refs_fetch.py` chỉ tải từ Wikimedia Commons. Bảo tàng mở khác (Smithsonian, Cleveland, Met – API trả 410 trong
+  vòng SHK, Rijksmuseum) chưa có: agent ghi link + giấy phép, đạo diễn tải tay.
+- `status.py`/`check_episode.py` chưa kiểm `DESIGN-OPTIONS.md` (có 2–3 hướng, mỗi hướng có Prompt/Edit) hay số ảnh trong
+  `_credits.jsonl` (15–40); cổng 3a vẫn do người dùng chọn concept.
+
+## Phôi 3D từ concept – Hunyuan3D 2.1 (#69): việc còn nợ
+
+- **TRELLIS.2** (ảnh → 3D có texture PBR): node đã có trong ComfyUI lõi, model chưa tải (~16 GB). **Hỏi chủ lab trước khi
+  tải** (ổ C: ít chỗ; tải về D:), rồi thử như `hunyuan3d` (workflow `trellis2`, so IoU và độ kín với Hunyuan3D trên cùng
+  concept).
+- `comfy.py run hunyuan3d` và `blender.py mesh-prep` mới chạy với ComfyUI/Blender giả; graph `hunyuan3d` chưa xác nhận
+  với `/object_info` thật (`"verified": false`), `meshprep.py` (voxel remesh, tách mảnh, QuadriFlow, xuất GLB) chưa chạy
+  với Blender 5.3 thật: chạy một lần trên máy chủ lab với phôi Q1·T3, đo giây và ghi vào `tools/blender/README.md`.
+- QuadriFlow trên lưới voxel ~300–600k mặt: chưa đo thời gian và bộ nhớ; nếu quá chậm thì decimate trước khi QuadriFlow.
+- Chưa có: khớp màu chiếu từ concept (`uvfit.py` của bản thử: tối ưu độ trùng bóng, ảnh "bleed") và ảnh "thật nhanh" (màu
+  chiếu + bump vảy) – chỉ để duyệt; điều kiện nhiều góc (`Hunyuan3Dv2ConditioningMultiView`, ảnh trước/sau từ Qwen-Edit);
+  chọn seed tự động theo IoU; vòng cạnh rig (retopo tay).
+- Bộ `hunyuan3d-2.1` của `tools/comfy/comfy.lock.json`: sha256 chưa ghim (`null`).
+
 ## Phương pháp `code` – bộ 11 style vẽ bằng code (#38–#43): việc còn nợ
 
 - Cần người xem: duyệt linh vật "Giọt" (turntable) và lookbook 11 style; chọn style nào lên `status: stable` (mỗi pack
@@ -324,3 +369,46 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
 - `sach-pop-up` (popup-paper) so với tham chiếu Papertrails còn thiếu: nhà, hàng rào, cầu, sông in trên trang có nước
   chạy, động vật giấy, lá rơi, bokeh thật theo độ sâu, AO, cửa sổ sáng ban đêm, con đường uốn theo lối đi (hiện thẳng
   theo trục x). ~250 ms/khung ở 960×540, ~500 ms ở 1080p (đêm chậm hơn vì bóng đèn lồng).
+
+## Style frame và DoP (#71, #72): việc còn nợ
+
+- **#71** Không phải cổng mới: duyệt khung chuẩn là một dòng `[MISSING]` của `status.py --gate G2` (tập `blender`/`code`);
+  `check_episode.py` chỉ WARN (tập đã qua G2 trước bước này: INFO), không ERROR. Chưa có tập thật đi qua khâu 3b.
+- **#71** Ảnh gốc của style frame (`out/<project>/<id>/styleframes/`) không nằm trong `drive_sync.py plan` (không phải
+  `renders/`/`vo/`/`audio/`, không có gói shot): chỉ contact sheet, bảng màu và bản sao khung chuẩn trong
+  `<tập>/review/styleframes/` lên Drive cùng chữ của tập.
+- **#71** Ngưỡng `styleframes.py compare` (`LIMITS`: luma 8, contrast 8, saturation 10, palette 12 trên thang 0–100) là ước
+  lượng, chưa đo trên khung thật của chủ dự án; `--tol` chỉnh tạm.
+- **#72** Luật "mỗi sinh vật chính ≥ 1 cận chi tiết + ≥ 1 `extreme-wide`" chỉ kiểm được ở tập `blender`/`code` (mã lớp
+  `A-`/`C-`/`M-<slug>` nêu tên sinh vật); tập `layers`/`seedance` (`L4`, `P<n>`) không biết lớp nào là sinh vật nào. Model
+  có id khác slug (không phải `<slug>` hay `<slug>-<hậu tố>`) bị báo "in no shot".
+- **#72** Luật hai shot liền nhau trùng cả cỡ cảnh và chuyển động đã là ERROR từ trước (issue đề xuất WARN): giữ ERROR.
+  Nội dung `CAMERA-BIBLE.md` chưa được kiểm tự động (`status.py --gate G1` chỉ cần file có chữ, tập chưa ghi ngày G1;
+  `review/dop-pass.md` không kiểm); khâu 2b không có số `stage` riêng (ghi `stage: 2`), 3a/3b ghi `stage: 3`.
+
+## Review đợt #68–#77: việc chưa làm
+
+- `tools/blender/spec.py` `resolve_hdri`: id có nhiều độ phân giải (`<id>_1k.hdr`, `<id>_4k.exr`) lấy file đầu theo thứ tự
+  tên, không theo `--res`/ý muốn; nên ưu tiên độ phân giải ghi trong `ASSETS_MANIFEST.csv` (đội Blender sửa).
+- Công thức grade cho clip H3 (`blender-method.md` §7, shot lai): pass depth/mask của render Blender không khớp chuyển động
+  do H3 tạo ra (con vật lệch khỏi mask); cần mask theo clip (`tools/layers/matte_seq.py`) hoặc chỉ grade lớp cảnh. Chưa thử.
+- `assets.py`: zip không có giới hạn tỉ lệ nén (zip bomb) ngoài kiểm chỗ trống theo cỡ khai trong zip; model zip giữ thư
+  mục con nhưng `spec.py` chỉ tìm model qua đường dẫn ghi tay trong shot3d.
+- `refs_fetch.py`: trần bản gốc 30 MB khi Commons không có ảnh thu nhỏ là ước lượng; `iiurlheight` cùng `iiurlwidth` chưa
+  thử với API thật (server giả bỏ qua tham số).
+- `grade.py`: khớp pass theo thứ tự với video vào chỉ quyết theo khung đầu (tên `000001.png`); pass thiếu khung giữa khi
+  khớp theo thứ tự vẫn lệch (không biết tên).
+
+## Qwen-Image-Edit local (#68) và quản lý model (#75): việc còn nợ
+
+- **#68** Graph `qwen-edit` chưa chạy với `/object_info` của server thật (`"verified": false`): lần chạy đầu trên máy chủ
+  lab (`run qwen-edit … --lightning 4 --dry-run` rồi chạy thật một ảnh) xác nhận tên input (`resolution_steps` của
+  `ImageScaleToTotalPixels`, `crop` của `ImageScale`) rồi đặt `verified: true`. Mô-đun `python_module` của node H3 trên
+  server chưa biết: lớp nào không ở `nodes`/`comfy_extras.*` thì `run` chỉ cảnh báo (ghi tên mô-đun vào đây).
+- **#68** Mỗi lần `run` một ảnh (script tạm của dự án chạy lô ≤ 4 ảnh trong một lần giữ GPU): lô dùng `--keep-models` cho
+  các ảnh trước, ảnh cuối bỏ cờ. Chưa có `--megapixels` (cỡ làm việc cố định 1 MP trong meta). Chưa thử denoise 0.85–0.9.
+- **#75** sha256 của bộ `qwen-image-edit-2511` và `hunyuan3d-2.1` chưa ghim (`null`; không băm file nhiều GB trên ổ C:):
+  ghi LFS oid từ trang Hugging Face hoặc từ lần `--fetch` kế tiếp vào `comfy.lock.json`. Repo/đường dẫn `hf` của hai bộ
+  ghi theo tài liệu ComfyUI, chưa kiểm với Hugging Face (sai thì `--fetch --yes` dừng trước khi tải). `minimax-h3` và
+  `qwen-image` chưa có nguồn `hf`. `--fetch` chưa kiểm thử với Hugging Face thật (chỉ server giả).
+- **#75** `--inventory` không biết `extra_model_paths` có thư mục tuyệt đối riêng cho từng loại (chỉ đọc `base_path`).

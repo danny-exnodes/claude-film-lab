@@ -3,12 +3,16 @@
 Tạo clip có tiếng bằng model **MiniMax H3** chạy trong **ComfyUI trên máy của chủ dự án** (Windows, RTX 5070 Ti 16 GB),
 **miễn phí**, ghi vào ledger của tập như một request Seedance nhưng **chi phí 0** (không trừ trần nào của
 `budget.yaml`). Chỉ dùng được trong **phiên Claude Code local** trên máy đó; phiên cloud không có GPU, không có ComfyUI.
-Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo ảnh concept").
+Cũng tạo **ảnh concept** bằng Qwen-Image 2512 (`qwen-t2i`, mục "Tạo ảnh concept"), **sửa ảnh** bằng
+Qwen-Image-Edit 2511 (`qwen-edit`, mục "Sửa ảnh") và **phôi 3D** của sinh vật bằng Hunyuan3D 2.1 (`hunyuan3d`, mục
+"Tạo phôi 3D"); kiểm kê và tải model có hỏi trước (mục "Quản lý model").
 
 | File | Việc |
 |---|---|
 | `comfy.py` | CLI (chỉ thư viện chuẩn; Pillow để cắt khung hình): `ping`, `start`, `install`, `models`, `workflows`, `run`, `interrupt` |
-| `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model H3 và Qwen-Image (sha256 chưa ghim: `null`) |
+| `hybrid.py` | chuỗi shot lai: khung khoá Blender → Qwen-Image-Edit → kiểm bằng mắt → H3 nối khung → ghép (mục "Chuỗi shot lai"); concept: `tools/concept.py` |
+| `mesh3d.py` | `run` của workflow ảnh → 3D (`hunyuan3d`): kiểm nền, vuông hoá ảnh vào, tải GLB (Pillow + numpy) |
+| `comfy.lock.json` | ComfyUI portable ghim phiên bản (tuỳ chọn) + tên, thư mục, kích thước các file model theo bộ (`minimax-h3`, `qwen-image`, `qwen-image-edit-2511`, `hunyuan3d-2.1`; sha256 chưa ghim: `null`), nguồn Hugging Face (`hf`) và giấy phép của bộ (`sets`) |
 | `workflows/<id>.json` | graph ComfyUI dạng **API** (không subgraph, không node bị bypass), giá trị mặc định do lab đặt |
 | `workflows/<id>.meta.json` | bản đồ tham số (node → input), luật khung hình/kích thước, phần tuỳ chọn, ref và guide |
 
@@ -48,6 +52,8 @@ model chung của Desktop. `--offline` chặn các
 | `h3-i2v` | `comfy:h3-i2v` | `--image` khung đầu, tuỳ chọn `--last` khung cuối (first-last frame); không `--image` = text-to-video | `minimax_h3_fl2va_pruned_int8_convrot` |
 | `h3-r2v` | `comfy:h3-r2v` | `--ref` 1–9 ảnh tham chiếu (`<Picture 1..n>` trong prompt), tuỳ chọn `--guide GIÂY=ẢNH` neo hình theo thời gian | `minimax_h3_ref2va_pruned_int8_convrot` |
 | `qwen-t2i` | `comfy:qwen-image` (kind `image`) | chỉ chữ: `--prompt`/`--prompt-file` (file chữ UTF-8), `--negative`, `--size WxH` | `qwen_image_2512_fp8_e4m3fn` (mục "Tạo ảnh concept") |
+| `qwen-edit` | `comfy:qwen-edit` (kind `image`) | `--image` ảnh cần sửa, tuỳ chọn `--ref` (tối đa 2), `--prompt`, `--lightning 4` hoặc `8`, `--denoise`, `--size WxH` | `qwen_image_edit_2511_fp8mixed` (mục "Sửa ảnh") |
+| `hunyuan3d` | `comfy:hunyuan3d` (kind `image`) | `--image` concept nền trắng, `--octree 256\|512`, `--steps`, `--cfg`, `--seed`, `--allow-bg` | `hunyuan_3d_v2.1` (mục "Tạo phôi 3D") |
 
 Cả hai dùng chung text encoder `qwen3vl_32b_minimax_h3_nvfp4_awq` (`CLIPLoader` type `minimax`), VAE hình
 `minimax_h3_video_vae_int8_convrot`, VAE tiếng `minimax_h3_audio_vae_fp32`; đầu ra mp4 H.264 có tiếng
@@ -92,6 +98,7 @@ python tools/comfy/comfy.py run h3-i2v --image START.png --last END.png --prompt
 python tools/comfy/comfy.py run h3-r2v --ref hero.png --ref place.png --guide 0=key1.png --guide 4.5=key2.png \
     --prompt-file s07.yaml --seconds 6 --out out/<project>/ep01/clips/ep01_s07_clip_v01.mp4 --ledger out/<project>/ep01/ledger.csv
 python tools/comfy/comfy.py interrupt --ledger out/<project>/ep01/ledger.csv      # dừng job của mình đang chạy
+python tools/comfy/comfy.py free        # POST /free: ComfyUI trả VRAM (sau lô --keep-models dừng giữa chừng); không chạy gì
 ```
 
 - `--dry-run`: kiểm hết, in tóm tắt graph (số node, kích thước, khung, seed, cách cắt ảnh, model, prompt đã ghép, ước
@@ -147,7 +154,108 @@ python tools/comfy/comfy.py run qwen-t2i --prompt-file concept.txt --turbo --see
 - Graph chưa được xác nhận với `/object_info` của server thật (`"verified": false`); bản thử tạm của chủ lab chạy được
   với cùng các node lõi.
 
-### Mã thoát và ledger
+## Sửa ảnh (`qwen-edit`)
+
+Qwen-Image-Edit 2511 (fp8mixed) chạy local, miễn phí: vẽ lại **một ảnh** theo prompt (bề mặt, chất liệu, mặt, xoá bộ
+phận) mà giữ dáng và bố cục. Dùng cho **ảnh tĩnh và khung khoá** (khung đầu/cuối của clip H3), không cho mọi khung
+(`.claude/skills/film-compose-shot/references/local-video.md` §8). Model là bộ `qwen-image-edit-2511` của
+`comfy.lock.json` (đã có trên máy chủ lab); bộ mã hoá chữ và VAE dùng chung với `qwen-image`.
+
+```bash
+python tools/comfy/comfy.py run qwen-edit --image <render>.png --prompt "..." --lightning 4 --seed 1717 \
+    --out out/<project>/<id>/edit/<id>_s21_last_edit_v01.png --ledger out/<project>/<id>/ledger.csv --dry-run
+python tools/comfy/comfy.py run qwen-edit --image <render>.png --ref <concept>.png --ref-mode vl --prompt-file p.txt \
+    --denoise 0.8 --lightning 8 --out out/<project>/<id>/edit/<id>_s21_first_edit_v01.png --ledger out/<project>/<id>/ledger.csv
+```
+
+- `--image` = ảnh 1 (ảnh được sửa); `--ref` = ảnh 2, 3 ("Picture 2/3" trong prompt), tối đa 2 (model đọc tối đa 3 ảnh).
+  Ảnh tải lên nguyên trạng; graph thu ảnh 1 về ~1 MP (giữ tỉ lệ, bội 16), làm việc ở đó rồi phóng **Lanczos** về cỡ
+  ảnh vào. `--size WxH` đổi cỡ ra (64–4096; khác tỉ lệ thì cắt giữa, có cảnh báo).
+- Mặc định **40 bước, cfg 4** (thật nhất, ~4 phút). `--lightning 4` / `--lightning 8`: LoRA lightx2v, 4 / 8 bước, cfg 1
+  (~20 s / ~30 s); 4 bước thường đủ, 8 không hơn rõ. `--steps`, `--cfg` đè mặc định.
+- `--denoise` (mặc định 1.0): 1.0 vẽ lại hẳn (sửa được khối, nhưng trôi giữa các khung); 0.6–0.85 giữ dáng của ảnh 1,
+  ở cận cảnh gần như chỉ đổi màu.
+- `--negative` chỉ khi cfg > 1: ở cfg 1 (mọi `--lightning`) sampler không dùng prompt âm, `comfy.py` **từ chối** (mã 2)
+  và nói lý do. Điều cần tránh viết vào prompt ("keep everything else exactly").
+- `--ref-mode full` (mặc định, cách nối của mẫu Comfy): mọi ảnh cũng thành latent tham chiếu; `--ref-mode vl`: ảnh tham
+  chiếu chỉ vào bộ mã hoá Qwen2.5-VL, latent tham chiếu duy nhất là ảnh 1 (giữ bố cục ảnh 1, mượn màu).
+- Graph (node lõi): `UNETLoader` → `ModelSamplingAuraFlow` (3.1) → `CFGNorm` → [`LoraLoaderModelOnly`] → `KSampler`
+  (euler/simple); `LoadImage` → `ImageScaleToTotalPixels` → `TextEncodeQwenImageEditPlus` (+/−) và `VAEEncode`;
+  `FluxKontextMultiReferenceLatentMethod` (`index_timestep_zero`); `VAEDecode` → `ImageScale` → `SaveImage`.
+- Đầu ra, ledger, khoá GPU, `/free`, `--keep-models`, websocket, `--review` như `qwen-t2i`: `<out>.png` + sidecar
+  `<out>.png.json` (thêm ảnh vào và sha256, cỡ làm việc, denoise, lightning, ref_mode); ledger `kind image`,
+  `model comfy:qwen-edit`, chi phí 0. Chưa xác nhận với `/object_info` của server thật (`"verified": false`); script
+  thử của chủ lab chạy được với cùng các node.
+- Ngoài allow list, `run` còn đọc `python_module` của từng node trên server (`/object_info`): node từ `comfy_api_nodes`
+  (API trả tiền) hay `custom_nodes` bị từ chối trước khi gửi gì; module lạ khác chỉ cảnh báo. Áp dụng cho mọi workflow.
+
+## Quản lý model (`models --inventory`, `--suggest-clean`, `--fetch`)
+
+```bash
+python tools/comfy/comfy.py models --inventory                  # mọi file model, họ, workflow nào dùng, ổ trống
+python tools/comfy/comfy.py models --suggest-clean              # ứng viên xoá (không bao giờ xoá)
+python tools/comfy/comfy.py models --fetch qwen-image-edit-2511 # chỉ in kế hoạch: file, dung lượng, tổng, ổ trống
+python tools/comfy/comfy.py models --fetch qwen-image-edit-2511 --yes   # sau khi chủ lab đồng ý
+```
+
+- `--inventory` (chỉ đọc): quét thư mục model của ComfyUI (`FILM_COMFY_MODELS` / thư mục chung của Desktop, `base_path`
+  của yaml extra_model_paths, `<ComfyUI>/models`), mỗi file một dòng: họ (H3, Qwen-Image, Qwen-Edit, Hunyuan3D, LTX,
+  Wan, SeedVR2, Z-Image, other), GB, workflow của lab dùng nó (graph `workflows/*.json` + `workflows` trong lock), bộ
+  của lock; cuối là tổng theo họ và dung lượng trống của từng ổ.
+- `--suggest-clean` (chỉ đọc): file không workflow nào của lab và không bộ nào của lock dùng, bản trùng (cùng tên, cùng
+  cỡ), phần tải dở `.part` / hỏng `.bad` (tên `…_.part`: dấu `\r` từ pipe shell, xem RUNBOOK). File lab dùng không bao
+  giờ có trong danh sách (trừ bản trùng). Xoá bằng tay sau khi chủ lab đồng ý.
+- `--fetch SET`: **luôn hỏi trước**. Không `--yes` thì chỉ in kế hoạch (không liên lạc mạng): file, có rồi / tải / tải
+  tiếp `.part`, GB, tổng, ổ đích còn bao nhiêu. Có `--yes` (chỉ phiên chính; có `FILM_AGENT` thì bị từ chối): đọc danh
+  sách repo Hugging Face cho **mọi** file trước (sai đường dẫn, sai cỡ so với lock, sha256 ghim khác LFS oid → dừng, chưa
+  tải gì), rồi tải từng file vào `<file>.part` (tải tiếp bằng `Range`), kiểm cỡ + sha256 (ghim trong lock, không thì
+  LFS oid của HF), **chỉ đổi tên khi khớp**, không bao giờ ghi đè (file đã có mà sai cỡ → từ chối, dời đi bằng tay);
+  sai hash → `<file>.bad`. Thiếu chỗ (giữ lại 2 GB) → từ chối. Tên file chỉ xử lý trong Python; lock có tên chứa ký tự
+  điều khiển (`\r`…), khoảng trắng đầu/cuối, `..` hay dấu `/` trong tên file → từ chối. Tên bộ gõ ở dòng lệnh được cắt
+  khoảng trắng/xuống dòng (có cảnh báo).
+- Bộ có nguồn HF: `qwen-image-edit-2511` (Comfy-Org/Qwen-Image-Edit_ComfyUI + lightx2v/Qwen-Image-Edit-2511-Lightning;
+  cần bộ `qwen-image`), `hunyuan3d-2.1` (Comfy-Org/hunyuan3D_2.1_repackaged; giấy phép Tencent Hunyuan Community, không
+  áp dụng EU/UK/Hàn Quốc). Repo/đường dẫn theo tài liệu ComfyUI, chưa kiểm với HF: sai thì `--fetch --yes` dừng ở bước
+  đọc danh sách. `minimax-h3`, `qwen-image` chưa có nguồn trong lock (`--fetch` từ chối).
+
+## Tạo phôi 3D (`hunyuan3d`)
+
+Hunyuan3D 2.1 chạy local, miễn phí: **một ảnh concept → một mesh GLB không màu**, phôi để điêu khắc/retopo trong Blender
+(`tools/blender/blender.py mesh-prep`; quy trình đủ: `.claude/skills/film-compose-shot/references/blender-method.md` §8).
+Model `checkpoints/hunyuan_3d_v2.1.safetensors` (bản đóng gói Comfy-Org, 7,4 GB) đã có trên máy chủ lab.
+
+```bash
+python tools/comfy/comfy.py run hunyuan3d --image <concept_trang>.png --seed 7 --dry-run \
+    --out out/<project>/characters/<c>/<c>_raw_v01.glb --ledger out/<project>/<id>/ledger.csv
+python tools/comfy/comfy.py run hunyuan3d --image <concept_trang>.png --seed 7 --octree 512 --steps 50 \
+    --out out/<project>/characters/<c>/<c>_raw_v02.glb --ledger out/<project>/<id>/ledger.csv
+```
+
+- Graph (node lõi, dựng lại từ template `3d_hunyuan3d-v2.1` của ComfyUI): `LoadImage` → `CLIPVisionEncode` (cắt giữa) →
+  `Hunyuan3Dv2Conditioning`; `ImageOnlyCheckpointLoader` → `ModelSamplingAuraFlow` (shift 1.0) → `KSampler` (euler/normal,
+  30 bước, cfg 5, denoise 1) trên `EmptyLatentHunyuan3Dv2` (4096) → `VAEDecodeHunyuan3D` → `VoxelToMesh` (surface net,
+  ngưỡng 0,6) → `SaveGLB`.
+- **Ảnh vào**: toàn thân trên nền trắng trơn (làm bằng Qwen-Image-Edit). `run` kiểm một viền 2 % quanh ảnh: dưới 98 %
+  điểm ảnh trắng (nền màu, thân chạm mép) → từ chối (2); `--allow-bg` vẫn gửi (cảnh báo). Ảnh PNG trong suốt tính
+  là nền trắng. Trước khi tải lên: cắt theo khung bao của vật (bỏ đốm lẻ ở mép), đệm thành ảnh vuông trắng 1024×1024, vật
+  chiếm 85 % cạnh (`CLIPVisionEncode` cắt giữa: ảnh rộng sẽ mất đầu/đuôi), vào file tạm; file gốc không bị đụng.
+- `--octree 256` (mặc định, `num_chunks` 8000, ~40 s với 30 bước) · `512` (`num_chunks` 32000, chi tiết hơn; dùng
+  `--steps 50`, ~3 phút). Nên chạy 2–4 seed ở 256 để chọn rồi chạy 512 cho seed được chọn.
+- Từ chối (2): cờ của workflow khác (`--prompt`, `--negative`, `--size`, `--turbo`, `--last`, `--ref`, `--guide`,
+  `--seconds`, `--res`, `--keep-frames`), thiếu `--image`, `--out` không phải `.glb` hoặc đã có, octree khác 256/512,
+  server thiếu node hay checkpoint; ngược lại `--octree`/`--allow-bg` với workflow khác cũng bị từ chối.
+- Đầu ra: `<out>.glb` (tải về nguyên tử, không bao giờ thay file có sẵn) + sidecar `<out>.glb.json` (seed, bước, cfg,
+  octree, ảnh vào: sha256, khung bao, kết quả kiểm nền; số đỉnh/tam giác của mesh, graph, giây GPU, giấy phép, lệnh
+  `mesh-prep` gợi ý). Ledger: `kind image`, `model comfy:hunyuan3d`, `size 1024x1024`, `count 1`, ghi chú
+  `req=<hex>; seed=<n>; steps=<n>; octree=<n>`, chi phí 0. `--review BUILD`: build kiểu `model`, mesh xong là một `step`
+  có GLB (engine `comfy-hunyuan3d`).
+- Mesh ra **không kín**, không vòng cạnh, phần mảnh (vây, tóc, gạc) vỡ: luôn qua `blender.py mesh-prep`. Giấy phép
+  trọng số: **Tencent Hunyuan 3D 2.1 Community License – không áp dụng ở EU, Anh, Hàn Quốc** (`THIRD_PARTY.md`,
+  `docs/MODELS.md`).
+- Graph chưa xác nhận với `/object_info` của server thật (`"verified": false`); script thử của chủ lab chạy được với cùng
+  node, cùng giá trị.
+
+## Mã thoát và ledger
 
 - **0** xong · **2** bị từ chối tại chỗ, chưa tải gì lên, chưa xếp hàng, không có dòng ledger (sửa lệnh) · **1** job đã
   vào hàng đợi rồi lỗi / bị dừng / quá giờ (xem dòng ledger), hoặc server không trả lời (`ping`, `interrupt`).
@@ -163,17 +271,62 @@ python tools/comfy/comfy.py run qwen-t2i --prompt-file concept.txt --turbo --see
 - Job mồ côi (tiến trình `run` chết giữa chừng): `comfy.py interrupt --prompt-id <task_id>` để dừng trên server, rồi
   `python3 tools/ark.py ledger-close --req <id> --status abandoned --ledger L` để đóng dòng.
 
+## Chuỗi concept (`tools/concept.py`)
+
+Khâu 3a (film-pipeline §2.2), phiên local: mỗi ảnh là một lần `comfy.py run qwen-t2i` (gen) hoặc `comfy.py run qwen-edit`
+(edit), có `--keep-models` trừ lần cuối của lô (VRAM trả lại cuối lô). Một lần gọi lỗi là dừng, không thử lại.
+
+```bash
+python tools/concept.py gen DESIGN-OPTIONS.md --slug phuong-hoang --out-dir out/<project>/characters/phuong-hoang/concept     --ledger out/<project>/<id>/ledger.csv --n 2 --dry-run          # 3 hướng × 2 seed = 6 ảnh
+python tools/concept.py edit out/<project>/characters/phuong-hoang/concept/phuong-hoang_a_s1001_v01.png     --instruction "remove the second horn, keep everything else exactly" --ledger out/<project>/<id>/ledger.csv
+python tools/concept.py sheet out/<project>/characters/phuong-hoang/concept       # bảng ghép có nhãn, trước/sau
+python3 tools/concept.py approve phuong-hoang out/<project>/characters/phuong-hoang/concept/phuong-hoang_a_s1001_v01_e01.png     --episode projects/<project>/<thư mục tập> --quote "<lời người dùng>"
+```
+
+- Tên: `<slug>_<hướng>_s<seed>_v<NN>.png` (vòng mới: `--version 2`), edit `..._e<NN>.png` (ghi trong
+  `concept_edits.json` cạnh ảnh: cùng ảnh, lệnh, seed, thiết lập thì bỏ qua; `--redo` làm bản mới), bảng
+  `<slug>_sheet_v<NN>.png`. Ảnh đã có thì bỏ qua (chạy lại là tiếp), không ghi đè gì.
+- File hướng (DESIGN-OPTIONS.md): mỗi hướng một tiêu đề `### <id>` (`### a`, `### a – Phượng thời Lý`, `### Hướng b: …`),
+  trong mục có dòng `Prompt EN: <prompt>` (hoặc nhãn một mình rồi một khối ``` ```), tuỳ chọn `Negative EN:` và
+  `Edit EN:` (lệnh sửa cho `edit --options`). Đọc được cả bảng `| Hướng | Dựa trên | Prompt |` của `ICONOGRAPHY.md` §5 và
+  file JSON (`{"slug", "seeds", "directions": [{"id", "prompt", "negative", "edit"}]}`). Định dạng đầy đủ:
+  `python tools/concept.py --help`.
+- `edit` mặc định Lightning 4, denoise 1.0, seed của ảnh gốc (`--seed` lặp lại để thử 2–3 seed). Không dùng concept
+  khác làm `--ref` (model chép nguyên ảnh tham chiếu).
+- `approve` ghi mục `## Concept đã duyệt` của `characters/<slug>/CHARACTER.md` (của tập nếu tập có, không thì của dự án;
+  tạo mới khi chưa có) và ô Concept `duyệt <ngày> <file>` của dòng `<slug>` trong bảng `## Sinh vật của tập`
+  (thiếu dòng thì thêm: Chính có, Ảnh sách chờ); không đụng dòng khác; cùng file lần hai không đổi gì; đọc lại bằng
+  `check_episode.py` như `status.py --gate G2`.
+- `--review <build>` chuyển cho `comfy.py` (build kiểu `concept` khi tên build có chữ concept). `--dry-run` in kế hoạch.
+- Bài học SHK Q1·T3: Qwen-Image chỉ chữ hay bỏ sót chi tiết lạ (mặt người trên thú, ba chân, một sừng); cụm từ như
+  "water buffalo" kéo theo hai sừng → bỏ cụm gây nhiễu khỏi prompt rồi sửa bằng `edit`; chi tiết đếm được (sừng, chân,
+  mắt) dựng thẳng trong 3D, không cố sửa bằng edit.
+
+## Chuỗi shot lai (`hybrid.py`)
+
+`tools/comfy/hybrid.py <bước> <shot3d.json> --media out/<project>/<id> --ledger L`: `blender.py keyframes` (2–3 khung
+khoá) → `comfy.py run qwen-edit` mỗi khung khoá → **dừng chờ người dùng kiểm bằng mắt** (`approve k1=k1_e01.png,k2=k2_e01.png`: đúng file đã xem) →
+`comfy.py run h3-i2v` khung đầu/cuối giữa hai khung duyệt liền nhau → ffmpeg nối thành `clips/<id>_s<NN>_h3_v<NN>.mp4`.
+Bước: `run` (tất cả, dừng ở bước kiểm), `keyframes`, `edit`, `approve`, `animate`, `assemble`, `status`. Khi nào dùng,
+giới hạn và bảng kiểm: `.claude/skills/film-compose-shot/references/local-video.md` §9; `python tools/comfy/hybrid.py --help`.
+
 ## Biến môi trường
 
 `FILM_COMFY_URL` (mặc định `http://127.0.0.1:8188`) · `FILM_COMFY_HOME` · `FILM_COMFY_MODELS` · `FILM_COMFY_PYTHON`
 (python cho `start`) · `FILM_COMFY_MODEL_PATHS` (yaml extra_model_paths cho `start`; mặc định yaml instance mới nhất trong
-`%APPDATA%\Comfy Desktop\instance-model-paths\`) · `FILM_LEDGER` · `FILM_AGENT`. Không cần và không đọc khoá nào; comfy.py
-chỉ liên lạc `FILM_COMFY_URL` (trừ `install --portable`), không qua proxy.
+`%APPDATA%\Comfy Desktop\instance-model-paths\`) · `FILM_LEDGER` · `FILM_AGENT` · `FILM_HF_URL` (chỉ `models --fetch`:
+gốc Hugging Face, mặc định `https://huggingface.co`; test trỏ vào server giả). Không cần và không đọc khoá nào; comfy.py
+chỉ liên lạc `FILM_COMFY_URL` (trừ `install --portable` và `models --fetch --yes`), không qua proxy.
 
 ## Kiểm thử
 
-`tests/test_comfy.py` dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
+`tests/test_concept.py` và `tests/test_hybrid.py` thay mọi lệnh con (`comfy.py`, `blender.py`, ffmpeg) bằng bản giả và
+kiểm danh sách tham số, kế hoạch `--dry-run`, cổng duyệt, chạy tiếp/không ghi đè, bảng ghép, `approve` đọc lại bằng
+`check_episode.py`; có ffmpeg thì ghép thật hai clip nhỏ. `tests/test_comfy.py` (và `tests/test_comfy_mesh.py` cho `hunyuan3d`) dựng một server ComfyUI giả (thư viện chuẩn, trong thread, có websocket `/ws` gửi tiến độ sampler) và kiểm mọi đường từ chối, lưới
 khung/kích thước, cắt ảnh, dry-run, đường thành công (file + sidecar + ledger, không tốn trần), lỗi thực thi, quá giờ →
 `interrupted`, `models --verify`, `install --dry-run`, `start`; `tests/test_comfy_ark.py` kiểm luật chi phí 0 và khoá
-ledger khi không có `fcntl` (Windows). Không cần GPU, chạy được trong WSL. Graph thật chỉ được xác nhận khi chạy với
+ledger khi không có `fcntl` (Windows); `tests/test_comfy_edit.py` kiểm `qwen-edit` (allow list, nối graph theo
+image/ref/lightning/denoise/size, từ chối `--negative` ở cfg 1, không ghi đè, ledger, module node trên server);
+`tests/test_comfy_models.py` kiểm `--inventory`/`--suggest-clean` và `--fetch` với một server Hugging Face giả (kế hoạch
+không liên lạc gì, tải tiếp `Range`, sai hash, không ghi đè, tên có `\r`). Không cần GPU, chạy được trong WSL. Graph thật chỉ được xác nhận khi chạy với
 `/object_info` của server thật (`"verified": false` trong meta cho tới lúc đó).

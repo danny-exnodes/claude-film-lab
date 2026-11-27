@@ -12,9 +12,32 @@ render:
   look: realistic         # look của Blender (tools/blender/looks.json): Cycles, HDRI/trời vật lý, PBR, AgX
   engine: cycles          # cycles (OptiX trên RTX); eevee chỉ để thử bố cục
   line: 0                 # không nét
-  mist: 0                 # sương bằng compose (mist-bands) hoặc volume trong cảnh, không sương theo độ sâu
+  mist: 0                 # Blender không vẽ sương theo độ sâu: sương do grade (pass depth), mist-bands hoặc volume
   palette: {ink: '#1A1714', paper: '#EFE6D3', ochre: '#C89A5A'}
 palette: {ink: '#1A1714', grey: '#8C8378', paper: '#EFE6D3', ochre: '#C89A5A', accent: '#B02E22'}
+# Grade thuỷ mặc hai lớp (tools/compose/grade.py, khâu 7–10): cảnh nhạt, sương, hư ảo; chủ thể (pass mask/<asset>) đậm
+# và tươi hơn để nổi giữa bối cảnh, giữ một phần sương và một vành sương mỏng ở mép. Ảnh đầu vào: beauty sau AgX.
+# Khóa và khoảng: blender-method.md §7. Chỉnh theo tập bằng --params <tập>/grade.json (ghi đè từng khóa).
+grade:
+  seed: 7                 # vân giấy cố định: cùng đầu vào → cùng byte
+  scene:
+    saturation: {global: 0.72, red: 1.0, orange: 0.75, yellow: 0.7, green: 0.42, cyan: 0.4, blue: 0.45, purple: 0.5}
+    keep_red: {amount: 1.0, min_sat: 0.35, gain: 1.0}     # đỏ son bão hoà giữ nguyên: điểm nhấn duy nhất
+    hue_pull:                                             # kéo màu về bảng màu thuỷ mặc
+      blue: {to: '#5E7480', amount: 0.4}
+      green: {to: '#6E8467', amount: 0.35}
+      orange: {to: '#C89A5A', amount: 0.3}
+      red: {to: '#B02E22', amount: 0.3}
+    tone: {black: 0.08, white: 0.94, pivot: 0.45, contrast: 0.8, gamma: 0.92}   # đen mực nâng, trắng giấy nén, mềm
+    split: {shadow: '#1A1714', shadow_amount: 0.35, highlight: '#EFE6D3', highlight_amount: 0.4}
+    mist: {color: '#E6DFD0', amount: 0.7, start: 8, falloff: 80, sky: 0.3, max: 0.85, low: 0.4, low_from: 0.55}
+    paper: {amount: 0.06, fibres: 900, fibre_amount: 0.6, dark: 0.4, tint: 0.06, color: '#EFE6D3'}
+    vignette: {amount: 0.22, radius: 0.55, color: '#5A4630'}
+  subject:                # chỉ ghi điều khác cảnh; khóa thiếu lấy của scene
+    saturation: {global: 1.0, orange: 1.0, yellow: 0.95, green: 0.8, cyan: 0.8, blue: 0.8, purple: 0.85}
+    tone: {black: 0.03, white: 0.96, pivot: 0.42, contrast: 1.15, gamma: 1.0}   # mực đậm hơn, tương phản hơn
+    split: {shadow_amount: 0.25, highlight_amount: 0.2}
+    layer: {opacity: 1.0, mist_keep: 0.25, edge: 3, rim: 0.35, rim_width: 16}
 motion: [mist-bands, embers, sun-glow, smoke]
 sound:
   scale: D minor pentatonic

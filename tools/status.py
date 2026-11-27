@@ -18,7 +18,9 @@ renders, and `UNSAVED media`: renders, vo/ takes and audio/ stems with no line o
 .pulled.sha256, i.e. not pushed to Drive 04_SanXuat/<episode>/_ChuaDuyet/ yet – tools/drive_sync.py), CREATURES (the
 `## Sinh vật của tập` table of EPISODE.md: main creature, owner's book photo, concept; an `OWNER_REFS` line when
 SERIES.md has owner_refs.required: true; shown when the table exists, owner_refs is required or the method is blender
-or code), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
+or code), STYLE FRAMES (STYLE-FRAMES.md of a blender/code episode, stage 3b: frames listed, the reference frames
+the owner approved – one 'không khí', one per main creature – and what is still missing; shown for blender/code or
+when the file exists), GATE (checklist for the first undated gate, or the one named by --gate). LOCAL (inside BUDGET): ledger rows
 of the local engines (model comfy:* or blender:*), free: they count against no cap and are never OPEN/MISSING paid
 requests (tools/ark.py skips them the same way); FORECAST adds the local GPU minutes still to run (estimates).
 
@@ -719,6 +721,35 @@ def creatures_text(c, notes):
     return out + notes_text(notes)
 
 
+# ------------------------------------------------------------- style frames ---
+def style_frames_section(ep_dir, method, creatures, notes):
+    """STYLE-FRAMES.md (stage 3b of blender/code, check_episode.read_style_frames): frames listed, the reference
+    frames the owner approved and what the approval still lacks (atmosphere frame, one per main creature)."""
+    sf = check_episode.read_style_frames(ep_dir)
+    notes += (sf or {}).get("problems", [])
+    return {"gated": method in check_episode.STYLEFRAME_METHODS, "present": sf is not None,
+            "frames": sf["frames"] if sf else 0, "refs": sf["refs"] if sf else [],
+            "gaps": check_episode.style_frame_gaps(sf, (creatures or {}).get("rows"))}
+
+
+def style_frames_text(s, notes):
+    if not (s["gated"] or s["present"]):
+        return notes_text(notes)
+    name = check_episode.STYLEFRAMES_FILE
+    if not s["present"]:
+        out = [f"STYLE FRAMES  no {name} (stage 3b, before G2)"]
+    else:
+        lo, hi = check_episode.SF_COUNT
+        out = [f"STYLE FRAMES ({name}) {s['frames']} frame(s)" + ("" if lo <= s["frames"] <= hi
+                                                                  else f" ({lo}-{hi} expected)")]
+        for r in s["refs"]:
+            out.append(f"  reference {'không khí' if r['role'] == 'atmosphere' else r['role']}: {r['frame']} "
+                       f"({r['date']})")
+    if s["gated"] and s["gaps"]:
+        out.append("  not approved yet: " + "; ".join(s["gaps"]))
+    return out + notes_text(notes)
+
+
 # --------------------------------------------------------------------- gate ---
 def run_check(ep_dir, media):
     """Run tools/check_episode.py on the episode in a subprocess: (exit code, its Summary line)."""
@@ -812,9 +843,19 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
             need(not gaps, "approved concept for every main creature (A-<slug>/C-<slug>: Concept 'duyệt' + "
                            f"{check_episode.CONCEPT_HEADING} in characters/<slug>/CHARACTER.md)"
                  + (f" (not yet: {'; '.join(g['slug'] + ' ' + g['why'] for g in gaps)})" if gaps else ""))
+    sf = d.get("style_frames")
+    if sf and sf["gated"] and gate == "G2":
+        # method blender/code: the owner approved the style frames and picked the reference frames (stage 3b)
+        need(not sf["gaps"], f"approved style frames ({check_episode.STYLEFRAMES_FILE} "
+                             f"{check_episode.SF_REF_HEADING}: one 'không khí' frame + one per main creature)"
+             + (f" (not yet: {'; '.join(sf['gaps'])})" if sf["gaps"] else ""))
     shots = [s for s in d["shots"]["shots"] if not s["reuse_of"]]
     n_open = len(d["attention"]["open"])
     if gate == "G1":
+        if not d["gates"].get("G1"):
+            # stage 2b (film-dop): G1 approves the script and the camera together; an episode past G1 keeps passing
+            need(exists("CAMERA-BIBLE.md", non_empty=True),
+                 "CAMERA-BIBLE.md non-empty (stage 2b, film-dop; templates/episode/CAMERA-BIBLE.md)")
         need(exists("research.md", non_empty=True), "research.md non-empty")
         need(exists("script.md"), "script.md present")
         need(exists("shots.csv"), "shots.csv present")
@@ -941,6 +982,8 @@ def episode_text(d, notes):
     out += notes_text(notes["method"])
     if d.get("creatures"):
         out += creatures_text(d["creatures"], notes["creatures"])
+    if d.get("style_frames"):
+        out += style_frames_text(d["style_frames"], notes["style_frames"])
     out.append("NEXT")
     out += d["next"] or ["  (nothing under '## Việc tiếp theo')"]
     out += budget_text(d, notes["budget"])
@@ -1025,7 +1068,8 @@ def main(argv=None):
     except Usage as e:
         print(f"error: {e}", file=sys.stderr)
         return USAGE_EXIT
-    notes = {"stage": [], "method": [], "creatures": [], "budget": [], "shots": [], "forecast": [], "media": []}
+    notes = {"stage": [], "method": [], "creatures": [], "style_frames": [], "budget": [], "shots": [], "forecast": [],
+             "media": []}
     if not isinstance(meta.get("gates"), dict):
         notes["stage"].append("EPISODE.md: gates is not a mapping {G1: ..., G4: ...}: every gate counts as not passed")
     media = media_dir(meta, a.media)
@@ -1046,6 +1090,7 @@ def main(argv=None):
     d["forecast"] = forecast_section(d["shots"], d["method"]["name"], d["budget"]["caps"], notes["forecast"],
                                      d["video_engine"])
     d["creatures"] = creatures_section(a.episode, body, d["method"]["name"], media, notes["creatures"])
+    d["style_frames"] = style_frames_section(a.episode, d["method"]["name"], d["creatures"], notes["style_frames"])
     d["media"] = media_section(media, bundled, notes["media"])
     if d["media"]["exists"]:
         d["media"]["unsaved"] = unsaved_section(a.episode, media, notes["media"])

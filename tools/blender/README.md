@@ -7,7 +7,9 @@ normal, line, mask) + `render.json`. **Miễn phí, local**: không API, không 
 
 | File | Chạy ở đâu | Việc |
 |---|---|---|
-| `blender.py` | Python ngoài Blender (Windows 3.12–3.14, Linux 3.12; chỉ thư viện chuẩn) | CLI: `find`, `check`, `render`, `still`, `turntable`, `keyframes`, `lookbook` |
+| `blender.py` | Python ngoài Blender (Windows 3.12–3.14, Linux 3.12; chỉ thư viện chuẩn) | CLI: `find`, `check`, `render`, `still`, `turntable`, `keyframes`, `lookbook`, `mesh-prep`, `mesh-check` |
+| `meshcheck.py` | Python ngoài Blender (numpy + Pillow) | đọc GLB, báo cáo lưới (lỗ, cạnh non-manifold, mảnh rời), bóng mesh, IoU với concept, bảng so sánh |
+| `meshprep.py` | trong Blender | phôi ảnh → 3D: voxel remesh, xoá mảnh vụn, QuadriFlow/decimate, xuất `_prep.glb` + `.blend` |
 | `spec.py` | cả hai phía (Python của Blender là 3.13) | kiểm `shot3d.json` (lỗi dạng `đường dẫn: lý do`), giá trị mặc định, số khung, toán đường máy quay |
 | `scene.py` | trong Blender | dựng cảnh từ spec, đặt máy quay từng khung, compositor, render, ghi `render.json` |
 | `looks.py` + `looks.json` | trong Blender | vật liệu, world, mặt trời, quản lý màu, nét mực Freestyle theo look |
@@ -47,7 +49,31 @@ python tools/blender/blender.py turntable <model>.glb --out <thư mục>
 python tools/blender/blender.py turntable <model>.blend#<Collection> --out <thư mục> --look realistic --frames 72 \
     --samples 64 [--fill 0.7] [--front 180] [--stills front,34,side,head] [--hdri <studio>.hdr]   # turntable duyệt G2
 python tools/blender/blender.py lookbook --out <thư mục> [--spec S] [--frame N] [--size 960x540]
+python tools/blender/blender.py mesh-check <mesh>.glb [--concept <concept>.png] [--view front|side|back] [--sheet s.png] [--json r.json]
+python tools/blender/blender.py mesh-prep <c>_raw_v01.glb --out <thư mục> [--concept <concept>.png] [--voxel auto|SIZE|0] \
+    [--quad-faces 20000 | --decimate N] [--min-island 0.002] [--no-turntable] [--stills front,34,side] [--frames 72] [--preview]
 ```
+
+### Phôi từ ảnh (`mesh-prep`, `mesh-check`)
+
+Mesh ảnh → 3D (`tools/comfy/comfy.py run hunyuan3d`) là "súp tam giác": không kín, mảnh vụn bay rời, không vòng cạnh.
+`mesh-prep` biến nó thành **nền điêu khắc** trong một lượt GPU (quy trình: `.claude/skills/film-compose-shot/references/blender-method.md` §8):
+1. báo cáo lưới của file gốc (không cần Blender, `meshcheck.py`: numpy + Pillow): tam giác, đỉnh (gộp đỉnh trùng vị trí),
+   cạnh hở (một mặt = lỗ), cạnh dùng chung quá hai mặt, số mảnh rời và các mảnh lớn nhất, kín hay không;
+2. Blender (`meshprep.py`): nhập GLB, voxel remesh (`--voxel auto` = cạnh dài nhất / 300, ~1,3 cm trên con 4 m; `0` = bỏ)
+   cho một lớp da kín, xoá mảnh rời nhỏ hơn `--min-island` (tỉ lệ số đỉnh, mặc định 0,002), QuadriFlow về
+   `--quad-faces` quad (mặc định 20000; QuadriFlow lỗi thì tự giảm mặt và ghi cảnh báo) hoặc `--decimate N` tam giác →
+   `<tên>_prep.glb` + `<tên>_prep.blend` (bản gốc ẩn trong collection `source`, làm nguồn bake) + `prep.json`;
+   tên bỏ đuôi `_raw` của file vào (`ho-giao_raw_v01.glb` → `ho-giao_v01_prep.glb`);
+3. turntable đất sét của bản prep vào `turntable/` (như `turntable`, look `clay` hoặc `--look`; `--no-turntable` để bỏ);
+4. bóng của mesh nhìn từ góc concept (glTF: từ +Z; Blender: từ −Y), bỏ mảnh vụn dưới 1 % diện tích mảnh lớn nhất →
+   `silhouette_raw.png`, `silhouette_prep.png`; với `--concept`: **IoU** bóng mesh ↔ concept sau khi cắt cả hai theo khung
+   bao và đưa cạnh dài về cùng cỡ (thử cả bóng lật gương), độ lệch tỉ lệ ngang/dọc; `compare.png` (concept, bóng, chồng
+   hình: cam = chỉ concept, xanh = chỉ mesh, xám = trùng; ảnh đất sét) và `mesh_report.json` (mọi số trên + cảnh báo:
+   không kín, mảnh rời, IoU < 0,85, tỉ lệ lệch > 10 %).
+
+`mesh-check` làm bước 1 và 4 cho một GLB bất kỳ, không Blender, không GPU (`--sheet`, `--json` để ghi file; không ghi đè).
+`mesh-prep` từ chối (2) trước khi chạy Blender: file không phải GLB, `--out` không trống, tham số sai.
 
 ### Turntable (duyệt model, G2)
 
@@ -101,7 +127,7 @@ Góc theo độ. Ví dụ đầy đủ: `tools/blender/demo/ink-wash-mountains.j
 - Gốc: `version` (= 1), `size` [w, h] (chẵn), `fps`, `seconds`, `seed`, `look`, `engine` (`eevee|cycles`), `world`,
   `assets`, `camera`, `passes` (`depth, normal, line, mask`), `depth_range` [gần, xa], tuỳ chọn `samples`, `title`, `note`,
   `asset_root` (thư mục asset CC0, tương đối với file spec: `hdri/`, `textures/<id>/`, `models/`; vd.
-  `out/<project>/assets/`), `materials` (look `realistic`: vai trò preset `mountain, rock, ground, water, trunk, foliage,
+  `out/<project>/assets/`; tải bằng `tools/assets.py`, sổ `ASSETS_MANIFEST.csv`), `materials` (look `realistic`: vai trò preset `mountain, rock, ground, water, trunk, foliage,
   prim` → id bộ texture trong `asset_root/textures/` hoặc thư mục, hoặc `{tex, scale, displace}`: `scale` mét mỗi ô lặp,
   mặc định 4; `displace` mét, Cycles).
 - `world`: `paper`, `ink` (màu `#rrggbb`, đè màu của look), `mist` (0–1), `mist_range` [bắt đầu, hết] mét, `sun`
@@ -168,5 +194,8 @@ sau khi đổi shader mất thêm 1–2 phút để EEVEE biên dịch shader (c
 ## Test
 
 - `tests/test_blender.py` (WSL, không cần Blender/GPU): kiểm spec, toán máy quay, CLI với Blender giả ghi lại argv.
+- `tests/test_blender_mesh.py` (WSL): `meshcheck.py` trên GLB nhỏ tự viết (đọc, nút biến đổi, đỉnh gộp, lỗ, mảnh rời,
+  bóng, IoU, lật gương), `mesh-check` và `mesh-prep` với Blender giả. `meshprep.py` (QuadriFlow, voxel) chưa chạy với
+  Blender thật trong test.
 - `tests/test_blender_render.py`: render thật 64x36, 3 khung; tự bỏ qua khi không có Blender. Chạy trên Windows:
   `cd tests && python -m unittest test_blender_render -v`.

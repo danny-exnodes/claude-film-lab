@@ -98,6 +98,12 @@ class CodeEpisode(TmpDirCase, unittest.TestCase):
                       "Concept |\n|---|---|---|---|---|\n", encoding="utf-8")
         code, out, _ = run_main(st.main, [str(self.ep), "--media", str(self.media), "--gate", "G2"])
         self.assertIn("(no creature listed)", out)
+        self.assertIn("[MISSING] approved style frames", out)          # style frames (#71): stage 3b
+        (self.ep / "STYLE-FRAMES.md").write_text(
+            "## Khung chuẩn đã duyệt\n\n| Vai | Khung | Ngày | Lời chủ dự án |\n|---|---|---|---|\n"
+            "| Không khí | sf02 | duyệt 2026-11-26 | ok |\n", encoding="utf-8")
+        code, out, _ = run_main(st.main, [str(self.ep), "--media", str(self.media), "--gate", "G2"])
+        self.assertIn("reference không khí: sf02 (2026-11-26)", out)
         self.assertIn("Gate G2: READY", out)
 
 

@@ -42,3 +42,4 @@ không được yêu cầu, và không bao giờ từ phiên cloud.
 | `v1.3.0` | commit merge của PR `Release v1.3.0` (2026-11-25) | Claude tạo bằng `gh release create` từ phiên local, theo yêu cầu trực tiếp của chủ dự án |
 | `v1.4.0` | commit merge của PR `Release v1.4.0` (2026-11-25) | Claude tạo từ phiên local, theo yêu cầu trực tiếp của chủ dự án |
 | `v1.5.0` | commit merge của PR `Release v1.5.0` (2026-11-26) | Claude tạo từ phiên local, theo yêu cầu trực tiếp của chủ dự án |
+| `v1.6.0` | commit merge của PR `Release v1.6.0` (2026-11-27) | Claude tạo từ phiên local, theo yêu cầu trực tiếp của chủ dự án |

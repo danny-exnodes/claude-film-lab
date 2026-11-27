@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-27
+
 ### Đợt issue #68–#77: Qwen-Edit, phôi 3D, grade thuỷ mặc, style frame, DoP, nghiên cứu hình tượng (2026-11-26)
 - ComfyUI `qwen-edit` (Qwen-Image-Edit 2511, chỉ node lõi, #68): `comfy.py run qwen-edit --image IN [--ref R …] --prompt …
   [--lightning 4|8] [--denoise D] [--size WxH] [--ref-mode full|vl]`; cỡ ra = cỡ ảnh vào; ledger `comfy:qwen-edit` (0 đ),
@@ -644,7 +646,8 @@ Claude Code cloud với BytePlus ModelArk và cinecode.
 - N agent tạo ảnh song song có thể vượt trần ngân sách tối đa N−1 request.
 - Lồng tiếng tiếng Việt chạy local (#8) chưa có.
 
-[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/danny-exnodes/claude-film-lab/compare/v1.2.0...v1.3.0

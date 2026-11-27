@@ -816,13 +816,30 @@ class TestEpisodeStyleFrames(EpisodeCase):
         self.assertEqual(sf["refs"], [{"role": "atmosphere", "frame": "sf03", "date": "2026-11-26"},
                                       {"role": "phuong-hoang", "frame": "sf05", "date": "2026-11-27"}])
         self.assertEqual(len(sf["problems"]), 3, sf["problems"])
-        self.assertIn("row 3 (rong): Ngày 'hôm qua' has no YYYY-MM-DD date", sf["problems"][0])
+        self.assertIn("row 3 (rong): Ngày 'hôm qua' does not start with a YYYY-MM-DD date", sf["problems"][0])
         self.assertIn("row 4: Vai '???' is neither", sf["problems"][1])
         self.assertIn("row 5 (huy): no frame", sf["problems"][2])
         self.assertIsNone(ce.read_style_frames(str(self.tmp)))
         (self.ep / ce.STYLEFRAMES_FILE).write_text("## Khung chuẩn đã duyệt\n| Vai | Khung |\n|---|---|\n| a | b |\n",
                                                    encoding="utf-8")
         self.assertIn("column(s) ngày missing", ce.read_style_frames(str(self.ep))["problems"][0])
+
+    def test_pending_dates_placeholders_and_unknown_frames_are_not_approved(self):
+        (self.ep / ce.STYLEFRAMES_FILE).write_text(style_frames_md(6, [
+            "| không khí | sf01 | chờ duyệt (dự kiến 2026-12-01) | |", "| huy | chờ | 2026-11-26 | |",
+            "| rong | - | 2026-11-26 | |", "| giao | sf09 | 2026-11-26 | |", "| ngua | sf02 | 2026-13-40 | |",
+            "| ca | `ep01_sf03_x_v01.png` | 2026-11-26 | |", "| ho | sf_final.png | 2026-11-26 | |"]),
+            encoding="utf-8")
+        (self.ep / "review" / "styleframes").mkdir(parents=True)
+        (self.ep / "review" / "styleframes" / "sf_final.png").write_bytes(b"png")
+        sf = ce.read_style_frames(str(self.ep))
+        self.assertEqual([r["role"] for r in sf["refs"]], ["ca", "ho"])      # a file of ## Khung, a copy in review/
+        self.assertEqual(len(sf["problems"]), 5, sf["problems"])
+        self.assertIn("(atmosphere): Ngày 'chờ duyệt (dự kiến 2026-12-01)' does not start", sf["problems"][0])
+        self.assertIn("(huy): Khung 'chờ' is a placeholder", sf["problems"][1])
+        self.assertIn("(rong): Khung '-' is a placeholder", sf["problems"][2])
+        self.assertIn("(giao): Khung 'sf09' is not an id or file of ## Khung", sf["problems"][3])
+        self.assertIn("(ngua): Ngày '2026-13-40'", sf["problems"][4])
 
     def test_template_parses_empty(self):
         shutil.copy(Path(ce.LAB, "templates/episode", ce.STYLEFRAMES_FILE), self.ep / ce.STYLEFRAMES_FILE)
@@ -839,9 +856,10 @@ class TestEpisodeStyleFrames(EpisodeCase):
         self.assertEqual(ce.style_frame_gaps(sf, rows), ["no reference frame for phuong-hoang"])
         self.assertEqual(ce.style_frame_gaps(sf, None), [])                  # no creature table: atmosphere only
 
-    def test_warn_from_stage_3_never_error(self):
+    def test_warn_from_stage_4_never_error(self):
         self.assertEqual(self.run_sf("blender", 2).lines, [])                    # before stage 3: nothing yet
-        rep = self.run_sf("blender", 3)
+        self.assertEqual(self.run_sf("blender", 3).lines, [])                    # stage 3 = 3a + 3b + 3: in progress
+        rep = self.run_sf("blender", 4)
         self.assertEqual((rep.errors, rep.warns), (0, 1), rep.lines)
         self.assertIn("style frames not approved: no STYLE-FRAMES.md", rep.lines[0])
         rep = self.run_sf("code", 5, style_frames_md(6, ["| không khí | sf01 | 2026-11-26 | |"]))
@@ -897,6 +915,11 @@ class TestCreatureShots(EpisodeCase):
         self.assertEqual(ce.creature_coverage(self.ROWS[:1], code, "code"), [])
         self.assertEqual(ce.creature_coverage(self.ROWS[:1], code, "blender"), [("huy", ["in no shot (layers A-huy)"])])
         self.assertEqual(ce.creature_coverage(self.ROWS, shots, "layers"), [])
+        # a variant of the longer slug (A-huy-con-head) is huy-con's, never huy's
+        shots = self.shots(("extreme-wide", ["A-huy"], ""), ("close", ["A-huy-con-head"], ""),
+                           ("extreme-wide", ["A-huy-con"], ""))
+        self.assertEqual(ce.creature_coverage(self.ROWS, shots, "blender"),
+                         [("huy", ["no detail close-up (close, extreme-close, insert)"])])
 
     def test_warn_in_a_blender_episode(self):
         self.edit("EPISODE.md", "stage: 5", "method: blender\nstage: 5")

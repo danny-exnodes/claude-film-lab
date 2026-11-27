@@ -9,11 +9,14 @@ for --style); no network, no API; ffmpeg only for video in or out. Free.
   python3 tools/compose/grade.py --export-lut scene.cube --style ... [--layer scene|subject] [--lut-size 33]
   python3 tools/compose/grade.py --check --style ... [--params shot.json]          # only validate the parameters
 
-IN is one image (OUT = a .png), a folder of PNG frames (OUT = a new folder, same file names, or a .mp4), a video
-(.mp4/.mov/.mkv/.webm, decoded with ffmpeg; OUT = a .mp4 or a folder) or a Blender render folder
+IN is one image (OUT = a .png), a folder of PNG frames (OUT = a new folder, same file names, or a .mp4; a .png when
+it holds one frame, e.g. a style frame rendered with `blender.py render --frames N --passes depth mask`), a video
+(.mp4/.mov/.mkv/.webm, decoded with ffmpeg; OUT = a .mp4/.mov/.mkv or a folder) or a Blender render folder
 (renders3d/s<NN>/ of `tools/blender/blender.py render`): then the frames are beauty/, the depth pass depth/ and
 depth_range / fps come from render.json, and --subject <asset> picks mask/<asset>/ (several: their union).
-Explicit --depth / --mask (a PNG or a folder) win. Pass files are matched to frames by file name, else by order.
+Explicit --depth / --mask (a PNG or a folder) win. Pass files are matched to frames by file name (a missing one is an
+error), else, when no name matches (video frames), by order. OUT is written as <OUT>.part (folder) or <stem>.part.<ext>
+and renamed when every frame is done: a run that fails leaves nothing behind and can simply run again.
 
 Passes (the format of `blender.py render`, tools/blender/README.md):
   depth  16-bit grey, depth_range [near, far] mapped linearly, near = white, far and sky = black; metres =
@@ -25,6 +28,7 @@ Parameters: style.yaml key `grade:` (or a JSON file with the same shape; --param
     seed: 7                       # paper grain; same input + same parameters -> same bytes
     scene:   {saturation, keep_red, hue_pull, tone, split, mist, paper, vignette}
     subject: {saturation, keep_red, hue_pull, tone, split, mist, layer}   # overrides of scene, inside the mask
+With --style, --params may change part of a style's hue_pull (only its amount); the merge is checked in full.
 Every key is optional; a missing key does nothing (the defaults are neutral: an empty grade returns the input). Keys,
 ranges and meanings: SCHEMA below and .claude/skills/film-compose-shot/references/blender-method.md §7.
 
@@ -40,7 +44,8 @@ Pipeline (display-referred sRGB 0..1, i.e. after Blender's view transform):
     7. paper grain (value noise + fibres, seeded, the same on every frame) and a warm vignette, once over both layers.
 
 Exit: 0 done · 1 ffmpeg missing/failed or a file cannot be read · 2 refused before writing anything (bad parameters,
-style.yaml error, OUT already exists, wrong combination of arguments).
+style.yaml error, OUT already exists, wrong combination of arguments; with --export-lut and IN, the .cube is written
+only after IN and OUT are checked).
 
 Adapted from an in-house style-frame script of the lab (grade_thuymac.py, same owner, numpy/Pillow/scipy): the hue-band
 saturation, palette hue pulls, tone curve, split tone, depth mist, paper texture, vignette and the scene/subject layer
@@ -56,6 +61,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -64,6 +70,7 @@ from PIL import Image, ImageDraw, ImageFilter
 LAB = Path(__file__).resolve().parents[2]
 LUT_INTERNAL = 65            # LUT points per axis used for grading (Pillow trilinear)
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+VIDEO_OUT_EXT = {".mp4", ".mov", ".mkv", ".m4v"}       # libx264 + yuv420p
 IMAGE_EXT = {".png", ".jpg", ".jpeg"}
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 REF_H = 1080.0               # pixel sizes in the parameters are at 1080p
@@ -122,7 +129,7 @@ def _check_value(where, v, kind, lo, hi, errs):
         errs.append(f"{where}: {v!r} is out of range {lo:g}-{hi:g}")
 
 
-def _check_block(where, block, name, errs):
+def _check_block(where, block, name, errs, partial=False):
     if not isinstance(block, dict):
         errs.append(f"{where}: must be a mapping")
         return
@@ -132,7 +139,7 @@ def _check_block(where, block, name, errs):
             if not isinstance(pull, dict):
                 errs.append(f"{w}: must be a mapping {{to, centre, width, amount}}")
                 continue
-            if "to" not in pull:
+            if "to" not in pull and not partial:
                 errs.append(f"{w}: 'to' (\"#RRGGBB\") is required")
             for k, v in pull.items():
                 if k not in HUE_PULL:
@@ -148,8 +155,10 @@ def _check_block(where, block, name, errs):
             _check_value(f"{where}.{k}", v, *keys[k][:3], errs)
 
 
-def validate(g, where="grade"):
-    """Errors (strings 'grade.scene.tone.black: ...') of a grade block; [] when it is usable."""
+def validate(g, where="grade", partial=False):
+    """Errors (strings 'grade.scene.tone.black: ...') of a grade block; [] when it is usable.
+    partial: an override merged over a style afterwards (a hue_pull may change only its amount; the merge is
+    validated again in full)."""
     errs = []
     if not isinstance(g, dict):
         return [f"{where}: must be a mapping {{seed, scene, subject}}"]
@@ -171,7 +180,7 @@ def validate(g, where="grade"):
                     if layer == "subject" and name in ("paper", "vignette") else ""
                 errs.append(f"{where}.{layer}: unknown key '{name}' (known: {', '.join(blocks)}){hint}")
             else:
-                _check_block(f"{where}.{layer}.{name}", block, name, errs)
+                _check_block(f"{where}.{layer}.{name}", block, name, errs, partial)
     return errs
 
 
@@ -241,10 +250,13 @@ def load_params(style=None, params=None):
             raise Refused(f"--params {params}: not valid JSON: {e}")
         if isinstance(pj, dict) and "grade" in pj and set(pj) <= {"grade"}:
             pj = pj["grade"]
-        errs = validate(pj)
+        errs = validate(pj, partial=bool(style))
         if errs:
             raise Refused(f"{params}:\n  " + "\n  ".join(errs))
         g = merge(g, pj)
+        errs = validate(g)
+        if errs:
+            raise Refused(f"{params} over {srcs[0]}:\n  " + "\n  ".join(errs))
         srcs.append(str(params))
     return g, srcs
 
@@ -560,15 +572,18 @@ def pngs(folder):
 
 
 class PassSource:
-    """A pass given as one file (every frame) or a folder (matched by frame file name, else by order)."""
+    """A pass given as one file (every frame) or a folder. A folder is matched by frame file name when any name
+    matches (then a missing name is an error, never the neighbour's pass), else by order (video frames)."""
 
-    def __init__(self, path, label):
-        self.path, self.label = Path(path), label
+    def __init__(self, path, label, names=None):
+        self.path, self.label, self.by_order = Path(path), label, None
         if self.path.is_dir():
             self.files = pngs(self.path)
             if not self.files:
                 raise Refused(f"{label} {path}: no PNG files")
             self.by_name = {p.name: p for p in self.files}
+            if names is not None:
+                self.by_order = not any(n in self.by_name for n in names)
         elif self.path.is_file():
             self.files = None
         else:
@@ -577,8 +592,13 @@ class PassSource:
     def get(self, index, name):
         if self.files is None:
             return self.path
-        if name in self.by_name:
-            return self.by_name[name]
+        if self.by_order is None:                  # frame names not known up front (a video): the first decides
+            self.by_order = name not in self.by_name
+        if not self.by_order:
+            if name in self.by_name:
+                return self.by_name[name]
+            raise Failed(f"{self.label} {self.path}: no {name} for frame {index + 1} (the pass is matched by file "
+                         f"name; re-render the missing frame)")
         if index < len(self.files):
             return self.files[index]
         raise Failed(f"{self.label} {self.path}: no file for frame {index + 1} ({name}): {len(self.files)} files")
@@ -619,10 +639,12 @@ def video_frames(video, size):
     if not ff:
         raise Failed("ffmpeg is not installed (or set FILM_FFMPEG)")
     W, H = size
+    errf = tempfile.TemporaryFile()                # stderr in a file: a full pipe would block ffmpeg
     proc = subprocess.Popen([ff, "-v", "error", "-i", str(video), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            stdout=subprocess.PIPE, stderr=errf)
     n = W * H * 3
     i = 0
+    done = False
     try:
         while True:
             buf = proc.stdout.read(n)
@@ -630,11 +652,15 @@ def video_frames(video, size):
                 break
             yield i, f"{i + 1:06d}.png", np.frombuffer(buf, np.uint8).reshape(H, W, 3)
             i += 1
+        done = True
     finally:
         proc.stdout.close()
-        err = proc.stderr.read().decode("utf-8", "replace")
-        proc.stderr.close()
+        if not done and proc.poll() is None:    # the caller stopped early (preview, a failed frame)
+            proc.kill()
         rc = proc.wait()
+        errf.seek(0)
+        err = errf.read().decode("utf-8", "replace")
+        errf.close()
     if rc or i == 0:
         raise Failed(f"ffmpeg could not decode {video}: {(err.strip().splitlines() or ['no frames'])[-1]}")
 
@@ -651,16 +677,41 @@ class VideoSink:
         cmd += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "16", "-preset", "medium", "-movflags", "+faststart",
                 str(path)]
         self.path = path
-        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.errf = tempfile.TemporaryFile()       # stderr in a file: a full pipe would block ffmpeg
+        self.proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=self.errf)
+
+    def _err(self):
+        self.errf.seek(0)
+        err = self.errf.read().decode("utf-8", "replace")
+        return (err.strip().splitlines() or ["?"])[-1]
 
     def write(self, name, arr):
-        self.proc.stdin.write(np.ascontiguousarray(arr).tobytes())
+        try:
+            self.proc.stdin.write(np.ascontiguousarray(arr).tobytes())
+        except (BrokenPipeError, OSError):
+            self.proc.kill()
+            self.proc.wait()
+            raise Failed(f"ffmpeg stopped while encoding {self.path}: {self._err()}") from None
 
     def close(self):
-        self.proc.stdin.close()
-        err = self.proc.stderr.read().decode("utf-8", "replace")
-        if self.proc.wait():
-            raise Failed(f"ffmpeg could not encode {self.path}: {(err.strip().splitlines() or ['?'])[-1]}")
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        rc = self.proc.wait()
+        err = self._err()
+        self.errf.close()
+        if rc:
+            raise Failed(f"ffmpeg could not encode {self.path}: {err}")
+
+    def abort(self):
+        try:
+            self.proc.stdin.close()
+        except OSError:
+            pass
+        self.proc.kill()
+        self.proc.wait()
+        self.errf.close()
 
 
 class DirSink:
@@ -674,6 +725,9 @@ class DirSink:
     def close(self):
         pass
 
+    def abort(self):
+        pass
+
 
 class ImageSink:
     def __init__(self, path):
@@ -683,6 +737,9 @@ class ImageSink:
         Image.fromarray(arr, "RGB").save(self.path, optimize=False)
 
     def close(self):
+        pass
+
+    def abort(self):
         pass
 
 
@@ -761,8 +818,9 @@ class Job:
                 raise Refused(f"--depth {depth}: depth_range unknown (no render.json next to it): pass --depth-range NEAR FAR")
         if self.depth_range and not (len(self.depth_range) == 2 and 0 <= self.depth_range[0] < self.depth_range[1]):
             raise Refused(f"depth_range {list(self.depth_range)} must be [near, far] with 0 <= near < far")
-        self.depth = PassSource(depth, "--depth") if depth is not None else None
-        self.masks = [PassSource(m, "--mask") for m in masks]
+        names = [p.name for p in self.files] if self.files is not None else None
+        self.depth = PassSource(depth, "--depth", names) if depth is not None else None
+        self.masks = [PassSource(m, "--mask", names) for m in masks]
 
     def frames(self):
         if self.kind == "video":
@@ -815,6 +873,18 @@ def parse(argv):
     return ap.parse_args(argv)
 
 
+def part_path(out):
+    """Where OUT is written until it is complete: <name>.part/ (folder) or <stem>.part<suffix> (file)."""
+    return out.with_name(out.name + ".part") if not out.suffix else out.with_name(out.stem + ".part" + out.suffix)
+
+
+def remove_path(p):
+    if p.is_dir():
+        shutil.rmtree(p, ignore_errors=True)
+    elif p.exists():
+        p.unlink()
+
+
 def run(a):
     g, srcs = load_params(a.style, a.params)
     if a.check:
@@ -823,24 +893,41 @@ def run(a):
         return 0
     if not (a.input or a.export_lut):
         raise Refused("nothing to do: pass IN OUT, IN --preview P.png, or --export-lut F.cube")
-    if a.export_lut:
+    if a.export_lut:                              # checked first, written only after IN/OUT are checked too
         if not 2 <= a.lut_size <= 129:
             raise Refused(f"--lut-size {a.lut_size}: must be 2-129")
         scene, subject, _ = resolve(g)
         if a.layer == "subject" and not subject:
             raise Refused("--layer subject: the grade has no subject: block")
         refuse_existing(a.export_lut)
+    job = out = None
+    single = False
+    if a.input:
+        if a.preview and a.output:
+            raise Refused("--preview writes one frame: drop OUT")
+        if not a.preview and not a.output:
+            raise Refused("OUT is missing (or use --preview P.png)")
+        job = Job(a)
+        if a.preview:
+            refuse_existing(a.preview)
+            if a.frame < 1 or (job.count is not None and a.frame > job.count):
+                raise Refused(f"--frame {a.frame}: IN has {job.count} frame(s)")
+        else:
+            out = Path(a.output)
+            refuse_existing(out)
+            single = job.kind == "image" or (job.count == 1 and out.suffix.lower() == ".png")
+            if job.kind == "image" and out.suffix.lower() != ".png":
+                raise Refused(f"OUT {out}: one image in -> a .png out")
+            if not single and out.suffix and out.suffix.lower() not in VIDEO_OUT_EXT:
+                raise Refused(f"OUT {out}: a folder (no suffix) or a {' / '.join(sorted(VIDEO_OUT_EXT))} "
+                              "(H.264)")
+    if a.export_lut:
         write_cube(a.export_lut, subject if a.layer == "subject" else scene, a.lut_size,
                    f"film-lab grade {a.layer}")
         print(f"lut {a.export_lut} ({a.layer}, {a.lut_size}^3; colour only: mist, subject layer, paper and vignette "
               f"need grade.py)")
         if not a.input:
             return 0
-    if a.preview and a.output:
-        raise Refused("--preview writes one frame: drop OUT")
-    if not a.preview and not a.output:
-        raise Refused("OUT is missing (or use --preview P.png)")
-    job = Job(a)
     grader = Grader(g)
     if job.masks and not grader.subject:
         print("grade: WARN mask given but the grade has no subject: block: one layer only", file=sys.stderr)
@@ -850,41 +937,48 @@ def run(a):
         print("grade: note: no depth pass: no mist", file=sys.stderr)
 
     if a.preview:
-        refuse_existing(a.preview)
-        if a.frame < 1 or (job.count is not None and a.frame > job.count):
-            raise Refused(f"--frame {a.frame}: IN has {job.count} frame(s)")
-        for i, name, arr in job.frames():
-            if i + 1 == a.frame:
-                out = grader.frame(arr, *job.passes(i, name, grader))
-                Image.fromarray(side_by_side(arr, out), "RGB").save(a.preview)
-                print(f"preview {a.preview} (frame {a.frame}: before | after)")
-                return 0
+        frames = job.frames()
+        try:
+            for i, name, arr in frames:
+                if i + 1 == a.frame:
+                    res = grader.frame(arr, *job.passes(i, name, grader))
+                    Image.fromarray(side_by_side(arr, res), "RGB").save(a.preview)
+                    print(f"preview {a.preview} (frame {a.frame}: before | after)")
+                    return 0
+        finally:
+            frames.close()
         raise Refused(f"--frame {a.frame}: IN has fewer frames")
 
-    out = Path(a.output)
-    refuse_existing(out)
-    if job.kind == "image":
-        if out.suffix.lower() != ".png":
-            raise Refused(f"OUT {out}: one image in -> a .png out")
-        out.parent.mkdir(parents=True, exist_ok=True)
-        sink = ImageSink(out)
-    elif out.suffix.lower() in VIDEO_EXT:
-        out.parent.mkdir(parents=True, exist_ok=True)
-        sink = VideoSink(out, job.size, job.fps, audio_from=job.audio)
+    # written under a .part name, renamed when every frame is done: a failed run leaves nothing that looks finished
+    part = part_path(out)
+    if part.exists():
+        print(f"grade: note: removing {part} left by an earlier run that stopped", file=sys.stderr)
+        remove_path(part)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if single:                                     # one image, or a sequence / render folder of one frame
+        sink = ImageSink(part)
     elif out.suffix:
-        raise Refused(f"OUT {out}: a folder (no suffix) or a .mp4")
+        sink = VideoSink(part, job.size, job.fps, audio_from=job.audio)
     else:
-        sink = DirSink(out)
+        sink = DirSink(part)
     n = 0
+    frames = job.frames()
     try:
-        for i, name, arr in job.frames():
+        for i, name, arr in frames:
             if arr.shape[1::-1] != job.size:
                 raise Failed(f"frame {i + 1} ({name}) is {arr.shape[1]}x{arr.shape[0]}, the first is "
                              f"{job.size[0]}x{job.size[1]}")
             sink.write(name, grader.frame(arr, *job.passes(i, name, grader)))
             n += 1
-    finally:
         sink.close()
+    except BaseException:
+        frames.close()
+        sink.abort()
+        remove_path(part)
+        raise
+    if out.is_dir():                               # an empty folder named OUT (refuse_existing let it through)
+        out.rmdir()
+    os.replace(part, out)
     layers = "scene + subject" if grader.subject and job.masks else "scene"
     print(f"graded {n} frame(s) -> {out} ({layers}; mist {'on' if job.depth else 'off'})")
     return 0

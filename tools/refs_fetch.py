@@ -4,6 +4,7 @@
   python3 tools/refs_fetch.py search "<query>" [--limit 20] [--free-only]
   python3 tools/refs_fetch.py fetch <File:… | Commons URL> [...] --out <dir> [--name N] [--note T] [--kind K] [--page N]
   python3 tools/refs_fetch.py fetch --list refs.txt --out <dir>
+  python3 tools/refs_fetch.py --interval 2 fetch ...        # --interval goes BEFORE the subcommand
 
 - Metadata comes from the Commons API (imageinfo + extmetadata of the File page): licence, author, credit/source,
   date, description, page URL. The image itself is the Commons thumbnail (not the original), at most --max-px
@@ -28,6 +29,7 @@ import netfetch  # noqa: E402
 API = "https://commons.wikimedia.org/w/api.php"
 PAGE = "https://commons.wikimedia.org/wiki/"
 CREDITS = "_credits.jsonl"
+MAX_ORIGINAL = 30 * 1024 * 1024        # bytes: an original is fetched only when Commons gives no thumbnail
 META_KEYS = ("LicenseShortName", "License", "LicenseUrl", "UsageTerms", "NonFree", "Copyrighted", "Artist", "Credit",
              "DateTimeOriginal", "DateTime", "ImageDescription", "ObjectName", "Attribution", "AttributionRequired")
 
@@ -164,7 +166,10 @@ def api_url(params):
 def file_info(client, title, max_px, page=None):
     """imageinfo of one File page (thumbnail ≤ max_px wide). Raises FetchError when the page is missing."""
     params = {"titles": title}
-    params["iiurlparam" if page else "iiurlwidth"] = f"page{page}-{max_px}px" if page else str(max_px)
+    if page:
+        params["iiurlparam"] = f"page{page}-{max_px}px"
+    else:                                      # the thumbnail fits a max_px box (tall images too)
+        params["iiurlwidth"] = params["iiurlheight"] = str(max_px)
     data = client.get_json(api_url(params))
     pages = (data.get("query") or {}).get("pages") or []
     if not pages or pages[0].get("missing") or not pages[0].get("imageinfo"):
@@ -203,16 +208,26 @@ def fetch_one(client, ref, out, name=None, note=None, kind=None, page=None, max_
     if not free and not allow_nonfree:
         raise Refused(f"{title}: licence {lic!r} is not free (add --allow-nonfree only for internal reference, "
                       "never for the film)")
-    src = info.get("thumburl") or info.get("url")
-    if not src:
-        raise netfetch.FetchError(f"{title}: no image URL in the API answer")
+    src = info.get("thumburl")
+    if not src:                                # no thumbnail: the original only when Commons says it is small
+        big = info.get("size")
+        if not info.get("url"):
+            raise netfetch.FetchError(f"{title}: no image URL in the API answer")
+        if not isinstance(big, (int, float)) or big > MAX_ORIGINAL:
+            how = f"{big / 1048576:.0f} MB" if isinstance(big, (int, float)) else "of unknown size"
+            raise netfetch.FetchError(f"{title}: Commons gave no thumbnail and the original is {how} "
+                                      f"(limit {MAX_ORIGINAL // 1048576} MB): not downloaded")
+        src = info["url"]
     stem = os.path.splitext(name)[0] if name else slug_name(title) + (f"-p{page}" if page else "")
     data = client.get(src)
     from PIL import Image
-    img = Image.open(io.BytesIO(data))
-    orig_fmt = (img.format or "").upper()
+    try:
+        img = Image.open(io.BytesIO(data))
+        orig_fmt = (img.format or "").upper()
+        img, resized = fit(img, max_px)
+    except Image.DecompressionBombError as e:  # not an OSError: it must not stop a --list batch
+        raise netfetch.FetchError(f"{title}: image too large to open safely ({e})") from None
     fmt = orig_fmt if orig_fmt in ("JPEG", "PNG") else "PNG"     # GIF, WebP, TIFF… are saved as PNG
-    img, resized = fit(img, max_px)
     ext = ".jpg" if fmt == "JPEG" else ".png"
     dest = os.path.join(out, safe_name(stem + ext))
     if os.path.exists(dest):

@@ -43,6 +43,28 @@
 - Chưa kiểm chứng: chưa chạy thật trên GPU/ComfyUI/Blender (graph `qwen-edit`, `hunyuan3d` ghi `verified: false`;
   `meshprep.py` chưa chạy trong Blender), chưa gọi API thật của Hugging Face, Commons, Poly Haven, ambientCG; tham số grade
   và ngưỡng `styleframes.py compare` chưa được người xem duyệt.
+- Sửa sau review: mẫu `DESIGN-OPTIONS.md` dùng `### <id> – <tên hướng>` + `Prompt EN:`/`Edit EN:` và lệnh `concept.py
+  gen/edit` (tên file theo CONVENTIONS §2); `concept.py` đọc thêm nhãn `**Prompt (EN)** (qwen-t2i):`, báo khi hướng dùng
+  `##`; `ICONOGRAPHY.md` không phải file hướng của `concept.py gen`.
+- Sửa sau review: `assets.py fetch` chạy lại khi zip đã tải mà chưa giải nén (trước đây `AttributeError`); zip model giữ
+  thư mục con (URI tương đối của .gltf/.obj), hai file trùng tên hay thiếu chỗ trống khi giải nén thì dừng, giữ zip.
+- Sửa sau review: `netfetch.py` không thử sớm khi `Retry-After` quá 120 s (dừng, báo chạy lại sau), kết nối đứt giữa chừng
+  là lỗi gọn (giữ `.part`), cỡ dạng chuỗi, `.part` đủ mà không biết cỡ (416); `refs_fetch.py` không tải bản gốc lớn khi
+  Commons không có ảnh thu nhỏ (> 30 MB), ảnh quá lớn (`DecompressionBombError`) không dừng cả `--list`, ảnh thu nhỏ vừa
+  khung `--max-px` cả chiều cao.
+- Sửa sau review: `grade.py` ghi qua `<OUT>.part` rồi đổi tên (lần chạy lỗi không để lại mp4/thư mục dở, chạy lại được);
+  pass theo tên file thiếu một khung là lỗi (không lấy pass khung bên cạnh); stderr của ffmpeg vào file tạm (không treo),
+  OUT `.webm` bị từ chối trước; `--export-lut` kèm IN chỉ ghi .cube sau khi kiểm IN/OUT; `--params` đổi được riêng `amount`
+  của một `hue_pull` có sẵn trong style; thư mục render một khung → một `.png`.
+- Sửa sau review: style frame render bằng `blender.py render <spec> --frames N --passes depth mask` (`still` không có
+  pass: mất sương và lớp sinh vật), khung hoàn chỉnh vào `styleframes/final/`, contact sheet chỉ từ đó; bảng khung chuẩn
+  chỉ tính dòng có ô `Ngày` bắt đầu bằng ngày (`chờ duyệt (dự kiến …)` không tính) và `Khung` là id/file của `## Khung`.
+- Sửa sau review: sinh vật `giao` không còn được tính shot của `A-giao-long-head` khi `giao-long` cũng là sinh vật;
+  `film-dop` chỉ đề xuất chuyển động máy hợp lệ của từng phương pháp (bảng tam viễn theo `layers`/`code`/`blender`);
+  khâu 2b ghi `stage: 2`, 3a/3b ghi `stage: 3`; `status.py --gate G1` cần `CAMERA-BIBLE.md` (tập chưa ghi ngày G1).
+- Lưu ý chuyển đổi: tập `blender`/`code` đang ở khâu 4 chưa có `STYLE-FRAMES.md` nay thấy WARN của `check_episode.py` và
+  `[MISSING] approved style frames` ở `status.py --gate G2`: làm khâu 3b (film-pipeline mục 2.3) trước G2. Tập ở khâu ≥ 5
+  đã ghi ngày G2 chỉ thấy INFO. Tập chưa qua G1 cần `CAMERA-BIBLE.md` (khâu 2b) trước G1.
 
 ## [1.5.0] - 2026-11-26
 

@@ -108,6 +108,19 @@ class TestParameters(TmpDirCase, unittest.TestCase):
         code, _, err = run_main(grade.main, ["--check", "--params", str(p)])
         self.assertEqual((code, "not valid JSON" in err), (2, True))
 
+    def test_params_may_change_only_the_amount_of_a_style_hue_pull(self):
+        p = self.tmp / "shot.json"
+        p.write_text(json.dumps({"scene": {"hue_pull": {"green": {"amount": 0.1}}}}), encoding="utf-8")
+        g, _ = grade.load_params(str(STYLE), str(p))
+        self.assertEqual(g["scene"]["hue_pull"]["green"], {"to": "#6E8467", "amount": 0.1})
+        # alone (no style to merge over) a hue_pull needs its 'to'; a new pull over the style too
+        with self.assertRaises(grade.Refused):
+            grade.load_params(None, str(p))
+        p.write_text(json.dumps({"scene": {"hue_pull": {"cyan": {"amount": 0.1}}}}), encoding="utf-8")
+        with self.assertRaises(grade.Refused) as cm:
+            grade.load_params(str(STYLE), str(p))
+        self.assertIn("'to'", str(cm.exception))
+
     def test_check_episode_validates_the_grade_block(self):
         code, out, _ = run_main(ce.main, ["style", str(STYLE)])
         self.assertNotIn("unknown key 'grade'", out)
@@ -241,6 +254,49 @@ class TestCli(TmpDirCase, unittest.TestCase):
         code, _, err = self.grade_cli("--export-lut", self.tmp / "x.cube", "--params", self._json({"scene": {}}),
                                       "--layer", "subject")
         self.assertEqual((code, "no subject" in err), (2, True))
+
+    def test_a_failed_run_leaves_nothing_and_can_run_again(self):
+        r = make_render(self.tmp / "s03", frames=3)
+        Image.fromarray(np.zeros((H, W + 8, 3), np.uint8)).save(r / "beauty" / "0003.png")    # frame 3 is wrong
+        outs = [self.tmp / "frames"] + ([self.tmp / "g.mp4"] if HAS_FFMPEG else [])
+        for out in outs:
+            for _ in range(2):                                        # the second run is not refused
+                code, _, err = self.grade_cli(r, out, "--style", STYLE, "--no-depth")
+                self.assertEqual(code, 1, err)
+                self.assertIn("frame 3", err)
+                self.assertEqual(sorted(p.name for p in self.tmp.iterdir()), ["s03"])
+
+    def test_a_one_frame_render_folder_grades_to_a_png(self):
+        # style frame (film-pipeline §2.3): blender.py render --frames N --passes depth mask, then one graded .png
+        r = make_render(self.tmp / "sf03", frames=1)
+        final = self.tmp / "final" / "ep01_sf03_x_v01.png"
+        code, so, err = self.grade_cli(r, final, "--style", STYLE, "--subject", "beast")
+        self.assertEqual(code, 0, err)
+        self.assertIn("scene + subject; mist on", so)
+        with Image.open(final) as im:
+            self.assertEqual(im.size, (W, H))
+        r2 = make_render(self.tmp / "two", frames=2)
+        code, _, err = self.grade_cli(r2, self.tmp / "x.png", "--style", STYLE)
+        self.assertEqual(code, 2)                                     # two frames: a folder or a video
+
+    def test_a_named_pass_frame_missing_is_an_error_not_the_neighbour(self):
+        r = make_render(self.tmp / "s03", frames=3)
+        (r / "depth" / "0002.png").unlink()
+        code, _, err = self.grade_cli(r, self.tmp / "out", "--style", STYLE)
+        self.assertEqual(code, 1)
+        self.assertIn("no 0002.png", err)
+        self.assertFalse((self.tmp / "out").exists())
+
+    def test_checks_come_before_the_lut_is_written(self):
+        r = make_render(self.tmp / "s03", frames=1)
+        cube = self.tmp / "s.cube"
+        code, _, err = self.grade_cli(r, "--export-lut", cube, "--style", STYLE)       # OUT missing
+        self.assertEqual(code, 2)
+        self.assertFalse(cube.exists())
+        code, _, err = self.grade_cli(r, self.tmp / "g.webm", "--export-lut", cube, "--style", STYLE)
+        self.assertEqual(code, 2)
+        self.assertIn("H.264", err)
+        self.assertFalse(cube.exists())
 
     def _json(self, d):
         p = self.tmp / f"p{len(list(self.tmp.iterdir()))}.json"

@@ -40,9 +40,11 @@ Chuẩn (mức sâu):
 - Tư liệu của chủ dự án (`out/<project>/assets/refs/<slug>/book/`, có bản quyền): xem để **phân tích** (vì sao kịch tính,
   ý chung lấy được, điều không chép, mức tối thiểu phải đạt); không chép nét, bố cục, màu; không mô tả lại từng trang;
   không bao giờ làm đầu vào concept hay ảnh tham chiếu.
-- `DESIGN-OPTIONS.md`: 2–3 hướng khác nhau rõ rệt, mỗi hướng 6–10 gạch, ảnh chính, **Prompt (EN)** (qwen-t2i: sinh vật
-  sống, toàn thân, silhouette, chất liệu, bảng màu của style) và **Edit (EN)** (qwen-edit: concept nào làm nền, 1–3 câu
-  sửa cụ thể, "keep everything else unchanged"); giải phẫu cho 3D (kích thước m, tỉ lệ, khớp cần rig, chất liệu).
+- `DESIGN-OPTIONS.md`: 2–3 hướng khác nhau rõ rệt, mỗi hướng một mục `### <id> – <tên hướng>` (id a, b, c: vào tên file
+  concept) với 6–10 gạch, ảnh chính, `Prompt EN:` (qwen-t2i: sinh vật sống, toàn thân, silhouette, chất liệu, bảng màu
+  của style) và `Edit EN:` (qwen-edit: concept nào làm nền, 1–3 câu sửa cụ thể, "keep everything else unchanged"), mỗi
+  nhãn kèm khối ```text; giải phẫu cho 3D (kích thước m, tỉ lệ, khớp cần rig, chất liệu). Giữ đúng tiêu đề và nhãn của
+  mẫu: `tools/concept.py gen` đọc chúng (thử bằng `--dry-run`).
 
 Cách làm:
 - Văn bản: zh.wikisource.org, bản thô `https://zh.wikisource.org/w/index.php?title=<trang>&action=raw`. Lấy nguyên văn
@@ -54,7 +56,9 @@ Cách làm:
   giấy phép/tác giả/link vào `_credits.jsonl`, không ghi đè, giấy phép không tự do bị từ chối). Không curl/wget ảnh,
   không `--allow-nonfree` trừ khi hợp đồng cho phép (chỉ tham khảo nội bộ). Ảnh ngoài Commons (bảo tàng CC0 khác): chỉ
   ghi link + giấy phép trong bảng, đạo diễn tải.
-- Nhiều agent song song: mỗi agent `--interval 2` để Commons không trả 429; lỗi 429 kéo dài thì dừng tải, ghi "thiếu".
+- Nhiều agent song song: mỗi agent `--interval 2` để Commons không trả 429. Cờ này đứng **trước** lệnh con:
+  `python3 tools/refs_fetch.py --interval 2 fetch --list <danh sách>.txt --out <thư mục ảnh>` (đặt sau `fetch` là lỗi
+  cú pháp). Lỗi 429 kéo dài, hay server bảo chờ quá 120 s (`run again later`): dừng tải, ghi "thiếu".
 - Bảng ảnh trong `ICONOGRAPHY.md` lấy giấy phép, tác giả, link từ `_credits.jsonl` (không gõ tay).
 - Bối cảnh: HDRI/texture/model CC0 cho Blender chỉ **đề xuất** id ở mục 5 của `LOCATION-REFS.md` (có thể xem
   `python3 tools/assets.py search --type hdri` / `plan`); không chạy `tools/assets.py fetch` (đạo diễn hỏi người dùng

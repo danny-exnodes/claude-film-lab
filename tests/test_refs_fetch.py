@@ -87,9 +87,12 @@ class FakeCommons:
         f = self.files.get(title)
         if not f:
             return {"title": title, "missing": True}
-        return {"title": title, "index": index, "imageinfo": [{
-            "url": f"{self.base}/img/{f['name']}", "width": f["w"], "height": f["h"],
-            "thumburl": f"{self.base}/img/{f['name']}", "extmetadata": f["meta"]}]}
+        info = {"url": f"{self.base}/img/{f['name']}", "width": f["w"], "height": f["h"], "size": len(f["data"]),
+                "thumburl": f"{self.base}/img/{f['name']}", "extmetadata": f["meta"]}
+        if f.get("nothumb"):
+            del info["thumburl"]
+            info["size"] = f["nothumb"]
+        return {"title": title, "index": index, "imageinfo": [info]}
 
     def close(self):
         self.server.shutdown()
@@ -261,6 +264,24 @@ class TestFetch(helpers.TmpDirCase, unittest.TestCase):
         self.assertIn("1 refused", out)
         self.assertEqual(sorted(r["file"] for r in self.credits()), ["b.png", "x_01_a.jpg"])
         self.assertEqual([r["note"] for r in self.credits() if r["file"] == "x_01_a.jpg"], ["first"])
+
+    def test_no_thumbnail_and_decompression_bomb_do_not_stop_the_batch(self):
+        self.fake.add("File:Huge.tif", 100, 100, fmt="PNG")
+        self.fake.files["File:Huge.tif"]["nothumb"] = 900 * 1048576       # original 900 MB, no thumbnail
+        self.fake.add("File:Small orig.png", 60, 60, fmt="PNG")
+        self.fake.files["File:Small orig.png"]["nothumb"] = 2000          # small original: fetched
+        self.fake.add("File:Bomb.png", 400, 300, fmt="PNG")
+        self.fake.add("File:Ok.jpg", 50, 50)
+        lst = self.tmp / "refs.txt"
+        lst.write_text("File:Huge.tif\nFile:Small_orig.png\nFile:Bomb.png\nFile:Ok.jpg\n", encoding="utf-8")
+        with mock.patch.object(Image, "MAX_IMAGE_PIXELS", 60 * 60):
+            code, out, err = self.run_cli("fetch", "--list", str(lst), "--out", self.out)
+        self.assertEqual(code, 1)
+        self.assertIn("2 saved", out)
+        self.assertIn("2 failed", out)
+        self.assertIn("no thumbnail and the original is 900 MB", err)
+        self.assertIn("too large to open safely", err)
+        self.assertEqual(sorted(r["file"] for r in self.credits()), ["ok.jpg", "small-orig.png"])
 
     def test_search(self):
         self.fake.add("File:A.jpg", 100, 50)

@@ -300,24 +300,42 @@ def free_space(path):
         return None
 
 
-def extract(zpath, folder):
-    """Extract the useful files of a downloaded zip flat into folder (names checked, nothing overwritten).
-    -> names extracted or already there."""
-    names = []
+def extract(zpath, folder, keep_dirs=False):
+    """Extract the useful files of a downloaded zip into folder (names checked, nothing overwritten).
+    Flat for textures and HDRIs (spec.py looks for the maps in one folder); a model keeps its subfolders so the
+    relative URIs of a .gltf / .obj still resolve. -> relative paths extracted or already there.
+    Refused (FetchError, zip kept): two members that would land on the same name, or more than the free disk space."""
+    picked = {}
     with zipfile.ZipFile(zpath) as z:
         for info in z.infolist():
             if info.is_dir():
                 continue
-            base = os.path.basename(info.filename.replace("\\", "/"))
-            if not base.lower().endswith(KEEP_FROM_ZIP) or not NAME_RE.match(base):
+            parts = [p for p in info.filename.replace("\\", "/").split("/") if p not in ("", ".")]
+            if not parts or not parts[-1].lower().endswith(KEEP_FROM_ZIP):
                 continue
-            dest = os.path.join(folder, base)
+            if keep_dirs and all(p != ".." and NAME_RE.match(p) for p in parts):
+                rel = "/".join(parts)
+            elif NAME_RE.match(parts[-1]):
+                rel = parts[-1]
+            else:
+                continue
+            if rel in picked:
+                raise netfetch.FetchError(f"{os.path.basename(zpath)}: two members land on {rel} "
+                                          f"({picked[rel].filename}, {info.filename}); zip kept")
+            picked[rel] = info
+        need = sum(i.file_size for r, i in picked.items() if not os.path.exists(os.path.join(folder, r)))
+        free = free_space(folder)
+        if free is not None and need > free:
+            raise netfetch.FetchError(f"{os.path.basename(zpath)}: {human(need)} to extract, {human(free)} free; "
+                                      "zip kept")
+        for rel, info in picked.items():
+            dest = os.path.join(folder, *rel.split("/"))
             if not os.path.exists(dest):
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with z.open(info) as src, open(dest + ".part", "wb") as out:
                     shutil.copyfileobj(src, out)
                 os.replace(dest + ".part", dest)
-            names.append(base)
-    return sorted(set(names))
+    return sorted(picked)
 
 
 def fetch_item(client, root, it, use, header, rows):
@@ -326,14 +344,19 @@ def fetch_item(client, root, it, use, header, rows):
     for f in it["files"]:
         if f.get("status") == "exists" and f.get("zip"):
             row = manifest_row(rows, it["id"], it["source"])
-            names += [p for p in (row.get("files") or "").split(";") if p]
-            continue
+            listed = [p for p in ((row or {}).get("files") or "").split(";") if p]
+            if row and row.get("resolution") == it["res"] and listed and all(
+                    os.path.isfile(os.path.join(base, p)) for p in listed):
+                names += listed
+                continue
+            # the zip is on disk but was never extracted (an earlier run stopped): download() says "exists",
+            # then it is extracted below
         dest = os.path.join(base, f["rel"])
         r = client.download(f["url"], dest, size=f.get("size"), md5=f.get("md5"))
         print(f"    {r['status']:6} {kind_dir(it['kind'], it['id'])}/{f['rel']}"
               + (f" (resumed at {human(r['resumed'])})" if r.get("resumed") else ""))
         if f.get("zip"):
-            got = extract(dest, base)
+            got = extract(dest, base, keep_dirs=it["kind"] == "model")
             if not got:
                 raise netfetch.FetchError(f"{f['rel']}: no usable file in the zip (kept)")
             os.remove(dest)

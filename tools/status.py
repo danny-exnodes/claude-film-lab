@@ -852,6 +852,10 @@ def gate_section(gate, ep_dir, media, d, budget_state, ledger):
     shots = [s for s in d["shots"]["shots"] if not s["reuse_of"]]
     n_open = len(d["attention"]["open"])
     if gate == "G1":
+        if not d["gates"].get("G1"):
+            # stage 2b (film-dop): G1 approves the script and the camera together; an episode past G1 keeps passing
+            need(exists("CAMERA-BIBLE.md", non_empty=True),
+                 "CAMERA-BIBLE.md non-empty (stage 2b, film-dop; templates/episode/CAMERA-BIBLE.md)")
         need(exists("research.md", non_empty=True), "research.md non-empty")
         need(exists("script.md"), "script.md present")
         need(exists("shots.csv"), "shots.csv present")

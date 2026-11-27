@@ -107,6 +107,30 @@ class TestOptions(Case):
         self.assertEqual(d["c"]["prompt"], "an unlabelled block")
         self.assertEqual(d["e"]["prompt"], "a table prompt")
 
+    def test_the_template_and_its_labels_are_read(self):
+        # templates/research/DESIGN-OPTIONS.md as copied: `### a – ...` with `Prompt EN:` / `Edit EN:` + fenced blocks
+        tpl = helpers.REPO / "templates" / "research" / "DESIGN-OPTIONS.md"
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            d = {x["id"]: x for x in concept.load_options(str(tpl))["directions"]}
+        self.assertEqual(sorted(d), ["a"])                        # b, c have no prompt yet
+        self.assertIn("A photorealistic", d["a"]["prompt"])
+        self.assertIn("keep everything else unchanged", d["a"]["edit"])
+        # the older bold labels with a parenthetical and a note before the colon
+        old = ('### a "Han" – x\n\n**Prompt (EN)** (qwen-t2i):\n\n```text\nA bird A\n```\n\n'
+               '**Edit (EN)** (qwen-edit) – nền `out/p/x.png`:\n\n```text\nremove horns\n```\n\n'
+               '- **Negative (EN):** blurry\n')
+        f = self.tmp / "old.md"
+        f.write_text(old, encoding="utf-8")
+        a = concept.load_options(str(f))["directions"][0]
+        self.assertEqual((a["id"], a["prompt"], a["edit"], a["negative"]), ("a", "A bird A", "remove horns", "blurry"))
+        # `## A. "..."` directions are not read, but say why
+        f.write_text(old.replace("### a", "## A."), encoding="utf-8")
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(concept.load_options(str(f))["directions"], [])
+        self.assertIn("level-3 heading", err.getvalue())
+
     def test_json_jobs_and_refusals(self):
         j = self.tmp / "jobs.json"
         j.write_text(json.dumps({"slug": "con-a", "seeds": [7, 9], "directions": [{"id": "x", "prompt": "p"}]}))

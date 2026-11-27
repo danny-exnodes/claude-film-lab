@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Concept chain for a creature (stage 3a, film-pipeline §2.2): text-to-image -> edit -> contact sheet -> approve.
 
-  python tools/concept.py gen <DESIGN-OPTIONS.md | ICONOGRAPHY.md | jobs.json> --slug S --out-dir DIR --ledger L
+  python tools/concept.py gen <DESIGN-OPTIONS.md | jobs.json> --slug S --out-dir DIR --ledger L
                          [--n 2] [--seed-start 1001] [--only a,b] [--size 1664x928] [--turbo] [--version 1]
                          [--review BUILD] [--dry-run]
   python tools/concept.py edit <image.png ...> --ledger L (--instruction TEXT | --options DESIGN-OPTIONS.md)
@@ -30,10 +30,10 @@ Accepted options files (gen; edit --options reads the `Edit EN` of the image's d
   Markdown: one `### <dir>` heading per direction (`### a`, `### a – Phượng thời Lý`, `### Hướng b: ...`); <dir> is the
     first word after an optional Hướng/Direction/Option/Phương án, lower case, [a-z0-9-]. In the section (up to the next
     heading of level 1-3): a line `Prompt EN: <text>` (also `- **Prompt EN:** <text>`, `Prompt:`), or the label alone
-    followed by a fenced block; optional `Negative EN:` and `Edit EN:` the same way. An unlabelled fenced block is the
-    prompt when there is no Prompt line. HTML comments are ignored; a direction without a prompt is skipped (WARN).
-    Also read: a Markdown table whose header has a `Hướng` (or `Direction`, `id`) column and a `Prompt` column
-    (ICONOGRAPHY.md §5), optional `Negative` and `Edit` columns.
+    (also the template's `**Prompt (EN)** (qwen-t2i):`) followed by a fenced block; optional `Negative EN:` and
+    `Edit EN:` the same way. An unlabelled fenced block is the prompt when there is no Prompt line. HTML comments are ignored; a direction without a prompt is skipped (WARN).
+    Also read: a Markdown table whose header has a `Hướng` (or `Direction`, `id`) column and a `Prompt` column,
+    optional `Negative` and `Edit` columns. Template: templates/research/DESIGN-OPTIONS.md.
   JSON: {"slug": "...", "size": "1664x928", "negative": "...", "seeds": [7, 9],
          "directions": [{"id": "a", "prompt": "...", "negative": "...", "edit": "...", "seeds": [...]}]}
     or just the list of directions. Command line flags win over the file.
@@ -61,8 +61,11 @@ RE_EDIT_TAIL = re.compile(r"_e(\d{2,})$")
 EDITS_FILE = "concept_edits.json"
 DEFAULT_SIZE = "1664x928"
 LABELS = {"prompt": "prompt", "negative": "negative", "edit": "edit"}
-RE_LABEL = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(prompt|negative|edit)(?:\s+en)?\s*:\s*(?:\*\*|__)?\s*(.*)$",
-                      re.I)
+# `Prompt EN: x`, `- **Prompt EN:** x`, `Prompt:`, and the template's `**Prompt (EN)** (qwen-t2i):` /
+# `**Edit (EN)** (qwen-edit) – nền `x.png`:` (a parenthetical and a dash note before the colon are ignored).
+RE_LABEL = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(prompt|negative|edit)(?:\s+en|\s*\(en\))?"
+                      r"(?:\s*(?:\*\*|__))?(?:\s*\([^)]*\))*(?:\s*(?:\*\*|__))?(?:\s+[–—-][^:]*)?"
+                      r"\s*:\s*(?:\*\*|__)?\s*(.*)$", re.I)
 RE_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 RE_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*([\w-]*)")
 DIR_PREFIX = re.compile(r"^(?:hướng|huong|direction|option|phương án|phuong an)\s+", re.I)
@@ -229,7 +232,7 @@ def parse_sections(lines):
 
 
 def table_rows(lines):
-    """Directions from Markdown tables with a direction column and a Prompt column (ICONOGRAPHY.md §5)."""
+    """Directions from Markdown tables with a direction column and a Prompt column."""
     out, head = [], None
     cells = lambda l: [c.strip() for c in l.strip().strip("|").split("|")]
     for line in lines + [""]:
@@ -263,6 +266,11 @@ def table_rows(lines):
 def parse_markdown(text):
     lines = strip_comments(nfc(text)).splitlines()
     dirs = parse_sections(lines)
+    if not dirs:                                    # an older DESIGN-OPTIONS.md: `## A. "<tên>"` directions
+        for line in lines:
+            h = RE_HEADING.match(line)
+            if h and len(h.group(1)) == 2 and re.match(r"(?:hướng\s+)?[a-z]\b\s*[.:)–—-]", nfc(h.group(2)), re.I):
+                warn(f"heading '{line.strip()}': a direction needs a level-3 heading (### a – <tên hướng>)")
     seen = {d["id"] for d in dirs}
     dirs += [d for d in table_rows(lines) if d["id"] not in seen]
     return {"directions": dirs}
@@ -862,7 +870,7 @@ def parser():
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     sp = p.add_subparsers(dest="cmd", required=True)
     g = sp.add_parser("gen", help="text-to-image concepts (comfy.py run qwen-t2i), N seeds per direction")
-    g.add_argument("options", help="DESIGN-OPTIONS.md / ICONOGRAPHY.md (### <dir> + Prompt EN) or a jobs JSON")
+    g.add_argument("options", help="DESIGN-OPTIONS.md (### <dir> + Prompt EN) or a jobs JSON")
     g.add_argument("--slug", default=None, help="the creature's slug (characters/<slug>/; or \"slug\" in the JSON)")
     g.add_argument("--out-dir", required=True, help="e.g. out/<project>/characters/<slug>/concept")
     g.add_argument("--ledger", default=None, help="the episode's ledger.csv (env FILM_LEDGER)")

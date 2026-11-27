@@ -1427,12 +1427,16 @@ CREATURE_PREFIXES = {"blender": ("A-",), "code": ("C-", "M-")}
 
 
 def creature_in_codes(slug, codes, prefixes, others):
+    """A-giao-long-head is giao-long's when giao-long is a creature too, never giao's: a variant belongs to the
+    longest creature slug it starts with."""
+    longer = [o for o in others if len(o) > len(slug) and o.startswith(slug + "-")]
     for c in codes:
         for p in prefixes:
             if not c.startswith(p):
                 continue
             name = c[len(p):]
-            if name == slug or (name.startswith(slug + "-") and name not in others):
+            if name == slug or (name.startswith(slug + "-") and name not in others
+                                and not any(name == o or name.startswith(o + "-") for o in longer)):
                 return True
     return False
 
@@ -1496,8 +1500,10 @@ SF_REF_HEADING = "## Khung chuẩn đã duyệt"
 SF_REF_COLS = {"vai": "role", "khung": "frame", "ngày": "date"}
 SF_ATMOSPHERE = {"không khí", "khong khi", "không-khí", "khong-khi", "atmosphere"}
 SF_COUNT = (5, 8)
+SF_WARN_STAGE = 4            # stage: 3 = 3a + 3b + 3 (film-pipeline §2); from the sample shot on, they are due
 STYLEFRAME_METHODS = CREATURE_METHODS
-RE_ANY_DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
+RE_SF_DATE = re.compile(r"^(?:duyệt\s+|approved\s+)?(\d{4}-\d{2}-\d{2})(?![\d-])", re.I)
+RE_SF_PLACEHOLDER = re.compile(r"^(?:[-–—?.…x]*|<.*>|(?:chờ|cho|tbd|todo|n/?a|none|chưa)\b.*)$", re.I)
 
 
 def md_table(lines):
@@ -1517,7 +1523,9 @@ def md_table(lines):
 def read_style_frames(ep_dir):
     """STYLE-FRAMES.md of the episode folder: None when the file is missing, else {"frames": rows of the `## Khung`
     table, "refs": [{"role": "atmosphere" | <creature slug>, "frame", "date"}], "problems": [...]}.
-    A reference row counts only with a role, a frame and a YYYY-MM-DD date."""
+    A reference row counts only with a role, a frame and a YYYY-MM-DD date that starts the Ngày cell (`duyệt
+    2026-11-26` too; `chờ duyệt (dự kiến 2026-12-01)` is not approved). The frame must be an id or a file of the
+    `## Khung` table (when it has rows) or a file in review/styleframes/; never a placeholder (chờ, -, ?, <…>)."""
     path = os.path.join(ep_dir, STYLEFRAMES_FILE)
     if not os.path.isfile(path):
         return None
@@ -1527,7 +1535,16 @@ def read_style_frames(ep_dir):
     except (OSError, CheckError) as e:
         out["problems"].append(f"unreadable ({getattr(e, 'msg', e)})")
         return out
-    out["frames"] = len(md_table(section_lines(text, SF_FRAMES_HEADING) or [])[1])
+    fhead, frows = md_table(section_lines(text, SF_FRAMES_HEADING) or [])
+    out["frames"] = len(frows)
+    known = set()
+    for col in ("id", "file"):
+        if col in fhead:
+            i = fhead.index(col)
+            for r in frows:
+                v = r[i].strip("` ") if i < len(r) else ""
+                if v:
+                    known |= {v, os.path.basename(v.replace("\\", "/"))}
     head, rows = md_table(section_lines(text, SF_REF_HEADING) or [])
     if not head:
         return out
@@ -1540,7 +1557,12 @@ def read_style_frames(ep_dir):
     for n, cells in enumerate(rows, 1):
         get = lambda k: cells[idx[k]].strip() if idx[k] < len(cells) else ""
         role = " ".join(nfc(get("role")).lower().strip("`* ").split())
-        frame, date = get("frame"), RE_ANY_DATE.search(get("date"))
+        frame, date = get("frame").strip("` "), RE_SF_DATE.match(nfc(get("date")))
+        if date:
+            try:
+                datetime.date.fromisoformat(date.group(1))
+            except ValueError:
+                date = None
         if role in SF_ATMOSPHERE:
             role = "atmosphere"
         else:
@@ -1549,12 +1571,17 @@ def read_style_frames(ep_dir):
                 out["problems"].append(f"{SF_REF_HEADING} row {n}: Vai '{get('role')}' is neither 'không khí' nor a "
                                        "creature slug of ## Sinh vật của tập")
                 continue
-        if not frame or not date:
-            out["problems"].append(f"{SF_REF_HEADING} row {n} ({role}): "
-                                   + ("no frame" if not frame else f"Ngày '{get('date')}' has no YYYY-MM-DD date")
-                                   + ": not counted as approved")
+        if not frame or RE_SF_PLACEHOLDER.match(nfc(frame)):
+            why = "no frame" if not frame else f"Khung '{frame}' is a placeholder"
+        elif not date:
+            why = f"Ngày '{get('date')}' does not start with a YYYY-MM-DD date"
+        elif frows and frame not in known and not any(
+                os.path.isfile(os.path.join(ep_dir, d, frame)) for d in ("review/styleframes", ".")):
+            why = f"Khung '{frame}' is not an id or file of {SF_FRAMES_HEADING} nor a file in review/styleframes/"
+        else:
+            out["refs"].append({"role": role, "frame": frame, "date": date.group(1)})
             continue
-        out["refs"].append({"role": role, "frame": frame, "date": date.group(0)})
+        out["problems"].append(f"{SF_REF_HEADING} row {n} ({role}): {why}: not counted as approved")
     return out
 
 
@@ -1575,7 +1602,8 @@ def style_frame_gaps(sf, creature_rows):
 
 def check_style_frames(ep_dir, meta, rep):
     """method blender/code: STYLE-FRAMES.md well-formed, 5-8 frames, the reference frames approved before G2
-    (WARN from stage 3; INFO once G2 is dated without them: the step did not exist then). Never an ERROR."""
+    (WARN from stage 4, the sample shot for G2: stage 3 holds 3a, 3b and 3 and the frames are made there; INFO once
+    G2 is dated without them: the step did not exist then). Never an ERROR."""
     method = episode_method(meta)[0]
     sf = read_style_frames(ep_dir)
     if method not in STYLEFRAME_METHODS and sf is None:
@@ -1583,10 +1611,10 @@ def check_style_frames(ep_dir, meta, rep):
     stage = meta.get("stage") if isinstance(meta.get("stage"), int) else -1
     for msg in (sf or {}).get("problems", []):
         rep.warn(STYLEFRAMES_FILE, msg)
-    if sf is not None and stage >= 3 and not SF_COUNT[0] <= sf["frames"] <= SF_COUNT[1]:
+    if sf is not None and stage >= SF_WARN_STAGE and not SF_COUNT[0] <= sf["frames"] <= SF_COUNT[1]:
         rep.warn(STYLEFRAMES_FILE, f"{sf['frames']} frame(s) in the {SF_FRAMES_HEADING} table: "
                                    f"{SF_COUNT[0]}-{SF_COUNT[1]} expected (one per chapter)")
-    if method not in STYLEFRAME_METHODS or stage < 3:
+    if method not in STYLEFRAME_METHODS or stage < SF_WARN_STAGE:
         return
     try:
         _, body = split_front_matter(read_text(os.path.join(ep_dir, "EPISODE.md")))

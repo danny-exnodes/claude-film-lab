@@ -34,23 +34,29 @@ hợp đồng), làm nhanh, không dựng model cuối:
 1. **Bối cảnh dựng nhanh**: preset địa hình, khối núi/đá thô, HDRI/sương theo look của style; đủ cho bố cục và ánh sáng.
 2. **Proxy sinh vật** theo concept đã duyệt: khối thô đúng silhouette và tỉ lệ (không chi tiết lông, vảy), đặt đúng cỡ
    cảnh của shot trong `shots.csv`/`CAMERA-BIBLE.md`.
-3. Một khung mỗi chương (shot3d nháp của khung đó), vào `out/<project>/<id>/styleframes/<id>_sf<NN>_<chủ-đề>_v<NN>.png`:
+3. Một khung mỗi chương (shot3d nháp của khung đó, khung số <n>), render **có pass** (grade cần depth cho sương, mask
+   cho lớp sinh vật; `blender.py still` không xuất pass) vào thư mục riêng của khung:
    ```
-   python tools/blender/blender.py still <shot3d.json> --frame <n> --out <khung>.png
+   python tools/blender/blender.py render <shot3d.json> --frames <n> --passes depth mask --out out/<project>/<id>/styleframes/render/sf<NN>
    ```
+   → `render/sf<NN>/beauty/<nnnn>.png`, `depth/`, `mask/<asset>/`, `render.json`.
 4. **Nâng chất** (chỉ khi hợp đồng ghi; tập sẽ dùng cùng đường này cho shot thật ở khâu 5–6). Prompt chỉ nâng chất
    liệu và ánh sáng, giữ bố cục và silhouette của proxy ("keep the composition and pose exactly"); không đổi số sừng,
-   chân (Qwen-Edit không làm được, `local-video.md` §8); `--dry-run` trước; đầu ra `<id>_sf<NN>_<chủ-đề>_edit_v<NN>.png`
-   cạnh khung gốc:
+   chân (Qwen-Edit không làm được, `local-video.md` §8); `--dry-run` trước; đầu ra
+   `out/<project>/<id>/styleframes/edit/<id>_sf<NN>_<chủ-đề>_edit_v<NN>.png`:
    ```
-   FILM_AGENT=<tên> python tools/comfy/comfy.py run qwen-edit --image <khung>.png --prompt "..." --lightning 8 --out <khung>_edit_v<NN>.png --ledger out/<project>/<id>/ledger.csv
+   FILM_AGENT=<tên> python tools/comfy/comfy.py run qwen-edit --image <render>/beauty/<nnnn>.png --prompt "..." --lightning 8 --out <edit>.png --ledger out/<project>/<id>/ledger.csv
    ```
-5. **Grade** theo style (cùng tham số cho mọi khung; ghi tham số vào cột "Cách làm"; `blender-method.md` §7):
-   `python3 tools/compose/grade.py <khung>.png <khung>_grade_v<NN>.png --style styles/<id> [--params <tập>/grade.json]`.
-6. Ghi bảng `## Khung` của `STYLE-FRAMES.md` (id, chương, shot, file, cách làm: đủ để làm lại), rồi contact sheet và
-   bảng màu (chép dòng `palette:` vào `## Bảng màu`):
+5. **Grade** theo style (cùng tham số cho mọi khung; ghi tham số vào cột "Cách làm"; `blender-method.md` §7) ra khung
+   hoàn chỉnh `out/<project>/<id>/styleframes/final/<id>_sf<NN>_<chủ-đề>_v<NN>.png` (chỉ khung hoàn chỉnh vào `final/`):
+   - không nâng chất: `python3 tools/compose/grade.py <render>/sf<NN> <final>.png --style styles/<id> --subject <asset> [--params <tập>/grade.json]`
+     (thư mục render một khung → một .png; `--subject` = asset của sinh vật, lấy `mask/<asset>/`);
+   - có nâng chất: `python3 tools/compose/grade.py <edit>.png <final>.png --style styles/<id> --depth <render>/depth/<nnnn>.png --mask <render>/mask/<asset>/<nnnn>.png`
+     (pass của render gốc; bản nâng chất giữ bố cục; `depth_range` đọc từ `render.json`).
+6. Ghi bảng `## Khung` của `STYLE-FRAMES.md` (id, chương, shot, file trong `final/`, cách làm: đủ để làm lại), rồi
+   contact sheet và bảng màu chỉ từ `final/` (chép dòng `palette:` vào `## Bảng màu`):
    ```
-   python3 tools/styleframes.py sheet out/<project>/<id>/styleframes --out <tập>/review/styleframes/<id>_contact_v01.png --palette-out <tập>/review/styleframes/<id>_palette_v01.png
+   python3 tools/styleframes.py sheet out/<project>/<id>/styleframes/final --out <tập>/review/styleframes/<id>_contact_v01.png --palette-out <tập>/review/styleframes/<id>_palette_v01.png
    ```
 Không ghi mục `## Khung chuẩn đã duyệt` (đạo diễn ghi sau khi chủ dự án chọn). Khung chuẩn đã duyệt là chuẩn cho mọi
 render sau: đối chiếu bằng `python3 tools/styleframes.py compare <khung chuẩn> <khung của shot>`, `DRIFT` thì báo đạo diễn.

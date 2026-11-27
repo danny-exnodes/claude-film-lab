@@ -383,7 +383,21 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   `A-`/`C-`/`M-<slug>` nêu tên sinh vật); tập `layers`/`seedance` (`L4`, `P<n>`) không biết lớp nào là sinh vật nào. Model
   có id khác slug (không phải `<slug>` hay `<slug>-<hậu tố>`) bị báo "in no shot".
 - **#72** Luật hai shot liền nhau trùng cả cỡ cảnh và chuyển động đã là ERROR từ trước (issue đề xuất WARN): giữ ERROR.
-  `CAMERA-BIBLE.md` chưa được kiểm tự động (chỉ là tài liệu của `film-dop`); khâu 2b không có số `stage` riêng (nằm trong khâu 2).
+  Nội dung `CAMERA-BIBLE.md` chưa được kiểm tự động (`status.py --gate G1` chỉ cần file có chữ, tập chưa ghi ngày G1;
+  `review/dop-pass.md` không kiểm); khâu 2b không có số `stage` riêng (ghi `stage: 2`), 3a/3b ghi `stage: 3`.
+
+## Review đợt #68–#77: việc chưa làm
+
+- `tools/blender/spec.py` `resolve_hdri`: id có nhiều độ phân giải (`<id>_1k.hdr`, `<id>_4k.exr`) lấy file đầu theo thứ tự
+  tên, không theo `--res`/ý muốn; nên ưu tiên độ phân giải ghi trong `ASSETS_MANIFEST.csv` (đội Blender sửa).
+- Công thức grade cho clip H3 (`blender-method.md` §7, shot lai): pass depth/mask của render Blender không khớp chuyển động
+  do H3 tạo ra (con vật lệch khỏi mask); cần mask theo clip (`tools/layers/matte_seq.py`) hoặc chỉ grade lớp cảnh. Chưa thử.
+- `assets.py`: zip không có giới hạn tỉ lệ nén (zip bomb) ngoài kiểm chỗ trống theo cỡ khai trong zip; model zip giữ thư
+  mục con nhưng `spec.py` chỉ tìm model qua đường dẫn ghi tay trong shot3d.
+- `refs_fetch.py`: trần bản gốc 30 MB khi Commons không có ảnh thu nhỏ là ước lượng; `iiurlheight` cùng `iiurlwidth` chưa
+  thử với API thật (server giả bỏ qua tham số).
+- `grade.py`: khớp pass theo thứ tự với video vào chỉ quyết theo khung đầu (tên `000001.png`); pass thiếu khung giữa khi
+  khớp theo thứ tự vẫn lệch (không biết tên).
 
 ## Qwen-Image-Edit local (#68) và quản lý model (#75): việc còn nợ
 

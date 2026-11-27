@@ -32,9 +32,17 @@ Không sửa `script.md` (lời bình là của biên kịch).
 Cách làm:
 1. Đọc kịch bản theo chương; đánh dấu mỗi chương cần **chi tiết** (một bộ phận sinh vật, một vật nhỏ) hay **non sông**
    (núi, sông, mây, sinh vật nhỏ giữa vùng đất). Xen kẽ hai cực, không đi một mạch toàn cảnh rồi một mạch cận cảnh.
-2. Dùng **tam viễn** của tranh sơn thuỷ làm thang: cao viễn (từ chân núi ngước lên đỉnh, thường `tilt-up`/`crane`),
-   thâm viễn (từ trước núi nhìn sâu vào các lớp sau, thường `push-in`/`dolly` qua tiền cảnh), bình viễn (núi gần ra núi
-   xa ngang tầm, thường `pan`/`track` chậm, `extreme-wide`). Ghi trong `CAMERA-BIBLE.md` mỗi tầng ứng với shot nào.
+2. Dùng **tam viễn** của tranh sơn thuỷ làm thang: cao viễn (từ chân núi ngước lên đỉnh), thâm viễn (từ trước núi
+   nhìn sâu vào các lớp sau, qua tiền cảnh), bình viễn (núi gần ra núi xa ngang tầm, chậm, `extreme-wide`). Giá trị
+   `camera` chỉ lấy trong danh sách của phương pháp (mục "Phương pháp dựng" dưới; tên khác = `check_episode.py` ERROR):
+
+   | Tầng | `layers` / `seedance` | `code` | `blender` |
+   |---|---|---|---|
+   | cao viễn | `tilt-up` | `tilt-up`, `crane` | `tilt`, `crane` |
+   | thâm viễn | `push-in` | `push-in`, `dolly` | `push-in`, `dolly` |
+   | bình viễn | `pan-left`, `pan-right`, `drift` | `pan-left`, `pan-right`, `track` | `pan`, `track` |
+
+   Ghi trong `CAMERA-BIBLE.md` mỗi tầng ứng với shot nào.
 3. Kỹ thuật nối (chọn đúng chỗ, ghi shot): **rack focus** (tiêu điểm chuyển từ chi tiết sang cảnh trong một shot),
    **pull-back reveal** (bắt đầu cận, lùi ra để thấy con vật nhỏ giữa vùng đất), **graphic match cut** (cắt giữa hai
    hình cùng dáng: con mắt và vầng trăng, vằn lông và vân đá), **scale reveal** (thứ tưởng nhỏ hoá ra khổng lồ, hay
@@ -59,12 +67,14 @@ Cách làm:
    tầm mắt, ống kính, độ cao máy đã duyệt.
 
 Phương pháp dựng (đọc `method` trong `EPISODE.md`; skill `film-script` mục 4a):
-- `method: blender`: `camera` ∈ `static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track`; máy 3D thật nên rack
+- `method: blender`: `camera` ∈ `static, push-in, pull-out, pan, tilt, orbit, dolly, crane, track` (đúng tên
+  `camera.move` của `shots3d/s<NN>.json`: `pan`/`tilt` không có hướng `-left`/`-up`, không có `drift`/`handheld`); máy 3D thật nên rack
   focus, pull-back, crane đều làm được (ghi tiêu cự, độ sâu trường ảnh mong muốn trong `action`).
-- `method: code`: `camera` thêm `orbit, dolly, crane, track`; rack focus chỉ khi style có làm mờ theo độ sâu, không thì đổi
+- `method: code`: `camera` ∈ danh sách của `layers` (dưới) thêm `orbit, dolly, crane, track` (và các chuyển động máy
+  toon của `motions.json`; không có `pan`, `tilt` trần); rack focus chỉ khi style có làm mờ theo độ sâu, không thì đổi
   thành cắt.
 - `method: layers` / `seedance`: `camera` ∈ `static, push-in, pull-out, pan-left, pan-right, tilt-up, tilt-down,`
-  `drift, handheld`; không có máy 3D thật: pull-back reveal = `pull-out` trên lớp tranh rộng, rack focus = làm mờ lớp gần/xa
+  `drift, handheld` (không có `crane`, `track`, `dolly`, `orbit`, `pan` trần); không có máy 3D thật: pull-back reveal = `pull-out` trên lớp tranh rộng, rack focus = làm mờ lớp gần/xa
   bằng code, scale reveal = cắt. Không đặt thứ cần ảnh mới hay clip mới vào `action` (đó là việc của biên kịch).
 
 Giới hạn:

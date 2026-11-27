@@ -78,7 +78,7 @@ mã (`check_episode.py` báo ERROR khi lệch). Đổi mã một tập đang là
 | Clip local (ComfyUI, `video_engine: comfy`) | như clip AI, model ngắn `h3`, kèm file `.json` cạnh clip (`<clip>.mp4.json` hoặc `<tên clip không đuôi>.json`) | `ep01_s03_h3_v01.mp4` + `ep01_s03_h3_v01.mp4.json` |
 | Shot 3D (`method: blender`, chữ) | `<thư mục tập>/shots3d/s<NN>.json` | `shots3d/s03.json` |
 | Render Blender (media) | `out/<project>/<id>/renders3d/s<NN>/` (render lại `s<NN>_v<NN>/`), `s<NN>_preview/`, `s<NN>_keys/`, `turntable-<asset>/` | `renders3d/s03/beauty/0001.png` |
-| Style frame (khâu 3b, media) | `out/<project>/<id>/styleframes/<id>_sf<NN>_<chủ-đề>_v<NN>.png` (nâng chất: `…_edit_v<NN>.png`); contact sheet `<id>_contact_v<NN>.png`, bảng màu `<id>_palette_v<NN>.png` trong `<thư mục tập>/review/styleframes/` | `ep01_sf03_dan-te_v01.png` |
+| Style frame (khâu 3b, media) | khung hoàn chỉnh `out/<project>/<id>/styleframes/final/<id>_sf<NN>_<chủ-đề>_v<NN>.png` (render có pass: `styleframes/render/sf<NN>/`; nâng chất: `styleframes/edit/…_edit_v<NN>.png`); contact sheet `<id>_contact_v<NN>.png`, bảng màu `<id>_palette_v<NN>.png` trong `<thư mục tập>/review/styleframes/` | `ep01_sf03_dan-te_v01.png` |
 | Concept sinh vật (khâu 3a, `tools/concept.py`) | `out/<project>/characters/<slug>/concept/<slug>_<hướng>_s<seed>_v<NN>.png`, edit `..._e<NN>.png`, bảng ghép `<slug>_sheet_v<NN>.png` | `phuong-hoang_a_s1001_v01_e01.png` |
 | Shot lai (`tools/comfy/hybrid.py`) | `renders3d/s<NN>_keys/` (`render/`, `edit/k<n>_e<NN>.png`, `segments/k<a>-k<b>_v<NN>.mp4`, `hybrid.json`, `hybrid_approved.json`) → clip `clips/<id>_s<NN>_h3_v<NN>.mp4` | `ep01_s03_h3_v01.mp4` |
 
@@ -265,7 +265,7 @@ style: thuy-mac
 length_s: 60
 method: layers           # cách dựng: layers | seedance | code | blender (xem dưới)
 video_engine: comfy      # tuỳ chọn, chỉ với seedance | blender: clip khâu 6 bằng seedance (mặc định) hoặc comfy
-stage: 2                 # 0..11 theo docs/WORKFLOW.md
+stage: 2                 # 0..11 theo docs/WORKFLOW.md; khâu 2b ghi 2, khâu 3a/3b ghi 3
 gates: {G1: null, G2: null, G3: null, G4: null}   # ngày duyệt YYYY-MM-DD hoặc null
 media: out/son-hai-kinh/q01t01
 drive: "ClaudeFilmLab/SonHaiKinh/03_KichBan/q01-t01-bac-thi"   # thư mục chữ của tập trên Drive (§11)
@@ -312,10 +312,12 @@ bảng này và concept duyệt cho mọi sinh vật chính (`[MISSING]` khi thi
 Style frame (khâu 3b, tập `blender`/`code`): file `STYLE-FRAMES.md` trong thư mục tập (mẫu
 `templates/episode/STYLE-FRAMES.md`). Bảng `## Khung` một dòng mỗi khung (5–8, mỗi chương một; ngoài khoảng đó → WARN).
 Bảng `## Khung chuẩn đã duyệt` `| Vai | Khung | Ngày | Lời chủ dự án |`: `Vai` = `không khí` hoặc slug của bảng
-`## Sinh vật của tập` (`A-`/`C-`/`M-` đứng trước được bỏ qua); một dòng chỉ tính khi có `Khung` và ngày `YYYY-MM-DD`.
+`## Sinh vật của tập` (`A-`/`C-`/`M-` đứng trước được bỏ qua); một dòng chỉ tính khi `Khung` là id hoặc file của bảng
+`## Khung` (hoặc file trong `review/styleframes/`; không phải `chờ`, `-`, `?`) và ô `Ngày` bắt đầu bằng `YYYY-MM-DD`
+(`duyệt 2026-11-26` được; `chờ duyệt (dự kiến …)` không).
 Duyệt đủ = có dòng `không khí` và một dòng cho mỗi sinh vật chính. Không phải cổng mới (G1–G4 giữ nguyên): `tools/status.py`
 in mục `STYLE FRAMES`, `--gate G2` của tập `blender`/`code` cần duyệt đủ (`[MISSING] approved style frames`);
-`tools/check_episode.py` WARN từ khâu 3 khi chưa duyệt đủ (file thiếu, thiếu dòng, ô sai), INFO khi tập đã ghi ngày G2 và
+`tools/check_episode.py` WARN từ khâu 4 khi chưa duyệt đủ (file thiếu, thiếu dòng, ô sai), INFO khi tập đã ghi ngày G2 và
 ở khâu ≥ 5 (tập làm trước khi có bước này vẫn hợp lệ). Tập `layers`/`seedance` không cần file này.
 
 ## 6. CSV (RFC 4180, UTF-8, có header, trường có dấu phẩy/xuống dòng phải đặt trong ngoặc kép)

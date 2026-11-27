@@ -113,6 +113,7 @@ python tools/comfy/comfy.py run qwen-t2i --prompt "..." [--size 1664x928] [--see
 python tools/comfy/comfy.py run qwen-edit --image <in>.png [--ref <r>.png] --prompt "..." [--lightning 4|8] [--denoise 0.8] --out <dir>/<id>_v<NN>.png --ledger L [--dry-run]   # sửa ảnh/khung khoá, local, miễn phí
 python tools/comfy/comfy.py run hunyuan3d --image <concept nền trắng>.png --out <c>_raw_v<NN>.glb [--octree 256|512] [--steps 30] [--seed N] --ledger L   # phôi 3D sinh vật (Hunyuan3D 2.1)
 python tools/comfy/comfy.py models --inventory [--suggest-clean] | --fetch <bộ> [--yes]   # kiểm kê (chỉ đọc); tải model: không --yes chỉ in kế hoạch
+python tools/comfy/comfy.py free   # chỉ POST /free: trả VRAM sau lô --keep-models dừng giữa chừng; không chạy gì
 python tools/concept.py gen <DESIGN-OPTIONS.md|jobs.json> --slug S --out-dir out/<project>/characters/<slug>/concept --ledger L [--n 2] [--dry-run] | edit <ảnh> --instruction "..." --ledger L | sheet <thư mục>   # concept khâu 3a
 python3 tools/concept.py approve <slug> <ảnh> --episode projects/<project>/<thư mục tập> [--quote "..."]   # ghi CHARACTER.md + bảng Sinh vật của tập
 python tools/comfy/hybrid.py run|keyframes|edit|animate|assemble <shots3d/s<NN>.json> --media out/<project>/<id> --ledger L --edit-prompt-file F --motion-prompt-file F.json [--keys 3] [--dry-run]   # shot lai, dừng ở bước kiểm bằng mắt

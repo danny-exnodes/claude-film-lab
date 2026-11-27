@@ -49,7 +49,7 @@ Theo `templates/research/ICONOGRAPHY.md` → `projects/<project>/characters/<slu
 4. **Phân tích mỹ thuật** và điều làm nên vẻ thần thoại (không ra con vật nuôi).
 
 Theo `templates/research/DESIGN-OPTIONS.md` → `projects/<project>/characters/<slug>/DESIGN-OPTIONS.md`: 2–3 hướng, mỗi
-hướng 6–10 gạch đầu dòng + ảnh tham chiếu chính + **Prompt (EN)** cho `qwen-t2i` + **Edit (EN)** cho `qwen-edit` (concept
+hướng 6–10 gạch đầu dòng + ảnh tham chiếu chính + `Prompt EN:` cho `qwen-t2i` + `Edit EN:` cho `qwen-edit` (concept
 nào làm nền, sửa gì) + giải phẫu cho 3D.
 
 ## Mức VỪA (sinh vật phụ, đạo cụ)

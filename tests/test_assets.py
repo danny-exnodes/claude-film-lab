@@ -344,6 +344,39 @@ class TestFetch(AssetsCase):
         self.assertIn("exists   textures/Rock030/Rock030_2K-JPG.zip", out)
         self.assertEqual(len(self.downloads()), n)
 
+    def test_zip_on_disk_never_extracted_is_extracted_on_rerun(self):
+        # an earlier run downloaded the zip and stopped before extracting it (no manifest row): no crash, no download
+        tex = os.path.join(self.root, "textures", "Rock030")
+        os.makedirs(tex)
+        with open(os.path.join(tex, "Rock030_2K-JPG.zip"), "wb") as f:
+            f.write(zip_bytes({"Rock030_2K-JPG_Color.jpg": blob("c", 900)}))
+        code, out, err = self.cli("fetch", "Rock030", "--source", "ambientcg", "--asset-root", self.root, "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.downloads(), [])
+        self.assertEqual(sorted(os.listdir(tex)), ["Rock030_2K-JPG_Color.jpg"])
+        self.assertEqual(self.manifest()[1][0]["files"], "Rock030_2K-JPG_Color.jpg")
+
+    def test_extract_duplicates_and_model_subfolders(self):
+        z = self.tmp / "m.zip"
+        z.write_bytes(zip_bytes({"a/x_Color.jpg": b"1", "b/x_Color.jpg": b"2"}))
+        dest = self.tmp / "flat"
+        dest.mkdir()
+        with self.assertRaises(netfetch.FetchError) as cm:
+            assets.extract(str(z), str(dest))
+        self.assertIn("two members", str(cm.exception))
+        self.assertEqual(os.listdir(dest), [])                     # nothing half-extracted
+        z.write_bytes(zip_bytes({"rock.gltf": b"{}", "rock.bin": b"0", "textures/rock_diff.jpg": b"1",
+                                 "../evil.jpg": b"e", "a/../b.jpg": b"e"}))
+        model = self.tmp / "model"
+        model.mkdir()
+        got = assets.extract(str(z), str(model), keep_dirs=True)
+        self.assertEqual(got, ["b.jpg", "evil.jpg", "rock.bin", "rock.gltf", "textures/rock_diff.jpg"])
+        self.assertTrue((model / "textures" / "rock_diff.jpg").is_file())
+        self.assertFalse((self.tmp / "evil.jpg").exists())
+        with mock.patch.object(assets, "free_space", return_value=1):
+            with self.assertRaises(netfetch.FetchError):
+                assets.extract(str(z), str(self.tmp / "model2"), keep_dirs=True)
+
     def test_ambientcg_hdri_size_check(self):
         self.fake.acg[1]["downloadFolders"]["default"]["downloadFiletypeCategories"]["exr"]["downloads"][0]["size"] = 1
         code, _, err = self.cli("fetch", "DaySky001", "--source", "ambientcg", "--asset-root", self.root, "--yes")
@@ -408,6 +441,58 @@ class TestNetfetchDownload(helpers.TmpDirCase, unittest.TestCase):
             with self.assertRaises(netfetch.FetchError) as cm:
                 c.get("http://x")
         self.assertEqual((cm.exception.status, waits), (404, []))
+
+    def test_retry_after_above_the_cap_gives_up_instead_of_retrying_early(self):
+        waits = []
+        err = __import__("urllib.error").error.HTTPError("http://x", 429, "slow down", {"Retry-After": "600"}, None)
+        c = netfetch.Client(min_interval=0, max_wait=120, sleep=waits.append)
+        with mock.patch.object(netfetch.urllib.request, "urlopen", side_effect=err) as m:
+            with self.assertRaises(netfetch.FetchError) as cm:
+                c.get("http://x")
+        self.assertIn("wait 600 s", str(cm.exception))
+        self.assertEqual((waits, m.call_count), ([], 1))
+
+    def test_cut_body_string_size_and_complete_part(self):
+        import http.client
+
+        class Resp:
+            status = 200
+
+            def __init__(self, data=b"", cut=False):
+                self.data, self.cut = io.BytesIO(data), cut
+
+            def read(self, n=-1):
+                if self.cut:
+                    raise http.client.IncompleteRead(b"ab", 10)
+                return self.data.read(n)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def getcode(self):
+                return self.status
+
+        c = netfetch.Client(min_interval=0, sleep=lambda t: None)
+        dest = str(self.tmp / "f.bin")
+        with mock.patch.object(netfetch.urllib.request, "urlopen", return_value=Resp(cut=True)):
+            with self.assertRaises(netfetch.FetchError) as cm:
+                c.download("http://x/f.bin", dest)
+            self.assertIn("connection cut", str(cm.exception))
+            with self.assertRaises(netfetch.FetchError):
+                c.get("http://x")
+        # size from an API as a string
+        with mock.patch.object(netfetch.urllib.request, "urlopen", return_value=Resp(b"hello")):
+            self.assertEqual(c.download("http://x/f.bin", str(self.tmp / "g.bin"), size="5")["bytes"], 5)
+        # size unknown, the .part is already complete: the server answers 416 to the Range request
+        with open(str(self.tmp / "h.bin.part"), "wb") as f:
+            f.write(b"done!")
+        e416 = __import__("urllib.error").error.HTTPError("http://x", 416, "range", {}, None)
+        with mock.patch.object(netfetch.urllib.request, "urlopen", side_effect=e416):
+            r = c.download("http://x/h.bin", str(self.tmp / "h.bin"))
+        self.assertEqual((r["status"], r["bytes"]), ("done", 5))
 
 
 if __name__ == "__main__":

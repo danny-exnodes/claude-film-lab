@@ -126,6 +126,9 @@ Chưa có dự án: mở dự án (mục 0). Chưa có tập: mở tập ở kh�
 ## 2. Khâu và cổng duyệt
 
 `stage` trong EPISODE.md = khâu đang làm hoặc đang chờ cổng. Chỉ tăng khi khâu xong và cổng của khâu đó (nếu có) đã qua.
+`stage` là số nguyên: khâu 2b ghi `stage: 2` (G1 đóng khâu 2 gồm cả 2b; `status.py --gate G1` cần `CAMERA-BIBLE.md`);
+khâu 3a, 3b ghi `stage: 3` (cùng khâu 3; concept và khung chuẩn kiểm ở G2, `check_episode.py` WARN style frame từ
+`stage: 4`).
 
 | # | Khâu | Ai làm | Đầu ra | Cổng |
 |---|---|---|---|---|
@@ -272,7 +275,7 @@ Q1·T3: dựng thẳng từ chữ kinh ("其狀如雞") + ảnh thú thật ra g
    `locations/<slug>/LOCATION-REFS.md`. Ảnh tham chiếu tải bằng `python3 tools/refs_fetch.py fetch` vào
    `out/<project>/assets/refs/` (giấy phép trong `_credits.jsonl`; không lên Drive). Agent xong: đẩy các file chữ.
 2. (c) Đạo diễn (phiên local trên máy chủ lab, miễn phí) tạo **2–3 hướng × 2 seed** concept mỗi sinh vật chính bằng
-   Qwen-Image local, từ các hướng (`### <hướng>` + `Prompt EN:`) của DESIGN-OPTIONS.md (hoặc ICONOGRAPHY.md):
+   Qwen-Image local, từ các hướng (`### <id> – <tên hướng>` + `Prompt EN:`) của DESIGN-OPTIONS.md:
    `python tools/concept.py gen <file hướng> --slug <slug> --out-dir out/<project>/characters/<slug>/concept --ledger out/<project>/ep<NN>/ledger.csv --n 2`
    (`--dry-run` trước; một việc GPU một lúc, xem `python tools/gpu_run.py status`) → ảnh `<slug>_<hướng>_s<seed>_v01.png`,
    rồi `python tools/concept.py sheet out/<project>/characters/<slug>/concept` (bảng ghép có nhãn). Lỗi đếm được, mặt,
@@ -297,13 +300,17 @@ shot mẫu G2.
    `CAMERA-BIBLE.md`), ghi vào bảng `## Khung`.
 2. Làm khung (miễn phí, phiên local trên máy chủ lab):
    - `blender`: giao `film-3d-artist` (hợp đồng ghi "style frame", danh sách khung/shot, đường dẫn concept đã duyệt):
-     bối cảnh dựng nhanh, proxy sinh vật đúng silhouette của concept, `blender.py still` mỗi khung, nâng chất bằng
-     `comfy.py run qwen-edit` (chỉ khi tập sẽ dùng cùng đường đó cho shot thật), grade bằng `grade.py` của `tools/compose`.
+     bối cảnh dựng nhanh, proxy sinh vật đúng silhouette của concept, mỗi khung một
+     `blender.py render <shot3d.json> --frames <n> --passes depth mask --out out/<project>/ep<NN>/styleframes/render/sf<NN>`
+     (`blender.py still` không xuất pass: grade mất sương và lớp sinh vật), nâng chất bằng `comfy.py run qwen-edit` (chỉ
+     khi tập sẽ dùng cùng đường đó cho shot thật) vào `styleframes/edit/`, grade bằng `tools/compose/grade.py` (pass của
+     render đó) ra khung hoàn chỉnh `out/<project>/ep<NN>/styleframes/final/ep<NN>_sf<NN>_<chủ-đề>_v<NN>.png`.
    - `code`: đạo diễn tự chạy `python3 tools/toon/toon.py still <style> --character <...>/character.json --out <khung>.png`
-     mỗi khung (hoặc `--creature`), grade nếu style dùng.
-   Khung phải làm lại được ở khâu 5: cột "Cách làm" ghi đủ lệnh và tham số.
-3. Contact sheet + bảng màu (miễn phí, Pillow):
-   `python3 tools/styleframes.py sheet out/<project>/ep<NN>/styleframes --out <tập>/review/styleframes/ep<NN>_contact_v01.png --palette-out <tập>/review/styleframes/ep<NN>_palette_v01.png`
+     mỗi khung (hoặc `--creature`), grade nếu style dùng; khung hoàn chỉnh cũng vào `styleframes/final/`.
+   Khung phải làm lại được ở khâu 5: cột "Cách làm" ghi đủ lệnh và tham số. Chỉ khung hoàn chỉnh nằm trong `final/`
+   (ảnh gốc, bản nâng chất, bản thử ở `render/`, `edit/`), để contact sheet không trộn các bước.
+3. Contact sheet + bảng màu (miễn phí, Pillow), chỉ từ `final/`:
+   `python3 tools/styleframes.py sheet out/<project>/ep<NN>/styleframes/final --out <tập>/review/styleframes/ep<NN>_contact_v01.png --palette-out <tập>/review/styleframes/ep<NN>_palette_v01.png`
    → chép dòng `palette:` và số đo vào `## Bảng màu`; viết `## Quy tắc đối chiếu` (độ nhạt, sinh vật đậm/nhạt so với nền,
    sương, nét).
 4. Gửi người dùng contact sheet (ảnh trong hội thoại), **người dùng duyệt và chọn khung chuẩn**: một khung `không khí` và
@@ -313,12 +320,13 @@ shot mẫu G2.
 5. Từ đây mọi hợp đồng khâu 3–10 ghi đường dẫn khung chuẩn; render/shot mới đối chiếu bằng
    `python3 tools/styleframes.py compare <tập>/review/styleframes/<khung chuẩn>.png <khung của shot>.png` (`DRIFT` = lệch
    độ nhạt, tương phản, bão hoà hay bảng màu quá ngưỡng: xem bằng mắt, sửa look/grade trước khi làm tiếp).
-   `status.py --gate G2` báo `[MISSING] approved style frames` khi bảng chưa đủ; `check_episode.py` WARN từ khâu 3 (tập
+   `status.py --gate G2` báo `[MISSING] approved style frames` khi bảng chưa đủ; `check_episode.py` WARN từ khâu 4 (tập
    đã qua G2 trước khi có bước này: INFO).
 
 ### 2.4 Đạo diễn hình ảnh (khâu 2b): `CAMERA-BIBLE.md`
 
-Sau khi `film-writer` xong `script.md` + `shots.csv`, trước G1 (người dùng duyệt kịch bản và máy quay cùng lượt): giao
+Sau khi `film-writer` xong `script.md` + `shots.csv`, trước G1 (người dùng duyệt kịch bản và máy quay cùng lượt;
+`stage` vẫn là 2; `status.py --gate G1` báo `[MISSING] CAMERA-BIBLE.md` khi chưa có, trừ tập đã ghi ngày G1): giao
 `film-dop` (`.claude/agents/film-dop.md`). Hợp đồng: thư mục tập, `method`, đầu vào (`script.md`, `shots.csv`,
 `CHARACTER.md`, `STYLE-FRAMES.md` và `LOCATION-REFS.md` nếu có), đầu ra `CAMERA-BIBLE.md` (mẫu
 `templates/episode/CAMERA-BIBLE.md`), cột `shot_size`/`camera`/`action` của `shots.csv` (mốc giây, lời bình, lớp giữ

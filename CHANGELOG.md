@@ -43,6 +43,19 @@
 - Chưa kiểm chứng: chưa chạy thật trên GPU/ComfyUI/Blender (graph `qwen-edit`, `hunyuan3d` ghi `verified: false`;
   `meshprep.py` chưa chạy trong Blender), chưa gọi API thật của Hugging Face, Commons, Poly Haven, ambientCG; tham số grade
   và ngưỡng `styleframes.py compare` chưa được người xem duyệt.
+- Sửa sau review (shot lai): duyệt bằng mắt không lách được – `hybrid.py approve` và `--approved` ghi mỗi khung kèm đúng
+  file edit đã xem (`k1=k1_e01.png,k2=e02`, bảng kiểm in sẵn lệnh), từ chối file không phải edit hiện tại và edit làm
+  trong cùng lệnh; `run` kiểm ledger, prompt edit/chuyển động và `--approved` trước khi Blender chạy.
+- Sửa sau review (shot lai): `assemble` chỉ ghép các đoạn của lần `animate` gần nhất (không trộn 480p/768p), đo độ dài
+  bằng `ffprobe` khi có; mỗi lệnh Blender một dòng ledger (`blender:keyframes`, `blender:still`) với số ảnh và trạng thái
+  thật; đường dẫn `--motion-prompt-file` lưu tuyệt đối; file mà spec nạp (.glb/.blend/HDRI/texture) đổi thì cần `--root` mới.
+- Sửa sau review (ComfyUI): `comfy.py free` (chỉ POST /free); `concept.py`/`hybrid.py` gọi nó khi lô `--keep-models` dừng
+  giữa chừng; `--lightning 0` = Qwen-Edit không LoRA; `qwen-t2i` từ chối `--negative` ở cfg 1 (`--turbo`), `concept.py gen
+  --turbo` không gửi `Negative EN`; `models --suggest-clean` giữ bản trùng ở thư mục mà lock nạp; danh sách Hugging Face
+  theo trang (`Link: rel="next"`, chỉ cùng host).
+- Sửa sau review (concept, lưới 3D): `concept.py approve` từ chối `--name` có `|`, `` ` ``, xuống dòng và `--quote` nhiều dòng;
+  `make_sheet` không để lại file tạm; `meshcheck` báo `GlbError` thay vì traceback khi scene/node hỏng, chịu được lưới toàn
+  tam giác suy biến; `mesh-prep` không lỗi khi `prep.json` thiếu `files.blend`.
 
 ## [1.5.0] - 2026-11-26
 

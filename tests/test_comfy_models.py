@@ -4,7 +4,7 @@ import hashlib, json, os, re, threading, unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import test_comfy as tc
 from helpers import REPO
@@ -22,6 +22,7 @@ class FakeHF:
         self.ignore_range, self.serve = False, {}     # serve: (repo, path) -> other bytes (a corrupt mirror)
         self.oid = {}                       # (repo, path) -> sha256 shown by the API (default: the real one)
         self.redirect = True                # resolve answers 302 to a /cdn/ URL first, like huggingface.co
+        self.page = None                    # tree listing page size (Link: <...?cursor=N>; rel="next"), None = one page
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -49,7 +50,14 @@ class FakeHF:
                             oid = fake.oid.get((r, p), hashlib.sha256(data).hexdigest())
                             out.append({"type": "file", "oid": "0" * 40, "size": len(data), "path": p,
                                         "lfs": {"oid": oid, "size": len(data), "pointerSize": 134}})
-                    return self.send(200, json.dumps(out).encode(), [("Content-Type", "application/json")])
+                    headers = [("Content-Type", "application/json")]
+                    if fake.page:
+                        start = int((parse_qs(urlparse(self.path).query).get("cursor") or ["0"])[0])
+                        if start + fake.page < len(out):
+                            headers.append(("Link", f'<{urlparse(self.path).path}?cursor={start + fake.page}>; '
+                                                    'rel="next"'))
+                        out = out[start:start + fake.page]
+                    return self.send(200, json.dumps(out).encode(), headers)
                 m = re.fullmatch(r"/(cdn/)?([^/]+/[^/]+)/resolve/([^/]+)/(.*)", path)
                 if m:
                     key = (m.group(2), m.group(4))
@@ -185,6 +193,19 @@ class TestInventory(ModelsCase):
         self.assertIn("families:", out)
         self.assertIn("clean-up candidates", out)
 
+    def test_duplicate_keeps_the_copy_the_lock_loads(self):
+        lab = self.put("checkpoints/hunyuan_3d_v2.1.safetensors", 800)
+        stray = self.put("3d/hunyuan_3d_v2.1.safetensors", 800)              # sorts before checkpoints/
+        unet = self.put("diffusion_models/qwen_image_2512_fp8_e4m3fn.safetensors", 1000)
+        alias = self.put("aaa/qwen_image_2512_fp8_e4m3fn.safetensors", 1000)
+        code, out, err = self.run_comfy("models", "--suggest-clean")
+        self.assertEqual(code, 0, err)
+        cands = out.split("clean-up candidates", 1)[1]
+        self.assertRegex(cands, re.escape(str(stray)) + r"  -- duplicate \(same name and size\) of " + re.escape(str(lab)))
+        self.assertRegex(cands, re.escape(str(alias)) + r"  -- duplicate .* of " + re.escape(str(unet)))
+        self.assertNotIn(f"{lab}  --", cands)
+        self.assertNotIn(f"{unet}  --", cands)
+
     def test_flag_combinations(self):
         for argv, want in ((["--inventory", "--fetch", "x"], "one at a time"),
                            (["--inventory", "--set", "qwen-image"], "do not take them"),
@@ -238,6 +259,19 @@ class TestFetch(ModelsCase):
         code, out, _ = self.fetch("--yes")                                 # second time: present, nothing fetched
         self.assertEqual(code, 0)
         self.assertIn("nothing to download", out)
+
+    def test_tree_listing_pages_are_followed(self):
+        folder = self.e["hf"]["path"].rsplit("/", 1)[0]
+        for i in range(3):                                                  # listed before the lock's file
+            self.f.files[("Org/Repo", f"{folder}/a{i}.safetensors")] = b"x"
+        self.f.files = dict(sorted(self.f.files.items(), key=lambda kv: kv[0][1]))
+        self.f.page = 2
+        code, out, err = self.fetch("--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.dest.read_bytes(), self.DATA)
+        self.assertEqual(sum(1 for c in self.f.calls if c.startswith("/api/models/")), 2, "two pages")
+        self.assertEqual(comfy.hf_next_page('<http://evil.example/x?cursor=2>; rel="next"', self.f.url + "/api/x"),
+                         None, "a next page on another host is never followed")
 
     def test_resume_with_range(self):
         part = Path(str(self.dest) + ".part")

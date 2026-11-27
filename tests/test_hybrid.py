@@ -1,7 +1,7 @@
 """tools/comfy/hybrid.py: Blender key frames -> Qwen-Edit -> eye check -> H3 -> assemble, with every subprocess faked
 (no Blender, no ComfyUI, no GPU): argument lists, dry-run plan, the approval gate, resume / no overwrite, the ledger row
 of the Blender step, and the ffmpeg concat on tiny generated clips when ffmpeg is installed."""
-import csv, json, shutil, subprocess, sys, unittest
+import csv, json, os, shutil, subprocess, sys, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -40,7 +40,7 @@ class Fake:
         if argv[1:2] == [hybrid.BLENDER]:
             return "blender " + argv[2]
         if argv[1:2] == [hybrid.COMFY]:
-            return argv[3]
+            return argv[3] if len(argv) > 3 else argv[2]          # run <workflow> | free
         return "ffmpeg"
 
     def __call__(self, argv):
@@ -108,6 +108,12 @@ class Case(helpers.TmpDirCase, unittest.TestCase):
     def state(self):
         return json.loads((self.root / hybrid.STATE).read_text(encoding="utf-8"))
 
+    def rows(self):
+        if not self.ledger.exists():
+            return []
+        with open(self.ledger, encoding="utf-8") as f:
+            return list(csv.DictReader(f))
+
 
 class TestPlan(Case):
     def test_dry_run_prints_every_call_and_runs_nothing(self):
@@ -162,16 +168,18 @@ class TestChain(Case):
         self.assertIn("peacock", out)
         self.assertIn("5-6 tail ribbons", out)
         self.assertIn("WAITING", out)
+        self.assertIn(f"approve {self.spec} k1=k1_e01.png,k2=k2_e01.png --media", out)   # bound to these files
         if Image is not None:
             self.assertTrue((self.root / "check_v01.png").is_file())
-        with open(self.ledger, encoding="utf-8") as f:
-            rows = list(csv.DictReader(f))
-        self.assertEqual([(r["model"], r["status"], r["count"]) for r in rows], [("blender:keyframes", "ok", "2")])
+        self.assertEqual([(r["model"], r["status"], r["count"]) for r in self.rows()], [("blender:keyframes", "ok", "2")])
         # resume: nothing is made again
         code, out, _, fake = self.cli(*self.base("run", *self.edit_args()))
         self.assertEqual((code, fake.calls), (0, []))
-        # the owner approves; run goes on with H3 and the concat
+        # the owner approves exactly the files of the check sheet; run goes on with H3 and the concat
         code, out, err, _ = self.cli("approve", self.spec, "k1,k2", "--media", self.media)
+        self.assertEqual(code, 2)                                   # a key without its file: refused
+        self.assertIn("k1=k1_e01.png", err)
+        code, out, err, _ = self.cli("approve", self.spec, "k1=k1_e01.png,k2=e01", "--media", self.media)
         self.assertEqual(code, 0, err)
         appr = json.loads((self.root / hybrid.APPROVED).read_text())
         self.assertEqual(sorted(appr["keys"]), ["k1", "k2"])
@@ -209,7 +217,11 @@ class TestChain(Case):
         self.assertEqual([("--keep-models" in c) for c in fake.of("qwen-edit")], [True, True, False])
         # the owner rejects k2: H3 bridges k1 -> k3 in one segment
         code, out, err, fake = self.cli(*self.base("animate", *self.edit_args(), "--approved", "k1,k3"))
+        self.assertEqual((code, fake.calls), (2, []))               # names without the files the owner saw
+        code, out, err, fake = self.cli(*self.base("animate", *self.edit_args(), "--approved", "k1=e01,k3=e01"))
         self.assertEqual(code, 0, err)
+        self.assertEqual([(r["model"], r["count"]) for r in self.rows() if r["model"].startswith("blender:")],
+                         [("blender:keyframes", "2"), ("blender:still", "1")])     # one row per Blender call
         h3, = fake.of("h3-i2v")
         self.assertEqual(Path(arg(h3, "--last")).name, "k3_e01.png")
         self.assertEqual(arg(h3, "--seconds"), "4.958")
@@ -246,7 +258,9 @@ class TestChain(Case):
     def test_a_failure_stops_the_chain(self):
         code, _, err, fake = self.cli(*self.base("run", *self.edit_args()), fake=Fake(fail={2: 1}))
         self.assertEqual(code, 1)
-        self.assertEqual(len(fake.calls), 2)                       # keyframes ok, first edit failed, no more
+        # keyframes ok, first edit (--keep-models) failed, no more edits; the VRAM it kept is freed
+        self.assertEqual([fake.kind(c) for c in fake.calls], ["blender keyframes", "qwen-edit", "free"])
+        self.assertEqual(fake.calls[-1], [sys.executable, hybrid.COMFY, "free"])
         self.assertIn("not retried", err)
         self.assertNotIn("edits", self.state())
         code, _, err, fake = self.cli(*self.base("run", *self.edit_args()))   # resume: only the edits run
@@ -273,11 +287,152 @@ class TestChain(Case):
         self.assertIn("eye check pending", out)
 
 
+class TestReviewFixes(Case):
+    """Round-3 review: the eye check cannot be bypassed, assemble uses one animate's segments, run refuses before
+    Blender, one ledger row per Blender call, --lightning 0, absolute prompt paths, asset files in the fingerprint."""
+
+    def test_approval_is_bound_to_the_files_the_owner_saw(self):
+        # a fresh root: nothing to have seen, refused before Blender renders anything
+        code, _, err, fake = self.cli(*self.base("run", *self.edit_args(), "--approved", "k1=e01,k2=e01"))
+        self.assertEqual((code, fake.calls), (2, []))
+        self.assertIn("no edit yet", err)
+        self.assertFalse((self.root / hybrid.APPROVED).exists())
+        self.cli(*self.base("run", *self.edit_args()))                     # stops at the eye check (k1_e01, k2_e01)
+        # a redo approved in the same call: refused before anything runs
+        code, _, err, fake = self.cli(*self.base("run", *self.edit_args(), "--redo", "k2", "--edit-seed", "9",
+                                                 "--approved", "k1=e01,k2=e01"))
+        self.assertEqual((code, fake.calls), (2, []))
+        self.assertIn("has not been checked yet", err)
+        code, _, err, fake = self.cli(*self.base("run", *self.edit_args(), "--redo", "k2", "--edit-seed", "9",
+                                                 "--approved", "k1=e01,k2=e02"))
+        self.assertEqual((code, fake.calls), (2, []))
+        # the redo alone: k2_e02 exists, the owner saw k2_e01 -> approving k2_e01 is refused, k2_e02 needs a check
+        code, _, err, _ = self.cli(*self.base("edit", *self.edit_args(), "--redo", "k2", "--edit-seed", "9"))
+        self.assertEqual(code, 0, err)
+        code, _, err, _ = self.cli("approve", self.spec, "k1=e01,k2=e01", "--media", self.media)
+        self.assertEqual(code, 2)
+        self.assertIn("not the current edit of k2 (k2_e02.png)", err)
+        self.assertFalse((self.root / hybrid.APPROVED).exists())
+        code, _, err, fake = self.cli(*self.base("run", *self.edit_args(), "--approved", "k1=e01,k2=e02"))
+        self.assertEqual(code, 0, err)                                   # the owner checked k2_e02: on to H3
+        h3, = fake.of("h3-i2v")
+        self.assertEqual(Path(arg(h3, "--last")).name, "k2_e02.png")
+        self.assertEqual(fake.of("qwen-edit"), [])
+
+    def test_an_edit_made_in_the_call_is_never_approved(self):
+        self.cli(*self.base("run", *self.edit_args()))
+        c = hybrid.Ctx(hybrid.parser().parse_args([str(x) for x in self.base("animate", *self.edit_args())]))
+        c.fresh.add("k2")
+        with self.assertRaises(hybrid.Refused) as e:
+            hybrid.approve(c, "k1=e01,k2=e01")
+        self.assertIn("made by this call", str(e.exception))
+
+    def test_run_refuses_before_blender(self):
+        code, _, err, fake = self.cli("run", self.spec, "--media", self.media, "--motion-prompt-file", self.motion)
+        self.assertEqual((code, fake.calls), (2, []))                   # no ledger
+        code, _, err, fake = self.cli(*self.base("run", "--motion-prompt-file", self.motion))
+        self.assertEqual((code, fake.calls), (2, []))                   # no edit prompt
+        self.assertIn("--edit-prompt", err)
+        self.assertFalse(self.root.exists())
+        self.cli(*self.base("run", *self.edit_args()))
+        code, _, err, fake = self.cli(*self.base("run", "--approved", "k1=e01,k2=e01"))
+        self.assertEqual((code, fake.calls), (2, []))                   # approved, but no motion prompt
+        self.assertIn("--motion-prompt", err)
+
+    def test_a_ledger_row_per_blender_call(self):
+        code, _, _, fake = self.cli(*self.base("keyframes", "--keys", "3"), fake=Fake(fail={2: 1}))
+        self.assertEqual(code, 1)
+        self.assertEqual([(r["model"], r["status"], r["count"]) for r in self.rows()],
+                         [("blender:keyframes", "ok", "2"), ("blender:still", "failed", "1")])
+        code, _, _, _ = self.cli(*self.base("keyframes"), fake=Fake(fail={1: 2}))     # still refused: no row
+        self.assertEqual(code, 2)
+        self.assertEqual(len(self.rows()), 2)
+        code, _, err, fake = self.cli(*self.base("keyframes"))                         # resume: only the still
+        self.assertEqual(code, 0, err)
+        self.assertEqual([fake.kind(c) for c in fake.calls], ["blender still"])
+        self.assertEqual(self.rows()[-1]["model"], "blender:still")
+
+    def test_lightning_off(self):
+        self.cli(*self.base("keyframes"))
+        code, out, err, fake = self.cli(*self.base("edit", *self.edit_args(), "--lightning", "0"))
+        self.assertEqual(code, 0, err)
+        self.assertTrue(fake.of("qwen-edit"))
+        for c in fake.of("qwen-edit"):
+            self.assertNotIn("--lightning", c)
+        self.assertIn("no Lightning", out)
+        self.assertEqual(self.state()["edit_params"]["lightning"], 0)
+
+    def test_assemble_takes_the_segments_of_the_last_animate(self):
+        self.cli(*self.base("run", *self.edit_args(), "--keys", "3"))
+        ok = ("--approved", "k1=e01,k2=e01,k3=e01")
+        code, _, err, _ = self.cli(*self.base("animate", *self.edit_args(), *ok, "--res", "480p"))
+        self.assertEqual(code, 0, err)
+        # 768p again: k1-k2 made, k2-k3 failed -> a 768p + 480p concat must not happen
+        code, _, _, _ = self.cli(*self.base("animate", *self.edit_args(), "--res", "768p"), fake=Fake(fail={2: 1}))
+        self.assertEqual(code, 1)
+        code, _, err, fake = self.cli(*self.base("assemble"))
+        self.assertEqual((code, fake.calls), (2, []))
+        self.assertIn("no clip for k2-k3", err)
+        code, _, err, fake = self.cli(*self.base("animate", *self.edit_args(), "--res", "768p"))
+        self.assertEqual(len(fake.of("h3-i2v")), 1)                       # only the missing pair
+        code, _, err, fake = self.cli(*self.base("assemble"))
+        self.assertEqual(code, 0, err)
+        side = json.loads((self.media / "clips" / "ep01_s03_h3_v01.mp4.json").read_text())
+        self.assertEqual([Path(s["file"]).name for s in side["segments"]], ["k1-k2_v02.mp4", "k2-k3_v02.mp4"])
+
+    def test_a_concat_of_the_wrong_length_is_not_a_clip(self):
+        self.cli(*self.base("run", *self.edit_args()))
+        self.cli(*self.base("animate", *self.edit_args(), "--approved", "k1=e01,k2=e01"))
+        probe = lambda p: 5.0 if "segments" in str(p) else 2.0
+        with mock.patch.object(hybrid, "probe_seconds", probe):
+            code, _, err, fake = self.cli(*self.base("assemble"))
+        self.assertEqual(code, 1)
+        self.assertEqual(len(fake.of("ffmpeg")), 2)                       # copy, then the re-encode
+        self.assertIn("2.00 s for 5.00 s of segments", err)
+        self.assertFalse((self.media / "clips" / "ep01_s03_h3_v01.mp4").exists())
+        self.assertEqual([p.name for p in (self.media / "clips").glob(".*")], [])
+
+    def test_motion_prompt_path_is_stored_absolute(self):
+        self.cli(*self.base("run", *self.edit_args()))
+        old = Path.cwd()
+        try:
+            os.chdir(self.tmp)
+            code, _, err, _ = self.cli(*self.base("animate", "--motion-prompt-file", "s03.json",
+                                                  "--approved", "k1=e01,k2=e01"))
+            self.assertEqual(code, 0, err)
+            os.chdir(self.media)
+            code, out, err, fake = self.cli(*self.base("animate"))           # resume from another folder
+            self.assertEqual((code, fake.calls), (0, []), err)
+        finally:
+            os.chdir(old)
+        self.assertEqual(self.state()["motion_prompts"], [["--prompt-file", str(self.motion)]])
+
+    def test_a_changed_asset_file_needs_a_new_root(self):
+        glb = self.spec.parent / "bird.glb"
+        glb.write_bytes(b"glTF one")
+        data = json.loads(self.spec.read_text())
+        data["assets"].append({"id": "bird", "src": "bird.glb", "at": [0, 0, 0]})
+        self.spec.write_text(json.dumps(data))
+        code, _, err, _ = self.cli(*self.base("keyframes"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(list(self.state()["asset_files"]), ["bird.glb"])
+        code, _, err, fake = self.cli(*self.base("keyframes"))
+        self.assertEqual((code, fake.calls), (0, []))
+        glb.write_bytes(b"glTF two")
+        code, _, err, fake = self.cli(*self.base("edit", *self.edit_args()))
+        self.assertEqual((code, fake.calls), (2, []))
+        self.assertIn("changed since the key frames", err)
+        self.assertIn(".glb", err)
+
+
 @unittest.skipUnless(FFMPEG and FFPROBE, "ffmpeg/ffprobe not installed")
 class TestAssembleWithFfmpeg(Case):
     def test_concat_without_reencode(self):
+        code, out, err, _ = self.cli(*self.base("run", *self.edit_args(), "--keys", "3"), ffmpeg=FFMPEG)
+        self.assertEqual(code, 0, err)
+        self.assertIn("WAITING", out)                               # the owner looks at the check sheet first
         fake = Fake(real_ffmpeg=True)
-        code, _, err, _ = self.cli(*self.base("run", *self.edit_args(), "--keys", "3", "--approved", "k1,k2,k3"),
+        code, _, err, _ = self.cli(*self.base("run", *self.edit_args(), "--approved", "k1=e01,k2=e01,k3=e01"),
                                    fake=fake, ffmpeg=FFMPEG)
         self.assertEqual(code, 0, err)
         self.assertEqual(len(fake.of("h3-i2v")), 2)

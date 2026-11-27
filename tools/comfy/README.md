@@ -98,6 +98,7 @@ python tools/comfy/comfy.py run h3-i2v --image START.png --last END.png --prompt
 python tools/comfy/comfy.py run h3-r2v --ref hero.png --ref place.png --guide 0=key1.png --guide 4.5=key2.png \
     --prompt-file s07.yaml --seconds 6 --out out/<project>/ep01/clips/ep01_s07_clip_v01.mp4 --ledger out/<project>/ep01/ledger.csv
 python tools/comfy/comfy.py interrupt --ledger out/<project>/ep01/ledger.csv      # dừng job của mình đang chạy
+python tools/comfy/comfy.py free        # POST /free: ComfyUI trả VRAM (sau lô --keep-models dừng giữa chừng); không chạy gì
 ```
 
 - `--dry-run`: kiểm hết, in tóm tắt graph (số node, kích thước, khung, seed, cách cắt ảnh, model, prompt đã ghép, ước
@@ -304,7 +305,7 @@ python3 tools/concept.py approve phuong-hoang out/<project>/characters/phuong-ho
 ## Chuỗi shot lai (`hybrid.py`)
 
 `tools/comfy/hybrid.py <bước> <shot3d.json> --media out/<project>/<id> --ledger L`: `blender.py keyframes` (2–3 khung
-khoá) → `comfy.py run qwen-edit` mỗi khung khoá → **dừng chờ người dùng kiểm bằng mắt** (`approve k1,k2`) →
+khoá) → `comfy.py run qwen-edit` mỗi khung khoá → **dừng chờ người dùng kiểm bằng mắt** (`approve k1=k1_e01.png,k2=k2_e01.png`: đúng file đã xem) →
 `comfy.py run h3-i2v` khung đầu/cuối giữa hai khung duyệt liền nhau → ffmpeg nối thành `clips/<id>_s<NN>_h3_v<NN>.mp4`.
 Bước: `run` (tất cả, dừng ở bước kiểm), `keyframes`, `edit`, `approve`, `animate`, `assemble`, `status`. Khi nào dùng,
 giới hạn và bảng kiểm: `.claude/skills/film-compose-shot/references/local-video.md` §9; `python tools/comfy/hybrid.py --help`.

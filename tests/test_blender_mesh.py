@@ -106,7 +106,29 @@ class TestReadGlb(helpers.TmpDirCase, unittest.TestCase):
             mc.read_glb(str(self.tmp / "cut.glb"))
 
 
+    def test_malformed_scene_graph_is_a_glb_error(self):
+        V, F = box()
+        p = write_glb(self.tmp / "b.glb", [(V, F)])
+        gltf, binary = mc.load_glb(p)
+        for change in ({"scene": 5}, {"scene": "x"}, {"scenes": [{"nodes": "ab"}]}, {"nodes": [{"mesh": 9}]},
+                       {"nodes": [{"mesh": 0, "translation": [1, 2]}]}):
+            bad = dict(gltf, **change)
+            with self.subTest(change=change), mock.patch.object(mc, "load_glb", return_value=(bad, binary)), \
+                    self.assertRaises(mc.GlbError):
+                mc.read_glb(p)
+
+
 class TestMeshStats(unittest.TestCase):
+    def test_all_degenerate_triangles(self):
+        V = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float)
+        F = np.array([[0, 0, 1], [1, 1, 2]])
+        st = mc.mesh_stats(V, F)
+        self.assertEqual((st["tris"], st["degenerate_tris"], st["watertight"]), (0, 2, False))
+        self.assertEqual(st["dims"], [1.0, 1.0, 0.0])
+        self.assertTrue(any("no usable triangle" in w for w in mc.warnings(st)))
+        self.assertEqual(mc.silhouette(V, F).dtype, bool)
+        self.assertEqual(mc.silhouette(V, np.zeros((0, 3), int)).dtype, bool)
+
     def test_closed_box(self):
         st = mc.mesh_stats(*box())
         self.assertEqual((st["verts"], st["tris"], st["edges"]), (8, 12, 18))

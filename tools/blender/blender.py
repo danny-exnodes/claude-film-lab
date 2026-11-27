@@ -1001,7 +1001,7 @@ def _mesh_prep_claimed(a, mc, cmd, name, look, stills, raw_mesh, concept, tt_out
     report = {
         "tool": "tools/blender/blender.py mesh-prep", "name": name,
         "raw": {"glb": os.path.abspath(a.glb), "glb_sha256": sha256(a.glb), "glb_info": info, "stats": raw},
-        "prep": {"glb": prep["files"]["glb"], "blend": prep["files"]["blend"], "stats": pstats, "blender": prep},
+        "prep": {"glb": prep["files"]["glb"], "blend": prep["files"].get("blend"), "stats": pstats, "blender": prep},
         "params": {"voxel": voxel_arg(a.voxel), "quad_faces": a.quad_faces, "decimate": a.decimate,
                    "min_island": a.min_island, "look": look, "view": MESH_VIEW},
         "concept": os.path.abspath(a.concept) if a.concept else None, "silhouette": cmp,

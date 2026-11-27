@@ -99,6 +99,15 @@ def node_matrix(node):
 def read_glb(path):
     """-> (V (n,3) float64, F (m,3) int64, info dict). Triangle primitives only (others are counted and skipped)."""
     gltf, binary = load_glb(path)
+    try:
+        meshes, nodes, placed = _placed_meshes(gltf)
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
+        raise GlbError(f"malformed glTF scene/nodes ({type(e).__name__}: {e})")
+    return _triangles(gltf, binary, meshes, placed)
+
+
+def _placed_meshes(gltf):
+    """(meshes, nodes, [(mesh index, world matrix)]) from the scene graph (all meshes when there are no nodes)."""
     meshes, nodes = gltf.get("meshes") or [], gltf.get("nodes") or []
     placed = []                                       # (mesh index, world matrix)
     if nodes:
@@ -121,6 +130,10 @@ def read_glb(path):
             stack.extend((c, m) for c in nodes[i].get("children") or [])
     else:
         placed = [(i, np.eye(4)) for i in range(len(meshes))]
+    return meshes, nodes, placed
+
+
+def _triangles(gltf, binary, meshes, placed):
     Vs, Fs, base, skipped, prims = [], [], 0, 0, 0
     try:
         for mi, mat in placed:
@@ -141,7 +154,7 @@ def read_glb(path):
                 Fs.append(f + base)
                 base += len(v)
                 prims += 1
-    except (KeyError, IndexError, TypeError) as e:
+    except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
         raise GlbError(f"malformed glTF ({type(e).__name__}: {e})")
     if not Vs or not sum(len(f) for f in Fs):
         raise GlbError("no triangles")
@@ -192,10 +205,12 @@ def mesh_stats(V, F):
     _, sizes = np.unique(lab, return_counts=True)
     sizes = np.sort(sizes)[::-1]
     boundary, over = int((counts == 1).sum()), int((counts > 2).sum())
-    lo, hi = V[used].min(0), V[used].max(0)
+    pts = V[used] if len(used) else V                   # every triangle degenerate: the bbox of the vertices
+    lo, hi = (pts.min(0), pts.max(0)) if len(pts) else (np.zeros(3), np.zeros(3))
     return {"verts": int(len(used)), "verts_in_file": int(raw_verts), "tris": int(len(F)),
             "degenerate_tris": int(degenerate.sum()), "edges": int(len(keys)), "boundary_edges": boundary,
-            "overshared_edges": over, "non_manifold_edges": boundary + over, "watertight": boundary + over == 0,
+            "overshared_edges": over, "non_manifold_edges": boundary + over,
+            "watertight": boundary + over == 0 and len(F) > 0,
             "islands": int(len(sizes)), "largest_islands": [int(s) for s in sizes[:5]],
             "small_islands": int((sizes < max(1, 0.01 * sizes[0])).sum()) if len(sizes) else 0,
             "bbox_min": [round(float(x), 4) for x in lo], "bbox_max": [round(float(x), 4) for x in hi],
@@ -220,7 +235,10 @@ def main_part(V, F, min_share=0.01):
 def warnings(stats, cmp=None):
     """Plain findings for the report (what the blank needs before rigging)."""
     out = []
-    if not stats["watertight"]:
+    if not stats["tris"]:
+        out.append(f"no usable triangle: all {stats['degenerate_tris']} are degenerate (zero area): export the mesh "
+                   "again")
+    elif not stats["watertight"]:
         out.append(f"not watertight: {stats['boundary_edges']} boundary edge(s) (holes), {stats['overshared_edges']} "
                    "edge(s) shared by more than two faces: voxel remesh before sculpting/rigging")
     if stats["islands"] > 1:
@@ -255,7 +273,10 @@ def silhouette(V, F, view="front", size=512, pad=4, min_part=0.01):
     if min_part > 0:
         V, F = main_part(np.asarray(V, dtype=np.float64), np.asarray(F), min_part)
     P = project(np.asarray(V, dtype=np.float64), view)
-    used = P[np.unique(F)]
+    F = np.asarray(F, dtype=np.int64).reshape(-1, 3)
+    used = P[np.unique(F)] if len(F) else P
+    if not len(used):
+        return np.zeros((2 * pad + 1, 2 * pad + 1), dtype=bool)
     lo, hi = used.min(0), used.max(0)
     span = float(max(hi - lo)) or 1.0
     s = (size - 2 * pad) / span

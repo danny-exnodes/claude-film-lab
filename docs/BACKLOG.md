@@ -55,6 +55,13 @@ Sinh từ báo cáo của đội agent (11 lượt kiểm toán, 10 gói triển
   bước, xem cờ `--lightning/--denoise` khớp workflow thật.
 - `hybrid.py`: chỉ `h3-i2v` first/last; biến thể `h3-r2v` + `--guide` (nhiều khung khoá trong một clip) chưa nối. Hai đoạn
   liền nhau lặp khung khoá ở chỗ nối (ghép không mã hoá lại): chưa tự cắt.
+- `hybrid.py approve` gắn duyệt với tên file edit (và sha256 lúc duyệt), chưa với đúng byte người dùng đã xem: file bị
+  thay tay cùng tên giữa lúc xem và lúc duyệt thì không phát hiện (cần ghi sha256 vào bảng ghép `check_v<NN>` rồi so).
+  Kiểm độ dài bản ghép cần `ffprobe` trên PATH (máy chủ lab chưa có `ffmpeg`): thiếu thì bỏ qua.
+- `comfy.py models --suggest-clean`: bản trùng của file chỉ workflow dùng mà lock không ghi thư mục thì vẫn giữ theo thứ
+  tự đường dẫn (chưa biết thư mục loader của node).
+- `blender.py mesh-prep`: `prep.json` thiếu `files.blend` giờ ghi `null` vào báo cáo; chưa có test riêng (bản Blender giả
+  luôn ghi đủ).
 - Review site: tag chọn/loại cho build `concept` (#74) chưa làm; `concept.py approve` chưa đẩy kết quả duyệt lên review.
 
 ## Lỗi reviewer xác nhận nhưng chưa sửa

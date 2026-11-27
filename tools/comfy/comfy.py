@@ -23,7 +23,7 @@
                      [--seconds 5] [--res 480p|768p] [--seed N] [--steps N] [--turbo] [--timeout 2400] [--keep-frames]
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py run qwen-t2i (--prompt TEXT | --prompt-file F.txt) --out <concepts>/<id>_v<NN>.png
-                     [--negative TEXT] [--size 1664x928] [--seed N] [--steps 30] [--cfg 2.5] [--turbo]
+                     [--negative TEXT (cfg > 1 only)] [--size 1664x928] [--seed N] [--steps 30] [--cfg 2.5] [--turbo]
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py run qwen-edit --image IN.png [--ref R.png ...] (--prompt TEXT | --prompt-file F.txt)
                      --out <dir>/<id>_v<NN>.png [--lightning 4|8] [--steps N] [--cfg C] [--denoise D] [--seed N]
@@ -32,6 +32,8 @@
                      [--octree 256|512] [--steps 30] [--cfg 5] [--seed N] [--allow-bg]
                      (--ledger L.csv | --no-ledger) [--dry-run] [--review BUILD] [--keep-models]
   python tools/comfy/comfy.py interrupt (--prompt-id ID | --ledger L.csv)     stop our own job(s), never a global stop
+  python tools/comfy/comfy.py free        POST /free: ComfyUI unloads its models (after a failed --keep-models batch);
+                                          starts nothing, queues nothing, takes no GPU lock
 
 Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.json):
   h3-i2v   MiniMax H3 image-to-video with audio: --image START (first frame), optional --last END (first-last frame);
@@ -40,8 +42,8 @@ Workflows (tools/comfy/workflows/<id>.json in ComfyUI API format + <id>.meta.jso
            --guide SECONDS=IMG time anchors (MiniMaxH3AddGuide).
   qwen-t2i Qwen-Image 2512 text-to-image (one PNG; concept art to choose before 3D): --size WxH (multiple of 16,
            default 1664x928; trained sizes 1328x1328, 1664x928, 928x1664, 1472x1104, 1104x1472, 1584x1056, 1056x1584),
-           30 steps, cfg 2.5, euler/simple, shift 3.1, --negative allowed; --turbo = Wuli Turbo LoRA, 2 steps, cfg 1,
-           drafts only. Ledger kind image, model comfy:qwen-image. --review: the sampler steps as progress and the
+           30 steps, cfg 2.5, euler/simple, shift 3.1, --negative allowed (refused at cfg 1: no effect); --turbo = Wuli
+           Turbo LoRA, 2 steps, cfg 1, drafts only. Ledger kind image, model comfy:qwen-image. --review: the sampler steps as progress and the
            image as a step of an "image" build.
   qwen-edit Qwen-Image-Edit 2511 image edit (one PNG): --image = image 1 (the one redrawn, scaled to ~1 MP, multiple
            of 16), --ref = images 2-3 ("Picture 2/3" in the prompt); output size = the input's (--size WxH overrides,
@@ -1496,6 +1498,10 @@ def check_image_inputs(a, meta, wid):
     cfg = a.cfg if a.cfg is not None else (turbo["cfg"] if turbo else meta["defaults"]["cfg"])
     if not 0 < cfg <= 30:
         refuse("--cfg must be > 0 and <= 30")
+    if a.negative is not None and cfg == 1.0:
+        refuse(f"--negative is refused at cfg 1{' (--turbo)' if turbo else ''}: with cfg 1 the sampler never uses the "
+               "negative prompt, it would change nothing. Say what to avoid in --prompt, or run without --turbo "
+               "(cfg 2.5) to use a negative")
     if turbo:
         warn(f"--turbo: {turbo['note']} ({steps} steps, cfg {cfg:g})")
     seed = a.seed if a.seed is not None else secrets.randbelow(2**32)
@@ -2144,7 +2150,21 @@ def inventory_cmd(a):
     print("drives: " + " · ".join(f"{d} {'?' if free is None else f'{free / GB:.1f}'} GB free of "
                                   f"{'?' if tot is None else f'{tot / GB:.1f}'} GB" for d, free, tot in drives))
     if a.suggest_clean:
-        cands, first = [], {}
+        # of copies with the same name and size, the one kept is the copy ComfyUI loads for the lab: the lock's
+        # <folder>/<file> (or its alias, in find_model's order), then the first model folder, then the path
+        where = {}
+        for m in lock["models"]:
+            where.setdefault(m["file"], list(MODEL_FOLDER_ALIASES.get(m["folder"], (m["folder"],))))
+
+        def keep_rank(r):
+            dirs = where.get(r["name"]) or []
+            parent = r["rel"].rsplit("/", 1)[0] if "/" in r["rel"] else ""
+            return (dirs.index(parent) if parent in dirs else len(dirs), roots.index(r["root"]), r["rel"].lower())
+
+        first = {}
+        for r in sorted((r for r in rows if not r["leftover"]), key=keep_rank):
+            first.setdefault((r["name"], r["size"]), r)
+        cands = []
         for r in rows:
             if r["leftover"]:
                 why = ("a download that did not finish (resume: models --fetch SET) or failed its sha256 (.bad)")
@@ -2152,11 +2172,10 @@ def inventory_cmd(a):
                     why += "; the name ends in '_': a \\r from a shell pipe? (RUNBOOK)"
                 cands.append((r, why))
                 continue
-            key = (r["name"], r["size"])
-            if key in first:
-                cands.append((r, f"duplicate (same name and size) of {first[key]['path']}"))
+            keep = first[(r["name"], r["size"])]
+            if keep is not r:
+                cands.append((r, f"duplicate (same name and size) of {keep['path']}"))
                 continue
-            first[key] = r
             if r["name"] not in use and r["name"] not in in_lock:
                 cands.append((r, "no lab workflow or lock set uses it"))
         cands.sort(key=lambda c: -c[0]["size"])
@@ -2186,22 +2205,41 @@ def hf_open(req, timeout=60):
     return (OPENER if host in ("127.0.0.1", "localhost", "::1") else HF_OPENER).open(req, timeout=timeout)
 
 
+HF_TREE_PAGES = 50                              # a tree listing is paged (Link: <...>; rel="next"): at most this many
+
+
+def hf_next_page(link, url):
+    """The rel="next" URL of a Link header, only on the same scheme and host as url (never another server)."""
+    m = re.search(r'<([^>]+)>\s*;\s*rel="?next"?', link or "")
+    if not m:
+        return None
+    nxt = urllib.parse.urljoin(url, m.group(1))
+    a, b = urllib.parse.urlparse(url), urllib.parse.urlparse(nxt)
+    return nxt if (a.scheme, a.netloc) == (b.scheme, b.netloc) else None
+
+
 def hf_file_info(repo, rev, path):
-    """{size, sha256} of one file of a Hugging Face model repo from the tree API (sha256 = the LFS oid)."""
+    """{size, sha256} of one file of a Hugging Face model repo from the tree API (sha256 = the LFS oid). A folder
+    with many files is listed in pages: the Link rel="next" cursor is followed until the file is found."""
     d = path.rsplit("/", 1)[0] if "/" in path else ""
     q = urllib.parse.quote
     url = f"{hf_base()}/api/models/{q(repo, safe='/')}/tree/{q(rev, safe='')}" + (f"/{q(d, safe='/')}" if d else "")
-    req = urllib.request.Request(url, headers={"User-Agent": "film-lab-comfy/1", "Accept": "application/json"})
-    with hf_open(req) as r:
-        listing = json.loads(r.read() or b"[]")
-    for e in listing if isinstance(listing, list) else []:
-        if isinstance(e, dict) and e.get("path") == path and e.get("type", "file") == "file":
-            lfs = e.get("lfs") if isinstance(e.get("lfs"), dict) else {}
-            sha = str(lfs.get("oid") or lfs.get("sha256") or "")
-            sha = sha[7:] if sha.startswith("sha256:") else sha
-            size = lfs.get("size", e.get("size"))
-            return {"size": size if isinstance(size, int) else None,
-                    "sha256": sha if re.fullmatch(r"[0-9a-f]{64}", sha) else None}
+    for _ in range(HF_TREE_PAGES):
+        req = urllib.request.Request(url, headers={"User-Agent": "film-lab-comfy/1", "Accept": "application/json"})
+        with hf_open(req) as r:
+            listing = json.loads(r.read() or b"[]")
+            link = r.headers.get("Link")
+        for e in listing if isinstance(listing, list) else []:
+            if isinstance(e, dict) and e.get("path") == path and e.get("type", "file") == "file":
+                lfs = e.get("lfs") if isinstance(e.get("lfs"), dict) else {}
+                sha = str(lfs.get("oid") or lfs.get("sha256") or "")
+                sha = sha[7:] if sha.startswith("sha256:") else sha
+                size = lfs.get("size", e.get("size"))
+                return {"size": size if isinstance(size, int) else None,
+                        "sha256": sha if re.fullmatch(r"[0-9a-f]{64}", sha) else None}
+        url = hf_next_page(link, url)
+        if not url:
+            break
     raise ComfyError(f"{path} is not in the listing of {repo}@{rev} (wrong path in the lock, or the repo changed)")
 
 
@@ -2539,7 +2577,7 @@ def workflows_cmd(a):
             continue
         if meta.get("kind") == "image":
             sz, d, e = meta["size"], meta["defaults"], meta.get("estimate") or {}
-            print(f"  inputs: --prompt | --prompt-file (text) · --negative · --size WxH (default "
+            print(f"  inputs: --prompt | --prompt-file (text) · --negative (cfg > 1 only) · --size WxH (default "
                   f"{sz['default'][0]}x{sz['default'][1]}) · --steps (default {d['steps']}; --turbo "
                   f"{meta['turbo']['steps']}) · --cfg (default {d['cfg']:g}; --turbo {meta['turbo']['cfg']:g}) · --seed")
             print(f"  constraints: one {meta['output'].get('ext', '.png')} · sides multiple of {meta['size_multiple']}, "
@@ -2614,6 +2652,18 @@ def interrupt(a):
             print(f"{pid}: not queued or running (if its `run` process died, close the row with "
                   f"python3 tools/ark.py ledger-close --req <id> --status abandoned --ledger L)")
     return FAILED if failed else 0
+
+
+def free_cmd(a):
+    """POST /free {unload_models, free_memory}: what `run` does before it releases the GPU lock, for the case a batch
+    stopped after a --keep-models call. Never starts or queues anything (ComfyUI unloads after its current job)."""
+    try:
+        call("POST", "/free", {"unload_models": True, "free_memory": True}, timeout=10)
+    except ComfyError as e:
+        print(f"ComfyUI is not reachable at {base_url()} ({e}): nothing to free", file=sys.stderr)
+        return FAILED
+    print(f"comfy: asked ComfyUI at {base_url()} to unload its models (POST /free)")
+    return 0
 
 
 # --- CLI ----------------------------------------------------------------------------------------------------------
@@ -2697,6 +2747,7 @@ r.add_argument("--keep-frames", action="store_true", help="also extract the raw 
 t = sp.add_parser("interrupt", help="stop our own job: --prompt-id, or every open comfy job of --ledger")
 t.add_argument("--prompt-id", default=None)
 t.add_argument("--ledger", default=None)
+sp.add_parser("free", help="POST /free: ComfyUI unloads its models (after a failed --keep-models batch); starts nothing")
 
 
 def main(argv=None):
@@ -2724,7 +2775,7 @@ def main(argv=None):
                 signal.signal(sig, h)
     else:
         code = {"ping": ping, "start": start, "install": install, "models": models_cmd, "workflows": workflows_cmd,
-                "interrupt": interrupt}[a.cmd](a)
+                "interrupt": interrupt, "free": free_cmd}[a.cmd](a)
     if code:
         sys.exit(code)
     return 0

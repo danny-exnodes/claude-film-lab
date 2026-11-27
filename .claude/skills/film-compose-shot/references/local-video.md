@@ -127,7 +127,7 @@ python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/
     --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json [--keys 3] --dry-run
 python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/<id> --ledger out/<project>/<id>/ledger.csv \
     --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json      # dừng ở bước kiểm bằng mắt
-python tools/comfy/hybrid.py approve <tập>/shots3d/s03.json k1,k2 --media out/<project>/<id>   # người dùng duyệt
+python tools/comfy/hybrid.py approve <tập>/shots3d/s03.json k1=k1_e01.png,k2=k2_e01.png --media out/<project>/<id>   # người dùng duyệt đúng các file này
 python tools/comfy/hybrid.py run <tập>/shots3d/s03.json --media out/<project>/<id> --ledger out/<project>/<id>/ledger.csv \
     --edit-prompt-file edit_s03.txt --motion-prompt-file s03.json      # H3 + ghép → clips/<id>_s03_h3_v01.mp4
 python tools/comfy/hybrid.py status <tập>/shots3d/s03.json --media out/<project>/<id>
@@ -144,7 +144,17 @@ python tools/comfy/hybrid.py status <tập>/shots3d/s03.json --media out/<projec
   từ chỗ dừng; không ghi đè gì (phiên bản tăng). Khung đã có edit thì giữ: `edit --redo k2 --edit-seed <khác>` làm lại một
   khung, `--redo all` khi đổi prompt. Edit đổi sau khi duyệt → phải duyệt lại. Khung bị loại: bỏ khỏi `approve`, H3 nối
   hai khung hai bên.
-- Ledger: mỗi ảnh/clip một dòng do `comfy.py` ghi (0 đ), bước Blender một dòng `blender:keyframes` (0 đ). `--review
+- **Duyệt gắn với file.** `approve` (và `--approved` của `run`/`animate`/`assemble`) phải ghi mỗi khung kèm đúng file
+  edit người dùng đã xem (`k2=k2_e02.png` hoặc `k2=e02`; bảng kiểm in sẵn lệnh); file không phải edit hiện tại của khung
+  thì bị từ chối. `run --approved` không bao giờ duyệt edit làm trong cùng lệnh: `--redo` một khung đang duyệt, hay
+  `--approved` trên thư mục chưa có edit, bị từ chối trước khi Blender chạy.
+- `run` kiểm `--ledger`, prompt edit (và prompt chuyển động khi đã duyệt) trước khi render Blender. `assemble` chỉ ghép
+  các đoạn của lần `animate` gần nhất (cùng khung, prompt, `--res`, `--turbo`, seed), không trộn 480p với 768p; độ dài
+  bản ghép được đo bằng `ffprobe` (khi có), lệch thì mã hoá lại, vẫn lệch thì không ghi clip. File mà spec nạp (.glb,
+  .blend, HDRI, texture) đổi sau khi render khung khoá → cần `--root` mới như khi sửa spec. `--lightning 0` = edit không
+  LoRA (40 bước, cfg 4, chậm hơn). Lô comfy dừng giữa chừng → `comfy.py free` trả VRAM.
+- Ledger: mỗi ảnh/clip một dòng do `comfy.py` ghi (0 đ), mỗi lệnh Blender một dòng (`blender:keyframes` 2 ảnh,
+  `blender:still` 1 ảnh; 0 đ; lệnh bị từ chối, thoát 2, không ghi). `--review
   <build>` chuyển tiếp cho `blender.py keyframes` và `comfy.py`. `--dry-run` in mọi lệnh, không chạy gì.
 - **Giới hạn.** Qwen-Edit không nhất quán khung-nối-khung; khối sai (mỏ tròn, mắt lồi, thừa sừng) phải **sửa trong
   Blender trước** – edit chỉ lo bề mặt, khối càng đúng thì càng ít trôi. Ở cận cảnh denoise 1.0 có thể dàn lại khung

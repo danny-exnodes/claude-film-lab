@@ -116,7 +116,7 @@ python tools/comfy/comfy.py models --inventory [--suggest-clean] | --fetch <bộ
 python tools/concept.py gen <DESIGN-OPTIONS.md|jobs.json> --slug S --out-dir out/<project>/characters/<slug>/concept --ledger L [--n 2] [--dry-run] | edit <ảnh> --instruction "..." --ledger L | sheet <thư mục>   # concept khâu 3a
 python3 tools/concept.py approve <slug> <ảnh> --episode projects/<project>/<thư mục tập> [--quote "..."]   # ghi CHARACTER.md + bảng Sinh vật của tập
 python tools/comfy/hybrid.py run|keyframes|edit|animate|assemble <shots3d/s<NN>.json> --media out/<project>/<id> --ledger L --edit-prompt-file F --motion-prompt-file F.json [--keys 3] [--dry-run]   # shot lai, dừng ở bước kiểm bằng mắt
-python tools/comfy/hybrid.py approve <shots3d/s<NN>.json> k1,k2 --media out/<project>/<id>   # chỉ sau khi người dùng duyệt khung đã edit
+python tools/comfy/hybrid.py approve <shots3d/s<NN>.json> k1=k1_e01.png,k2=k2_e01.png --media out/<project>/<id>   # chỉ sau khi người dùng duyệt đúng các file edit này
 python tools/blender/blender.py mesh-prep <c>_raw_v<NN>.glb --out <dir> [--concept <concept>.png] [--quad-faces 20000 | --decimate N]   # phôi → nền điêu khắc: báo cáo lưới, remesh, turntable đất sét, IoU bóng
 python tools/blender/blender.py mesh-check <mesh>.glb [--concept <concept>.png] [--sheet s.png]   # báo cáo lưới + IoU bóng, không Blender
 python tools/gpu_run.py [--label L] [--wait SEC] -- <lệnh ...> | status   # khoá GPU chung mọi worktree; render Blender, comfy.py run tự lấy khoá

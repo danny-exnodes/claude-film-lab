@@ -4,36 +4,44 @@ eye check -> MiniMax H3 in-betweens -> one clip. An orchestrator: it only calls 
 
   python tools/comfy/hybrid.py run <shot3d.json> --media out/<project>/<id> --ledger L
                      (--edit-prompt TEXT | --edit-prompt-file F.txt) (--motion-prompt TEXT | --motion-prompt-file F.json)
-                     [--keys 2|3] [--mid FRAME] [--size 1344x768] [--look L] [--lightning 4|8] [--denoise 1.0]
-                     [--edit-seed N] [--ref IMG] [--res 480p|768p] [--motion-seed N] [--turbo] [--approved k1,k2]
-                     [--expect TEXT] [--root DIR] [--review BUILD] [--dry-run]
+                     [--keys 2|3] [--mid FRAME] [--size 1344x768] [--look L] [--lightning 0|4|8] [--denoise 1.0]
+                     [--edit-seed N] [--ref IMG] [--res 480p|768p] [--motion-seed N] [--turbo]
+                     [--approved k1=k1_e01.png,k2=k2_e01.png] [--expect TEXT] [--root DIR] [--review BUILD] [--dry-run]
   python tools/comfy/hybrid.py keyframes|edit|animate|assemble <shot3d.json> --media ... [the same options]
-  python tools/comfy/hybrid.py approve <shot3d.json> k1,k2[,k3] --media out/<project>/<id>
+  python tools/comfy/hybrid.py approve <shot3d.json> k1=k1_e01.png,k2=k2_e01.png[,k3=...] --media out/<project>/<id>
   python tools/comfy/hybrid.py status <shot3d.json> --media out/<project>/<id>
 
 Steps (`run` = all of them, stopping at the eye check until the key frames are approved):
   keyframes  tools/blender/blender.py keyframes (k1 = frame 1, k<N> = the last frame) + blender.py still for a middle
-             key (--keys 3: the middle frame, or --mid FRAME) -> <root>/render/; one ledger row blender:keyframes
-             (cost 0) when --ledger is given
-  edit       tools/comfy/comfy.py run qwen-edit on every key frame (Lightning 8, denoise 1.0, one seed for all keys)
-             -> <root>/edit/<key>_e<NN>.png, a contact sheet <root>/check_v<NN>.png (render | edit per key), then
-             STOP: the checklist for the owner's eye check is printed
-  approve    writes <root>/hybrid_approved.json (the approved keys and the sha256 of their edits); a key left out is
-             skipped (H3 bridges the keys on both sides of it); an edit redone after approval needs approving again
+             key (--keys 3: the middle frame, or --mid FRAME) -> <root>/render/; one ledger row per Blender call
+             (blender:keyframes count 2, blender:still count 1, cost 0) when --ledger is given
+  edit       tools/comfy/comfy.py run qwen-edit on every key frame (Lightning 8, denoise 1.0, one seed for all keys;
+             --lightning 0 = no LoRA: 40 steps, cfg 4) -> <root>/edit/<key>_e<NN>.png, a contact sheet
+             <root>/check_v<NN>.png (render | edit per key), then STOP: the checklist for the owner's eye check is
+             printed, with the exact approve command
+  approve    the owner's eye check, bound to the files the owner saw: every key is named with its edit
+             (k2=k2_e02.png, or k2=e02); refused when that is not the key's current edit. Writes
+             <root>/hybrid_approved.json (the approved keys, their edit files and sha256); a key left out is skipped
+             (H3 bridges the keys on both sides of it); an edit redone after approval needs approving again
   animate    comfy.py run h3-i2v --image <key a> --last <key b> between consecutive approved keys, length = the
              frames between them / fps (H3 snaps up to its 17k+5 grid) -> <root>/segments/<a>-<b>_v<NN>.mp4
-  assemble   ffmpeg concat (stream copy; re-encoded only when copy fails) -> <media>/clips/<id>_<shot>_h3_v<NN>.mp4 +
-             <clip>.mp4.json (keys, segments, their sidecars); consecutive segments share the key frame between them
-             (one frame repeated: retime in compositing)
---approved k1,k3 on run/animate/assemble = approve first. <root> defaults to <media>/renders3d/<shot>_keys/
-(a new round of key frames: --root .../<shot>_keys_v02). State: <root>/hybrid.json.
+  assemble   ffmpeg concat of the segments of the last animate (same --res, --turbo, prompts, seed; stream copy,
+             re-encoded when copy fails or its length is not the segments' sum, checked with ffprobe when on PATH)
+             -> <media>/clips/<id>_<shot>_h3_v<NN>.mp4 + <clip>.mp4.json (keys, segments, their sidecars);
+             consecutive segments share the key frame between them (one frame repeated: retime in compositing)
+--approved k1=e01,k3=e01 on run/animate/assemble = approve first, with the same binding; never an edit this call makes
+(run checks it before anything runs: no --redo of an approved key, no approval on a fresh root).
+<root> defaults to <media>/renders3d/<shot>_keys/ (a new round of key frames: --root .../<shot>_keys_v02).
+State: <root>/hybrid.json. A changed spec, or a changed file it loads (.glb/.blend/HDRI/textures), needs a new root.
 
 Every step is resumable: an output that exists is never made again or overwritten (versions go up: _e<NN>, _v<NN>);
 a key that has an edit keeps it: `edit --redo k2` makes a new edit of k2 (with --edit-seed N for another result),
 `--redo all` edits every key again (new prompt or settings). Every comfy.py call of a step but the
 last gets --keep-models; the last frees the VRAM. --ledger and --review pass through to comfy.py (one ledger row per
 image or clip, cost 0) and --review to blender.py keyframes. A called tool that exits non-zero stops the chain (never
-retried); hybrid.py exits with its code. --dry-run prints the plan and calls nothing.
+retried; a stopped comfy batch is followed by `comfy.py free`); hybrid.py exits with its code. `run` checks the
+ledger, the edit prompt (and with an approval the motion prompt) before Blender renders anything. --dry-run prints
+the plan and calls nothing.
 
 Limits: Qwen-Edit is not frame-consistent (edit 2-3 key frames per shot, never every frame); fix a wrong volume (beak,
 eye, horn count) in Blender first, the edit only upgrades the surface; the edited keys must be checked by eye before
@@ -172,11 +180,49 @@ class Ctx:
         if self.state and self.state.get("spec_sha256") != self.spec_sha:
             raise Refused(f"{a.spec} changed since the key frames of {self.root} were made: render a new round "
                           f"with --root {self.root}_v02 (or the next free _v<NN>)")
+        self.assets_sha = self.asset_fingerprint(data)
+        if self.state.get("assets_sha256") not in (None, self.assets_sha):
+            raise Refused(f"a file {a.spec} loads (.glb/.blend, HDRI, textures) changed since the key frames of "
+                          f"{self.root} were made: render a new round with --root {self.root}_v02 (or the next "
+                          "free _v<NN>)")
+        self.fresh = set()          # keys whose edit was made by this call: nobody has checked them yet
         self.state.setdefault("version", 1)
         self.state.setdefault("tool", "tools/comfy/hybrid.py")
         self.state.update({"spec": os.path.abspath(a.spec), "spec_sha256": self.spec_sha, "shot": self.shot,
-                           "id": self.eid, "fps": self.fps, "frames": self.frames})
+                           "id": self.eid, "fps": self.fps, "frames": self.frames, "assets_sha256": self.assets_sha})
         self.keys = self.choose_keys()
+
+    def asset_fingerprint(self, data):
+        """sha256 over the files the spec loads (asset .glb/.gltf/.blend, the HDRI, texture maps), each by its path
+        relative to the spec and its sha256 (cached in the state by size + mtime)."""
+        base = os.path.dirname(os.path.abspath(self.a.spec))
+        paths = []
+        for asset in data.get("assets") or []:
+            src = asset.get("src") if isinstance(asset, dict) else None
+            kind = spec._src_kind(src)
+            if kind in ("file", "blend"):
+                paths.append(spec._abs(base, spec.blend_src(src)[0] if kind == "blend" else src))
+        hdri = (data.get("world") or {}).get("hdri") if isinstance(data.get("world"), dict) else None
+        if hdri:
+            paths.append(spec.resolve_hdri(hdri, data.get("asset_root"), base))
+        for m in (data.get("materials") or {}).values() if isinstance(data.get("materials"), dict) else []:
+            tex = m if isinstance(m, str) else m.get("tex") if isinstance(m, dict) else None
+            if tex:
+                paths += spec.resolve_texture(tex, data.get("asset_root"), base).values()
+        cache, seen, rows = self.state.get("asset_files") or {}, {}, []
+        for p in sorted({os.path.abspath(p) for p in paths if p and os.path.isfile(p)}):
+            try:
+                rel = os.path.relpath(p, base).replace(os.sep, "/")
+            except ValueError:          # another drive (Windows)
+                rel = p.replace(os.sep, "/")
+            st = os.stat(p)
+            old = cache.get(rel) or {}
+            sha = old.get("sha256") if (old.get("size"), old.get("mtime_ns")) == (st.st_size, st.st_mtime_ns) \
+                else sha256_file(p)
+            seen[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": sha}
+            rows.append([rel, sha])
+        self.state["asset_files"] = seen
+        return sha256_text(json.dumps(rows))
 
     def p(self, rel):
         return os.path.normpath(os.path.join(self.root, rel))
@@ -235,19 +281,34 @@ class Ctx:
         return recs[-1] if recs else None
 
 
+def free_vram():
+    """`comfy.py free` (POST /free only) after a comfy batch stopped: the calls before (and a failed --keep-models
+    call) left their models in VRAM. Best effort."""
+    code = run_cmd([sys.executable, COMFY, "free"])
+    if code:
+        print(f"hybrid: comfy.py free exited {code}: ComfyUI may still hold the models in VRAM", file=sys.stderr)
+
+
 def run_jobs(jobs, dry):
-    """[(label, argv, on_ok)] -> exit code; --keep-models on every comfy call but the last; stops at a failure."""
-    comfy_idx = [i for i, (_, argv, _) in enumerate(jobs) if argv[1:2] == [COMFY]]
-    for i, (label, argv, on_ok) in enumerate(jobs):
-        if i in comfy_idx and i != comfy_idx[-1]:
+    """[(label, argv, on_ok[, on_end])] -> exit code; --keep-models on every comfy call but the last; stops at a
+    failure (then frees the VRAM the comfy calls kept). on_end(code) after every call that ran, on_ok() on success."""
+    jobs = [tuple(j) + (None,) * (4 - len(j)) for j in jobs]
+    comfy_idx = [i for i, j in enumerate(jobs) if j[1][1:2] == [COMFY]]
+    for i, (label, argv, on_ok, on_end) in enumerate(jobs):
+        keep = i in comfy_idx and i != comfy_idx[-1]
+        if keep:
             argv = argv + ["--keep-models"]
         say(f"  [{i + 1}/{len(jobs)}] {label}\n      {show(argv)}")
         if dry:
             continue
         code = run_cmd(argv)
+        if on_end:
+            on_end(code)
         if code:
             print(f"hybrid: stopped: {label} exited {code} (not retried"
                   + ("; exit 1 = see its ledger row" if argv[1:2] == [COMFY] else "") + ")", file=sys.stderr)
+            if i in comfy_idx and (keep or comfy_idx.index(i) > 0):
+                free_vram()
             return code
         if on_ok:
             on_ok()
@@ -263,6 +324,16 @@ def step_keyframes(c):
     c.state["size"] = size
     render_dir = c.p("render")
     jobs = []
+
+    def ledger_row(model, count, out, frames):
+        """One ledger row per Blender call (cost 0): its real count and status; none when it refused (exit 2)."""
+        def on_end(code):
+            if c.ledger and code != REFUSED:
+                ark.ledger_append(c.ledger, {"kind": "image", "model": model, "size": size, "count": count,
+                                             "status": "ok" if code == 0 else "failed", "out": out, "usage": "",
+                                             "note": f"req={ark.new_req()}; hybrid {c.eid} {c.shot} frames {frames}"})
+        return on_end
+
     have = all(os.path.isfile(c.p(k["render"])) for k in (c.keys[0], c.keys[-1]))
     if not have:
         if os.path.isdir(render_dir) and os.listdir(render_dir):
@@ -273,14 +344,16 @@ def step_keyframes(c):
             argv += ["--look", a.look]
         if a.review:
             argv += ["--review", a.review]
-        jobs.append(("blender keyframes (k1, last)", argv, None))
+        jobs.append(("blender keyframes (k1, last)", argv, None,
+                     ledger_row("blender:keyframes", 2, render_dir, f"{c.keys[0]['frame']},{c.keys[-1]['frame']}")))
     for k in c.keys[1:-1]:
         if not os.path.isfile(c.p(k["render"])):
             argv = [sys.executable, BLENDER, "still", os.path.abspath(a.spec), "--frame", str(k["frame"]),
                     "--out", c.p(k["render"]), "--size", size]
             if a.look:
                 argv += ["--look", a.look]
-            jobs.append((f"blender still {k['name']} frame {k['frame']}", argv, None))
+            jobs.append((f"blender still {k['name']} frame {k['frame']}", argv, None,
+                         ledger_row("blender:still", 1, c.p(k["render"]), str(k["frame"]))))
     say(f"keyframes: {c.shot} {c.frames} frames at {c.fps} fps · keys "
         + ", ".join(f"{k['name']} f{k['frame']}" for k in c.keys) + f" · {size} -> {render_dir}")
     if not jobs:
@@ -289,16 +362,11 @@ def step_keyframes(c):
             k.setdefault("render_sha256", sha256_file(c.p(k["render"])))
         c.save()
         return 0
-    rid = ark.new_req()
+    if not c.dry:
+        c.save()                        # the key choice holds for this root even when a render fails
     code = run_jobs(jobs, c.dry)
     if c.dry:
         return 0
-    if c.ledger and code in (0, 1):
-        ark.ledger_append(c.ledger, {"kind": "image", "model": "blender:keyframes", "size": size,
-                                     "count": len(c.keys), "status": "ok" if code == 0 else "failed",
-                                     "out": render_dir, "usage": "",
-                                     "note": f"req={rid}; hybrid {c.eid} {c.shot} keys "
-                                             + ",".join(str(k["frame"]) for k in c.keys)})
     if code:
         return code
     missing = [k["render"] for k in c.keys if not os.path.isfile(c.p(k["render"]))]
@@ -339,7 +407,7 @@ def edit_params(c):
             raise Refused(f"--ref {r}: no such file")
     prev = c.state.get("edit_params") or {}
     params = {"prompt_sha256": sha256_text(prompt),
-              "lightning": a.lightning or prev.get("lightning") or 8,
+              "lightning": a.lightning if a.lightning is not None else prev.get("lightning", 8),   # 0 = no LoRA
               "denoise": a.denoise if a.denoise is not None else prev.get("denoise", 1.0),
               "seed": a.edit_seed if a.edit_seed is not None else prev.get("seed", DEFAULT_EDIT_SEED),
               "steps": a.edit_steps if a.edit_steps is not None else prev.get("steps"),
@@ -352,7 +420,10 @@ def edit_argv(c, image, prompt, params, out):
     args = [sys.executable, COMFY, "run", "qwen-edit", "--image", image]
     for r in c.a.ref or []:
         args += ["--ref", r]
-    args += ["--prompt", prompt, "--lightning", str(params["lightning"]), "--denoise", f"{params['denoise']:g}"]
+    args += ["--prompt", prompt]
+    if params["lightning"]:
+        args += ["--lightning", str(params["lightning"])]
+    args += ["--denoise", f"{params['denoise']:g}"]
     if params.get("steps") is not None:
         args += ["--steps", str(params["steps"])]
     if params.get("cfg") is not None:
@@ -363,14 +434,19 @@ def edit_argv(c, image, prompt, params, out):
     return args
 
 
-def step_edit(c):
-    c.need_ledger()
-    prompt, params = edit_params(c)
-    redo = set(x.strip() for x in (c.a.redo or "").split(",") if x.strip())
+def redo_keys(c):
+    redo = set(x.strip() for x in (getattr(c.a, "redo", None) or "").split(",") if x.strip())
     if "all" in redo:
         redo = {k["name"] for k in c.keys}
     for name in redo:
         c.key(name)
+    return redo
+
+
+def step_edit(c):
+    c.need_ledger()
+    prompt, params = edit_params(c)
+    redo = redo_keys(c)
     jobs = []
     for k in c.keys:
         render = c.p(k["render"])
@@ -389,12 +465,14 @@ def step_edit(c):
             rec = {"file": os.path.relpath(out, c.root).replace(os.sep, "/"), "sha256": sha256_file(out),
                    "params": want, "date": datetime.date.today().isoformat()}
             c.state.setdefault("edits", {}).setdefault(k["name"], []).append(rec)
+            c.fresh.add(k["name"])
             c.save()
 
         jobs.append((f"qwen-edit {k['name']} (frame {k['frame']}) -> edit/{os.path.basename(out)}",
                      edit_argv(c, render, prompt, params, out), done))
-    say(f"edit: Qwen-Image-Edit · Lightning {params['lightning']} · denoise {params['denoise']:g} · seed "
-        f"{params['seed']} · {len(jobs)} key frame(s) to edit")
+    say(f"edit: Qwen-Image-Edit · " + (f"Lightning {params['lightning']}" if params["lightning"] else
+                                       "no Lightning (40 steps, cfg 4)")
+        + f" · denoise {params['denoise']:g} · seed {params['seed']} · {len(jobs)} key frame(s) to edit")
     if jobs and not c.dry:
         os.makedirs(c.p("edit"), exist_ok=True)
         c.state["edit_prompt"] = prompt
@@ -449,27 +527,61 @@ def checklist(c):
               "  [ ] no text, watermark or border"]
     lines += [f"  [ ] {e}" for e in c.a.expect or []]
     lines += ["  A wrong volume (beak, eye, horn count)? Fix the model in Blender and render again; do not edit harder.",
-              f"  Approve:  python tools/comfy/hybrid.py approve {c.a.spec} "
-              + ",".join(k["name"] for k in c.keys) + f" --media {c.a.media}"
-              + (f" --root {c.a.root}" if c.a.root else ""),
-              "  (leave a rejected key out, or redo it: hybrid.py edit ... --redo k2 --edit-seed <another>)"]
+              f"  Approve (after the owner said yes to exactly these files):  python tools/comfy/hybrid.py approve "
+              f"{c.a.spec} " + ",".join(f"{k['name']}={os.path.basename(c.current_edit(k['name'])['file'])}"
+                                        for k in c.keys if c.current_edit(k["name"]))
+              + f" --media {c.a.media}" + (f" --root {c.a.root}" if c.a.root else ""),
+              "  (leave a rejected key out, or redo it: hybrid.py edit ... --redo k2 --edit-seed <another>, then show "
+              "the new check sheet)"]
     say("\n".join(lines))
 
 
 # ------------------------------------------------------------------------------------------------ approve
-def approve(c, names):
-    names = [n.strip() for n in names.split(",") if n.strip()]
+def parse_approval(text):
+    """'k1=k1_e01.png,k2=e02' -> [(key, edit file name)]: every key is named with the edit the owner saw."""
+    out = []
+    for tok in (t.strip() for t in str(text).split(",")):
+        if not tok:
+            continue
+        name, _, f = (x.strip() for x in tok.partition("="))
+        if not f:
+            raise Refused(f"{tok}: name each key with the edit file the owner checked, e.g. {name}={name}_e01.png "
+                          "(the eye checklist prints the exact approve command)")
+        f = os.path.basename(f.replace("\\", "/"))
+        f = f if f.lower().endswith(".png") else f + ".png"
+        out.append((name, f if f.startswith(name + "_") else f"{name}_{f}"))
+    names = [n for n, _ in out]
     if len(set(names)) != len(names):
         raise Refused("a key is named twice")
     if len(names) < 2:
         raise Refused("approve at least 2 keys (H3 needs a first and a last frame)")
+    return out
+
+
+def resolve_approval(c, text):
+    """{key: {file, sha256}} of an approval, refused unless every named file is the key's current edit and was not
+    made by this call (nobody can have checked it). Writes nothing."""
     rec = {}
-    for n in names:
+    for n, f in parse_approval(text):
         c.key(n)
         cur = c.current_edit(n)
         if not cur:
-            raise Refused(f"{n} has no edit yet: run the edit step first")
+            raise Refused(f"{n} has no edit yet: run the edit step, show the owner the eye check, then approve")
+        have = os.path.basename(cur["file"])
+        if n in c.fresh:
+            raise Refused(f"{n}: {have} was made by this call: nobody has checked it yet (show the check sheet, "
+                          "then approve)")
+        if f != have:
+            raise Refused(f"{n}={f} is not the current edit of {n} ({have})" + (
+                ": an edit made after the one the owner saw needs its own eye check" if os.path.isfile(
+                    c.p(os.path.join("edit", f))) else ": no such edit"))
         rec[n] = {"file": cur["file"], "sha256": sha256_file(c.p(cur["file"]))}
+    return rec
+
+
+def approve(c, text):
+    rec = resolve_approval(c, text)
+    names = list(rec)
     data = {"date": datetime.date.today().isoformat(), "keys": rec,
             "rejected": [k["name"] for k in c.keys if k["name"] not in rec]}
     old = read_json(c.p(APPROVED), "approval")
@@ -491,7 +603,8 @@ def approved_keys(c, required=True):
     if not data or not data.get("keys"):
         if required:
             raise Refused(f"no approval in {c.p(APPROVED)}: the owner checks the edited keys first "
-                          "(hybrid.py approve <spec> k1,k2 --media ..., or --approved k1,k2)")
+                          "(hybrid.py approve <spec> k1=k1_e01.png,k2=k2_e01.png --media ..., or --approved "
+                          "k1=...,k2=...: the command the eye checklist prints)")
         return None
     out = []
     for k in c.keys:
@@ -509,22 +622,29 @@ def approved_keys(c, required=True):
 
 
 # ------------------------------------------------------------------------------------------------ animate
-def motion_prompts(c, pairs):
+def given_motion(c):
+    """[(flag, text or absolute file path)] of the motion prompts (the command line, else the state); refused when
+    there is none or a file is missing."""
     a = c.a
-    texts, files = a.motion_prompt or [], a.motion_prompt_file or []
+    texts, files = getattr(a, "motion_prompt", None) or [], getattr(a, "motion_prompt_file", None) or []
     if texts and files:
         raise Refused("give --motion-prompt or --motion-prompt-file, not both")
-    given = [("--prompt", t) for t in texts] + [("--prompt-file", f) for f in files]
+    given = [("--prompt", t) for t in texts] + [("--prompt-file", os.path.abspath(f)) for f in files]
     if not given:
         given = [tuple(x) for x in c.state.get("motion_prompts") or []]
     if not given:
         raise Refused("the animate step needs --motion-prompt TEXT or --motion-prompt-file F.json (h3-i2v fields; "
                       "one for every segment, or one per segment in order)")
-    if len(given) not in (1, len(pairs)):
-        raise Refused(f"{len(given)} motion prompts for {len(pairs)} segment(s): give 1 or {len(pairs)}")
     for flag, v in given:
         if flag == "--prompt-file" and not os.path.isfile(v):
             raise Refused(f"--motion-prompt-file {v}: no such file")
+    return given
+
+
+def motion_prompts(c, pairs):
+    given = given_motion(c)
+    if len(given) not in (1, len(pairs)):
+        raise Refused(f"{len(given)} motion prompts for {len(pairs)} segment(s): give 1 or {len(pairs)}")
     c.state["motion_prompts"] = [list(g) for g in given]
     return [given[0]] * len(pairs) if len(given) == 1 else given
 
@@ -540,11 +660,13 @@ def step_animate(c):
     prompts = motion_prompts(c, pairs)
     a = c.a
     jobs = []
+    c.state["animate"] = {"pairs": {}}      # what assemble takes: the segments made with exactly these settings
     for ((ka, pa, sa), (kb, pb, sb)), (flag, val) in zip(pairs, prompts):
         seconds = round((kb["frame"] - ka["frame"]) / c.fps, 3)
         params = {"a": sa, "b": sb, "prompt_sha256": prompt_sha(flag, val), "seconds": seconds, "res": a.res,
                   "seed": a.motion_seed, "turbo": bool(a.turbo)}
         pair = f"{ka['name']}-{kb['name']}"
+        c.state["animate"]["pairs"][pair] = params
         segs = [s for s in c.state.get("segments", []) if s["pair"] == pair and s["params"] == params
                 and os.path.isfile(c.p(s["file"]))]
         if segs:
@@ -572,26 +694,51 @@ def step_animate(c):
         jobs.append((f"h3-i2v {pair} ({seconds:g} s of the shot) -> segments/{os.path.basename(out)}", argv, done))
     say(f"animate: MiniMax H3 first/last between {len(keys)} approved keys · {len(jobs)} segment(s) to make"
         + (" · --turbo: draft" if a.turbo else ""))
-    if jobs and not c.dry:
-        os.makedirs(c.p("segments"), exist_ok=True)
+    if not c.dry:
+        if jobs:
+            os.makedirs(c.p("segments"), exist_ok=True)
         c.save()
     return run_jobs(jobs, c.dry)
 
 
 # ------------------------------------------------------------------------------------------------ assemble
 def current_segments(c, keys):
-    """The newest clip of every pair of consecutive approved keys; None in a dry-run when one is missing."""
+    """The newest clip of every pair of consecutive approved keys made with the settings of the last animate (same
+    keys, prompt, --res, --turbo, seed); None in a dry-run when one is missing. Refused when they mix canvases."""
+    want = (c.state.get("animate") or {}).get("pairs") or {}
     out = []
     for (ka, _, sa), (kb, _, sb) in zip(keys, keys[1:]):
         pair = f"{ka['name']}-{kb['name']}"
-        segs = [s for s in c.state.get("segments", []) if s["pair"] == pair and s["params"]["a"] == sa
-                and s["params"]["b"] == sb and os.path.isfile(c.p(s["file"]))]
+        w = want.get(pair)
+        if w and (w["a"], w["b"]) != (sa, sb):
+            w = {"a": None}                     # the approved keys changed after the last animate: nothing matches
+        segs = [s for s in c.state.get("segments", []) if s["pair"] == pair and os.path.isfile(c.p(s["file"]))
+                and (s["params"] == w if w else (s["params"]["a"], s["params"]["b"]) == (sa, sb))]
         if not segs:
             if c.dry:
                 return None
-            raise Refused(f"no clip for {pair} yet: run the animate step first")
+            raise Refused(f"no clip for {pair} made with the approved keys and the settings of the last animate: "
+                          "run the animate step (again)")
         out.append(segs[-1])
+    kinds = {(s["params"].get("res") or "768p", bool(s["params"].get("turbo"))) for s in out}
+    if len(kinds) > 1:
+        raise Refused("the segments mix canvases or drafts (" + ", ".join(
+            f"{r}{' turbo' if t else ''}" for r, t in sorted(kinds)) + "): animate again with one --res "
+            "(and --turbo or not) for every pair")
     return out
+
+
+def probe_seconds(path):
+    """Duration of a media file by ffprobe (None when ffprobe is missing or cannot read it). Tests replace this."""
+    ff = shutil.which("ffprobe")
+    if not ff:
+        return None
+    try:
+        r = subprocess.run([ff, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                           capture_output=True, text=True, timeout=120)
+        return float(r.stdout.strip())
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 def ffmpeg_path():
@@ -629,16 +776,30 @@ def step_assemble(c):
             f.write("file '" + c.p(s["file"]).replace("\\", "/").replace("'", "'\\''") + "'\n")
     base = [ff, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0", "-i", lst]
     encoder = "copy"
-    try:
-        code = run_cmd(base + ["-c", "copy", "-movflags", "+faststart", tmp])
+    parts = [probe_seconds(c.p(s["file"])) for s in segs]
+    total = None if None in parts else sum(parts)
+
+    def bad(code):
+        """Why the concat in tmp is not usable, or None. Its length is checked when ffprobe reads every file."""
         if code or not os.path.isfile(tmp) or not os.path.getsize(tmp):
-            say("  stream copy failed: re-encoding (libx264 crf 16, aac)")
+            return f"ffmpeg exited {code}" if code else "no output"
+        if total is not None:
+            got = probe_seconds(tmp)
+            if got is None or abs(got - total) > max(0.25, 0.05 * total):
+                return f"{'unreadable' if got is None else f'{got:.2f} s'} for {total:.2f} s of segments"
+        return None
+    try:
+        why = bad(run_cmd(base + ["-c", "copy", "-movflags", "+faststart", tmp]))
+        if why:
+            say(f"  stream copy failed ({why}): re-encoding (libx264 crf 16, aac)")
             encoder = "libx264"
-            code = run_cmd(base + ["-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p",
-                                   "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", tmp])
-            if code or not os.path.isfile(tmp) or not os.path.getsize(tmp):
-                print(f"hybrid: ffmpeg failed ({code})", file=sys.stderr)
-                return code or 1
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            why = bad(run_cmd(base + ["-c:v", "libx264", "-crf", "16", "-preset", "medium", "-pix_fmt", "yuv420p",
+                                      "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart", tmp]))
+            if why:
+                print(f"hybrid: ffmpeg concat failed ({why}); no clip written", file=sys.stderr)
+                return 1
         place_new(tmp, out)
     finally:
         for p in (lst, tmp):
@@ -673,7 +834,25 @@ def approval_valid(c):
         return False
 
 
+def check_run(c):
+    """Every refusal `run` can know before Blender renders anything (exit 2 = nothing called): the ledger, the edit
+    prompt and settings, an --approved that names the files the owner saw (never a key this call edits again), and
+    the motion prompt when the chain will go on to H3."""
+    c.need_ledger()
+    edit_params(c)
+    if c.a.approved:
+        redo = redo_keys(c)
+        again = [n for n, _ in parse_approval(c.a.approved) if n in redo]
+        if again:
+            raise Refused(f"--redo {','.join(again)} with --approved: the new edit of {', '.join(again)} has not been "
+                          "checked yet (edit, show the check sheet, then approve)")
+        resolve_approval(c, c.a.approved)
+    if c.a.approved or read_json(c.p(APPROVED), "approval"):
+        given_motion(c)
+
+
 def step_run(c):
+    check_run(c)
     for name, fn in (("keyframes", step_keyframes), ("edit", step_edit)):
         say(f"== {name}")
         code = fn(c)
@@ -733,7 +912,8 @@ def parser():
         q.add_argument("--look", default=None, help="blender.py --look")
         q.add_argument("--edit-prompt", default=None)
         q.add_argument("--edit-prompt-file", default=None)
-        q.add_argument("--lightning", type=int, choices=(4, 8), default=None, help="Lightning LoRA (default 8)")
+        q.add_argument("--lightning", type=int, choices=(0, 4, 8), default=None,
+                       help="Lightning LoRA (default 8; 0 = none: 40 steps, cfg 4)")
         q.add_argument("--denoise", type=float, default=None, help="default 1.0")
         q.add_argument("--edit-seed", type=int, default=None, help=f"one seed for every key (default "
                                                                   f"{DEFAULT_EDIT_SEED})")
@@ -748,7 +928,8 @@ def parser():
         q.add_argument("--res", choices=("480p", "768p"), default=None, help="h3-i2v canvas (default 768p)")
         q.add_argument("--motion-seed", type=int, default=None)
         q.add_argument("--turbo", action="store_true", help="h3-i2v Lightning LoRA: drafts only")
-        q.add_argument("--approved", default=None, metavar="k1,k2", help="approve these keys first")
+        q.add_argument("--approved", default=None, metavar="k1=k1_e01.png,k2=...",
+                       help="approve these keys (each with the edit file the owner checked) first")
 
     for q in (sp.add_parser("run", help="every step, stopping at the eye check until approved"),
               sp.add_parser("keyframes", help="Blender key frames"),
@@ -759,7 +940,7 @@ def parser():
         steps(q)
     q = sp.add_parser("approve", help="record the owner's eye check: the approved keys")
     common(q)
-    q.add_argument("keys_ok", metavar="k1,k2[,k3]")
+    q.add_argument("keys_ok", metavar="k1=k1_e01.png,k2=k2_e01.png[,k3=...]")
     q = sp.add_parser("status", help="what is done")
     common(q)
     return p

@@ -5,7 +5,7 @@
                          [--n 2] [--seed-start 1001] [--only a,b] [--size 1664x928] [--turbo] [--version 1]
                          [--review BUILD] [--dry-run]
   python tools/concept.py edit <image.png ...> --ledger L (--instruction TEXT | --options DESIGN-OPTIONS.md)
-                         [--ref R.png ...] [--lightning 4|8] [--denoise 1.0] [--steps N] [--cfg C] [--seed N ...]
+                         [--ref R.png ...] [--lightning 0|4|8] [--denoise 1.0] [--steps N] [--cfg C] [--seed N ...]
                          [--size WxH] [--redo] [--review BUILD] [--dry-run]
   python tools/concept.py sheet <dir | image.png ...> [--out SHEET.png] [--cell 480] [--cols 3]
   python3 tools/concept.py approve <slug> <image.png> --episode projects/<project>/<episode dir>
@@ -14,7 +14,8 @@
 An orchestrator: every image comes from `python tools/comfy/comfy.py run qwen-t2i` (gen) or `run qwen-edit` (edit), one
 subprocess per image (each takes the lab's GPU lock, writes its own ledger row, cost 0, and its <out>.json sidecar).
 All but the last call of a batch get --keep-models; the last frees the VRAM. A call that exits non-zero stops the
-batch (never retried: exit 1 = the job was queued and failed, see its ledger row). --dry-run prints the plan and calls
+batch (never retried: exit 1 = the job was queued and failed, see its ledger row) and `comfy.py free` unloads what the
+earlier calls kept. gen --turbo (cfg 1) sends no negative prompt. edit --lightning 0 = no LoRA (40 steps, cfg 4). --dry-run prints the plan and calls
 nothing. Only the main session or an agent in a local session on the owner's PC runs gen/edit (ComfyUI, GPU).
 
 Names (docs/CONVENTIONS.md §2, film-pipeline §2.2; default folder out/<project>/characters/<slug>/concept/):
@@ -65,6 +66,7 @@ RE_LABEL = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*|__)?\s*(prompt|negative|edit)(?
 RE_HEADING = re.compile(r"^(#{1,6})\s+(.*?)\s*#*\s*$")
 RE_FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*([\w-]*)")
 DIR_PREFIX = re.compile(r"^(?:hướng|huong|direction|option|phương án|phuong an)\s+", re.I)
+CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029]")       # line breaks and other control characters
 CONCEPT_HEADING = "## Concept đã duyệt"
 CREATURE_HEADING = "## Sinh vật của tập"
 
@@ -113,20 +115,33 @@ def show(argv):
     return "python " + " ".join(out)
 
 
-def run_batch(jobs, dry_run):
+def free_vram():
+    """After a batch stopped at a failure: `comfy.py free` (POST /free only), since the calls before it (and the
+    failed one, when it had --keep-models) left their models in VRAM. Best effort: its exit code is only reported."""
+    code = run_cmd([sys.executable, COMFY, "free"])
+    if code:
+        print(f"concept: comfy.py free exited {code}: ComfyUI may still hold the models in VRAM "
+              "(python tools/comfy/comfy.py free)", file=sys.stderr)
+
+
+def run_batch(jobs, dry_run, on_ok=None):
     """jobs: [(label, argv)] of comfy.py calls; --keep-models on all but the last. -> exit code (stops at the first
-    failure, never retries)."""
+    failure, never retries; then frees the VRAM the --keep-models calls kept). on_ok(i) after each call that worked."""
     for i, (label, argv) in enumerate(jobs):
-        argv = argv + (["--keep-models"] if i < len(jobs) - 1 else [])
+        keep = i < len(jobs) - 1
+        argv = argv + (["--keep-models"] if keep else [])
         say(f"[{i + 1}/{len(jobs)}] {label}\n  {show(argv)}")
         if dry_run:
             continue
         code = run_cmd(argv)
         if code:
-            print(f"concept: stopped: comfy.py exited {code} on {label} (not retried; exit 1 = see its ledger row)"
-                  + ("; the models of the earlier --keep-models calls may still be in VRAM" if i else ""),
+            print(f"concept: stopped: comfy.py exited {code} on {label} (not retried; exit 1 = see its ledger row)",
                   file=sys.stderr)
+            if keep or i:
+                free_vram()
             return code
+        if on_ok:
+            on_ok(i)
     if dry_run:
         say("dry-run: nothing called, no ledger row")
     return 0
@@ -315,7 +330,7 @@ def cmd_gen(a):
     if not ledger:
         raise Refused("--ledger L.csv (the episode's ledger; comfy.py writes one row per image, cost 0)")
     size = a.size or opts.get("size")
-    jobs, skipped = [], 0
+    jobs, skipped, dropped = [], 0, set()
     for d in dirs:
         listed = d.get("seeds") or opts.get("seeds")
         if listed and a.seed_start is None:
@@ -323,6 +338,9 @@ def cmd_gen(a):
         else:
             seeds = [(1001 if a.seed_start is None else a.seed_start) + k for k in range(a.n or 2)]
         negative = d.get("negative") or opts.get("negative")
+        if negative and a.turbo:            # cfg 1: comfy.py refuses a negative it could not use
+            dropped.add(d["id"])
+            negative = None
         for seed in seeds:
             out = os.path.join(a.out_dir, f"{slug}_{d['id']}_s{seed}_v{a.version:02d}.png")
             if os.path.exists(out) and os.path.getsize(out) > 0:
@@ -343,6 +361,8 @@ def cmd_gen(a):
             jobs.append((f"{d['id']} seed {seed}", comfy_argv("qwen-t2i", args)))
     say(f"concept gen: {slug} · {len(dirs)} direction(s) · {len(jobs)} image(s) to make, {skipped} done"
         + (" · --turbo: drafts only" if a.turbo else ""))
+    if dropped:
+        say(f"  --turbo (cfg 1) has no negative prompt: `Negative EN` of {', '.join(sorted(dropped))} not sent")
     if not jobs:
         return 0
     if not a.dry_run:
@@ -467,24 +487,17 @@ def cmd_edit(a):
                        date=datetime.date.today().isoformat())
             args = qwen_edit_args(img, a.ref or [], instr, settings, seed, out, ledger, a.review)
             jobs.append((f"{name} seed {seed} -> {os.path.basename(out)}", comfy_argv("qwen-edit", args), folder, rec))
-    say(f"concept edit: {len(jobs)} edit(s) · Lightning {a.lightning} · denoise {a.denoise:g}")
+    say(f"concept edit: {len(jobs)} edit(s) · " + (f"Lightning {a.lightning}" if a.lightning else
+                                                   "no Lightning (40 steps, cfg 4)") + f" · denoise {a.denoise:g}")
     if not jobs:
         return 0
-    # run one by one so each finished edit is recorded even when a later one fails
-    for i, (label, argv, folder, rec) in enumerate(jobs):
-        argv = argv + (["--keep-models"] if i < len(jobs) - 1 else [])
-        say(f"[{i + 1}/{len(jobs)}] {label}\n  {show(argv)}")
-        if a.dry_run:
-            continue
-        code = run_cmd(argv)
-        if code:
-            print(f"concept: stopped: comfy.py exited {code} on {label} (not retried)", file=sys.stderr)
-            return code
+
+    def done(i):                        # each finished edit is recorded even when a later one fails
+        _, _, folder, rec = jobs[i]
         records[folder].append(rec)
         write_json_atomic(os.path.join(folder, EDITS_FILE), records[folder])
-    if a.dry_run:
-        say("dry-run: nothing called, no ledger row")
-    return 0
+
+    return run_batch([(label, argv) for label, argv, _, _ in jobs], a.dry_run, done)
 
 
 # ------------------------------------------------------------------------------------------------ sheet
@@ -549,17 +562,19 @@ def make_sheet(rows, out, cell=480, title=None):
                 d.text((x0 + 6, y0 + band + ch + 3), clean(fit(sub, cell - 12, fnt, d)), fill=(200, 200, 200),
                        font=fnt)
     tmp = out + f".tmp{os.getpid()}.png"
-    sheet.save(tmp)
     try:
-        os.link(tmp, out)
-    except FileExistsError:
-        raise Refused(f"{out} appeared meanwhile: not replaced")
-    except OSError:
-        if os.path.exists(out):
-            raise Refused(f"{out} appeared meanwhile: not replaced")
-        os.rename(tmp, out)
-        return out
-    os.remove(tmp)
+        sheet.save(tmp)
+        try:
+            os.link(tmp, out)
+        except FileExistsError:
+            raise Refused(f"{out} appeared meanwhile: not replaced") from None
+        except OSError:
+            if os.path.exists(out):
+                raise Refused(f"{out} appeared meanwhile: not replaced") from None
+            os.rename(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     return out
 
 
@@ -796,8 +811,13 @@ def cmd_approve(a):
     if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
         raise Refused(f"--date {date}: YYYY-MM-DD")
     file_disp = rel_display(a.file)
-    if "|" in file_disp or "`" in file_disp:
-        raise Refused(f"{file_disp}: a file name with | or ` cannot go into the table")
+    if "|" in file_disp or "`" in file_disp or CONTROL.search(file_disp):
+        raise Refused(f"{file_disp}: a file name with |, ` or a control character cannot go into the table")
+    if a.name is not None and (not a.name.strip() or "|" in a.name or "`" in a.name or CONTROL.search(a.name)):
+        raise Refused(f"--name {a.name!r}: one line without | or ` (it goes into the EPISODE.md table and the "
+                      "CHARACTER.md title)")
+    if a.quote is not None and CONTROL.search(a.quote):
+        raise Refused("--quote: one line (no line break or control character): it is one list item of CHARACTER.md")
     m = RE_NAME.match(os.path.basename(a.file))
     if not m:
         warn(f"{os.path.basename(a.file)} is not a concept.py name (<slug>_<dir>_s<seed>_v<NN>.png)")
@@ -861,7 +881,8 @@ def parser():
                                                        "else exactly\")")
     e.add_argument("--options", default=None, help="DESIGN-OPTIONS.md: the `Edit EN` of each image's direction")
     e.add_argument("--ref", action="append", default=None, metavar="IMG", help="reference image (Picture 2..)")
-    e.add_argument("--lightning", type=int, choices=(4, 8), default=4, help="Lightning LoRA steps (default 4)")
+    e.add_argument("--lightning", type=int, choices=(0, 4, 8), default=4,
+                   help="Lightning LoRA steps (default 4; 0 = no LoRA: 40 steps, cfg 4, slower, full quality)")
     e.add_argument("--denoise", type=float, default=1.0, help="default 1.0 (repaints; lower keeps more)")
     e.add_argument("--steps", type=int, default=None)
     e.add_argument("--cfg", type=float, default=None)

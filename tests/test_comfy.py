@@ -931,6 +931,18 @@ class TestOtherCommands(ComfyCase):
         self.assertIn("not queued or running", out)
         self.assertEqual(len(f.interrupts), 1)
 
+    def test_free_only_posts_free(self):
+        code, _, err = self.run_comfy("free")                       # nothing answers: exit 1, nothing started
+        self.assertEqual(code, 1)
+        self.assertIn("not reachable", err)
+        f = self.server()
+        code, out, err = self.run_comfy("free")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(f.calls, [("POST", "/free")])
+        self.assertEqual(f.frees, [{"unload_models": True, "free_memory": True}])
+        self.assertIn("unload its models", out)
+        self.assertFalse(os.path.exists(os.environ["FILM_GPU_LOCK"]), "no GPU lock taken")
+
     def test_interrupt_goes_on_when_the_server_drops(self):
         f = self.server()
         for pid in ("p-run", "p-wait", "p-run2"):
@@ -1052,12 +1064,18 @@ class TestQwenImage(ComfyCase):
         self.assertIn("estimate ~135 s of GPU", out)                       # the owner's measure: 30 steps, 1664x928
         self.assertIn("dry-run: nothing uploaded or queued, no ledger row", out)
         self.assertEqual(err, "")
-        code, out, err = self.run_still("--dry-run", "--turbo", "--size", "1328x1328", "--negative", "blurry")
+        code, out, err = self.run_still("--dry-run", "--turbo", "--size", "1328x1328")
         self.assertEqual(code, 0, err)
         self.assertIn("11 nodes · 1328x1328 · steps 2 · cfg 1 (turbo LoRA)", out)
         self.assertIn("Wuli-Qwen-Image-2512-Turbo-LoRA-2steps-V1.0-bf16.safetensors", out)
-        self.assertIn("negative:\n  blurry", out)
         self.assertIn("drafts only", err)
+        code, out, err = self.run_still("--dry-run", "--negative", "blurry")      # cfg 2.5: the negative is used
+        self.assertEqual(code, 0, err)
+        self.assertIn("negative:\n  blurry", out)
+        for extra in (["--turbo"], ["--cfg", "1"]):                             # cfg 1: refused, as qwen-edit
+            code, _, err = self.run_still("--dry-run", "--negative", "blurry", *extra)
+            self.assertEqual(code, 2, extra)
+            self.assertIn("--negative is refused at cfg 1", err)
         code, out, err = self.run_still("--dry-run", "--size", "1024x768")
         self.assertEqual(code, 0, err)
         self.assertIn("not one of qwen-t2i's trained sizes", err)

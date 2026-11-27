@@ -61,13 +61,15 @@ def arg(argv, flag):
 
 
 class FakeComfy:
-    """Stands in for `python tools/comfy/comfy.py run ...`: records the argv, writes --out (+ sidecar)."""
+    """Stands in for `python tools/comfy/comfy.py run ...` (and `free`): records the argv, writes --out (+ sidecar)."""
 
     def __init__(self, fail_at=None, code=1):
         self.calls, self.fail_at, self.code = [], fail_at, code
 
     def __call__(self, argv):
         self.calls.append(list(argv))
+        if argv[2:] == ["free"]:
+            return 0
         if self.fail_at is not None and len(self.calls) == self.fail_at:
             return self.code
         out = arg(argv, "--out")
@@ -165,8 +167,21 @@ class TestGen(Case):
         code, _, err, fake = self.cli("gen", self.opts, "--slug", "phuong-hoang", "--out-dir", self.out,
                                       "--ledger", self.ledger, fake=FakeComfy(fail_at=2))
         self.assertEqual(code, 1)
-        self.assertEqual(len(fake.calls), 2)
+        self.assertEqual([c[2] for c in fake.calls], ["run", "run", "free"])     # the VRAM the batch kept is freed
+        self.assertEqual(fake.calls[-1], [sys.executable, concept.COMFY, "free"])
         self.assertIn("not retried", err)
+        # a single call that fails had no --keep-models: comfy.py freed the VRAM itself, nothing more is called
+        code, _, _, fake = self.cli("gen", self.opts, "--slug", "phuong-hoang", "--out-dir", self.out, "--version", "2",
+                                    "--ledger", self.ledger, "--only", "a", "--n", "1", fake=FakeComfy(fail_at=1))
+        self.assertEqual((code, len(fake.calls)), (1, 1))
+
+    def test_turbo_sends_no_negative(self):
+        code, out, err, fake = self.cli("gen", self.opts, "--slug", "phuong-hoang", "--out-dir", self.out,
+                                        "--ledger", self.ledger, "--only", "b", "--n", "1", "--turbo")
+        self.assertEqual(code, 0, err)
+        self.assertIn("--turbo", fake.calls[0])
+        self.assertNotIn("--negative", fake.calls[0])
+        self.assertIn("`Negative EN` of b not sent", out)
 
     def test_refusals(self):
         code, _, err, fake = self.cli("gen", self.opts, "--slug", "phuong-hoang", "--out-dir", self.out)
@@ -219,6 +234,17 @@ class TestEdit(Case):
         self.assertEqual([("--keep-models" in c) for c in fake.calls], [True, False])
         self.assertEqual(arg(fake.calls[0], "--lightning"), "8")
 
+    def test_lightning_off_and_a_failure_keeps_the_finished_edits(self):
+        code, out, err, fake = self.cli("edit", self.src, "--instruction", "x", "--ledger", self.ledger,
+                                        "--lightning", "0", "--seed", "1", "--seed", "2", "--seed", "3",
+                                        fake=FakeComfy(fail_at=2))
+        self.assertEqual(code, 1)
+        self.assertNotIn("--lightning", fake.calls[0])                 # no LoRA: comfy.py's 40 steps, cfg 4
+        self.assertIn("no Lightning", out)
+        self.assertEqual(fake.calls[-1][2:], ["free"])
+        rec = json.loads((self.out / concept.EDITS_FILE).read_text(encoding="utf-8"))
+        self.assertEqual([(r["seed"], r["settings"]["lightning"]) for r in rec], [(1, 0)])
+
     def test_edit_from_options_and_refusals(self):
         code, _, _, fake = self.cli("edit", self.src, "--options", self.opts, "--ledger", self.ledger)
         self.assertEqual(code, 0)
@@ -258,6 +284,21 @@ class TestSheet(Case):
         code, _, err, _ = self.cli("sheet", self.out, "--out", sheet)
         self.assertEqual(code, 2)
         self.assertIn("exists", err)
+
+    def test_a_sheet_that_appears_meanwhile_leaves_no_temp_file(self):
+        png(self.out / "phuong-hoang_a_s7_v01.png", (160, 90))
+        target = self.out / "late.png"
+        real_link = concept.os.link
+
+        def link(src, dst):              # another process writes the target between the check and the link
+            Path(dst).write_bytes(b"theirs")
+            return real_link(src, dst)
+        with mock.patch.object(concept.os, "link", link):
+            code, _, err, _ = self.cli("sheet", self.out, "--out", target)
+        self.assertEqual(code, 2)
+        self.assertIn("appeared meanwhile", err)
+        self.assertEqual(target.read_bytes(), b"theirs")
+        self.assertEqual([p.name for p in self.out.glob("*.tmp*")], [])
 
 
 EPISODE = """---
@@ -381,6 +422,22 @@ class TestApprove(Case):
         code, _, err, _ = self.cli("approve", "ho-giao", self.img, "--episode", self.ep)
         self.assertEqual(code, 2)
         self.assertIn("Sinh vật của tập", err)
+
+    def test_name_and_quote_cannot_break_the_markdown(self):
+        snap = (self.ep / "EPISODE.md").read_bytes()
+        new = png(self.tmp / "con-moi_a_s1_v01.png")
+        for flag, val, want in (("--name", "Con | mới", "--name"), ("--name", "Con `x`", "--name"),
+                                ("--name", "Con\n## Nhật ký", "--name"), ("--name", " ", "--name"),
+                                ("--quote", "ok\n## Prompt khóa\nchép đè", "--quote"),
+                                ("--quote", "a\rb", "--quote")):
+            code, _, err, _ = self.cli("approve", "con-moi", new, "--episode", self.ep, flag, val)
+            self.assertEqual(code, 2, (flag, val))
+            self.assertIn(want, err)
+        self.assertEqual((self.ep / "EPISODE.md").read_bytes(), snap)
+        self.assertFalse((self.project / "characters").exists())
+        code, _, err, _ = self.cli("approve", "con-moi", new, "--episode", self.ep, "--name", "Con mới",
+                                   "--quote", "lấy con này | được")             # a | inside the quote is harmless
+        self.assertEqual(code, 0, err)
 
 
 if __name__ == "__main__":
